@@ -18,72 +18,101 @@ pub enum MukeiError {
     // ------------------------------------------------------------------
     // FFI / Bridge (TRD §1.3, §1.5)
     // ------------------------------------------------------------------
+    /// A Rust panic was caught at the FFI boundary by `catch_unwind`.
     #[error("FFI panic at bridge boundary")]
     FFIPanic,
+    /// The callback's `CallbackGuard` generation no longer matches the
+    /// guard's live counter — the owning QObject has been destroyed.
     #[error("callback guard generation mismatch — QObject was destroyed")]
     CallbackGuardExpired,
+    /// A `tokio::task::spawn_blocking` task returned a join error
+    /// (panic or cancellation inside the blocking pool).
     #[error("spawn_blocking task join failed: {0}")]
     BlockingJoinFailed(String),
 
     // ------------------------------------------------------------------
     // Resource exhaustion (TRD §38)
     // ------------------------------------------------------------------
+    /// Out-of-memory during inference (KV cache or activation tensor).
     #[error("out of memory during inference")]
     OOM,
+    /// Memory preflight check rejected the model load before mmap.
     #[error("memory preflight refused model load: {0}")]
     MemoryPreflightRejected(String),
+    /// SoC thermal sensor reported throttle — generation suspended.
     #[error("thermal throttling triggered — generation suspended")]
     ThermalThrottle,
 
     // ------------------------------------------------------------------
     // LLM / Inference (TRD §3)
     // ------------------------------------------------------------------
+    /// Underlying `llama.cpp` model load failed (mmap, GGUF parse, etc.).
     #[error("model load failed: {0}")]
     ModelLoadFailed(String),
+    /// Header / file SHA-256 did not match the pinned value (REQ-SEC-01).
     #[error("SHA256 mismatch — model file corrupt or replaced")]
     ModelCorrupted,
+    /// Could not construct a llama context (n_ctx too large, OOM, etc.).
     #[error("context creation failed: {0}")]
     ContextCreationFailed(String),
+    /// The assembled prompt exceeded the active n_ctx budget.
     #[error("context window overflow ({0} tokens > limit)")]
     ContextOverflow(usize),
+    /// GBNF grammar file failed to load or parse.
     #[error("grammar (GBNF) load failed: {0}")]
     GrammarLoadFailed(String),
 
     // ------------------------------------------------------------------
     // Storage (BS §2 / TRD §6)
     // ------------------------------------------------------------------
+    /// Could not open the SQLite database / build the r2d2 pool.
     #[error("database initialisation failed: {0}")]
     DatabaseInitFailed(String),
+    /// SQLite reported a corruption sentinel (`SQLITE_CORRUPT`).
     #[error("database corruption detected")]
     DatabaseCorruption,
+    /// A migration script failed at the indicated version.
     #[error("migration failed at version {0}: {1}")]
     MigrationFailed(u32, String),
+    /// The `migrations_applied` table shows an out-of-order set; boot
+    /// refuses to start to avoid silently skipping a schema bump.
     #[error("migration order conflict: expected {expected}, applied {applied:?}")]
     MigrationOrderConflict {
+        /// The next version the boot path tried to apply.
         expected: u32,
+        /// The full applied set as found on disk.
         applied:  Vec<u32>,
     },
 
     // ------------------------------------------------------------------
     // Config (TRD §12.5)
     // ------------------------------------------------------------------
+    /// A required top-level key was absent from `config.toml`.
     #[error("config.toml missing required field: {0}")]
     ConfigMissingField(String),
+    /// A `config.toml` field is present but holds an illegal value.
     #[error("config.toml field '{field}' has invalid value: {reason}")]
     ConfigInvalid {
+        /// Dotted field path (e.g. `watchdog.max_iterations`).
         field:  String,
+        /// Human-readable reason; surfaced to QML for the error dialog.
         reason: String,
     },
+    /// A `config.toml` root key was not on the strict allow-list.
     #[error("config.toml contains unknown field: {0}")]
     ConfigUnknownField(String),
+    /// Android Keystore / desktop keyring is unavailable; secrets cannot
+    /// be unwrapped this boot.
     #[error("safe-storage (Keystore) unavailable: {0}")]
     SafeStorageUnavailable(String),
 
     // ------------------------------------------------------------------
     // Crypto / Secrets (TRD §12.3)
     // ------------------------------------------------------------------
+    /// A wrapped-key blob from disk did not decode to a valid envelope.
     #[error("wrapped-key envelope malformed: {0}")]
     WrappedKeyMalformed(String),
+    /// The wrapping key existed but `unwrap_key` failed at Keystore.
     #[error("wrapping key could not unwrap — Android Keystore failure")]
     UnwrapFailed,
     /// Tripwire variant: signals that a code path almost handed a plaintext
@@ -100,73 +129,126 @@ pub enum MukeiError {
     // ------------------------------------------------------------------
     // Agent / Tool execution (TRD §2.3, §2.5, §13.3)
     // ------------------------------------------------------------------
+    /// The ReAct loop made more tool-call iterations than the watchdog
+    /// budget allows. Carries the iteration count at abort.
     #[error("tool loop detected — aborted after {0} iterations")]
     ToolLoopDetected(usize),
+    /// A tool exceeded its per-call timeout. `None` means the timeout was
+    /// hit but the configured duration is not exposed for telemetry-free
+    /// diagnostics.
     #[error("tool execution timeout after {0:?}")]
     ToolTimeout(Option<std::time::Duration>),
+    /// The LLM emitted a tool name absent from `ALLOWED_TOOLS`.
     #[error("tool '{tool_name}' is not in the allowed registry")]
-    UnknownTool { tool_name: String },
+    UnknownTool {
+        /// Tool name as emitted by the LLM.
+        tool_name: String,
+    },
+    /// The post-GBNF validator rejected the arguments for this tool.
     #[error("tool '{tool_name}' validator rejected payload: {reason}")]
     ToolArgsRejected {
+        /// Tool name.
         tool_name: String,
+        /// Validator's human-readable rejection reason; re-fed to the LLM.
         reason:     String,
     },
+    /// The same tool failed twice with the same argument fingerprint
+    /// (REQ-AGT-04). The agent loop downgrades to graceful degrade.
     #[error("tool '{tool_name}' blocked — fingerprint abuse limit reached")]
-    ToolAbuseBlocked { tool_name: String },
+    ToolAbuseBlocked {
+        /// Tool name that hit the abuse threshold.
+        tool_name: String,
+    },
+    /// User / config disabled this tool for the entire session.
     #[error("tool '{tool_name}' is permanently disabled for this session")]
-    ToolPermanentlyDisabled { tool_name: String },
+    ToolPermanentlyDisabled {
+        /// Tool name.
+        tool_name: String,
+    },
+    /// Could not parse the LLM output into a tool-call payload at all.
     #[error("tool payload could not be parsed: {0}")]
     ToolParseFailed(String),
+    /// A specific tool argument failed its semantic validation.
     #[error("tool argument '{field}' invalid: {reason}")]
-    ToolArgumentInvalid { field: &'static str, reason: String },
+    ToolArgumentInvalid {
+        /// Argument field name (static string).
+        field: &'static str,
+        /// Reason for rejection.
+        reason: String,
+    },
+    /// The tool ran but reported a runtime failure.
     #[error("tool execution failed: {0}")]
     ToolExecutionFailed(String),
+    /// All web-search backends failed or returned zero results.
     #[error("web search failed: {0}")]
     WebSearchFailed(String),
+    /// The HTTP client could not be constructed (TLS / DNS init).
     #[error("http client construction failed: {0}")]
     HttpClientFailed(String),
+    /// `read_file` could not read the resolved SAF target.
     #[error("file read failed: {0}")]
     FileReadFailed(String),
+    /// `read_file` refused a non-UTF-8 file (binary heuristic).
     #[error("binary file rejected by text-only reader")]
     BinaryFile,
+    /// A canonicalised path escaped the jail root (path traversal block).
     #[error("sandbox violation")]
     SandboxViolation,
 
     // ------------------------------------------------------------------
     // Permission / OS (TRD §14.1, BS §15)
     // ------------------------------------------------------------------
+    /// The user or OS denied a required permission.
     #[error("permission denied by user or OS")]
     PermissionDenied,
+    /// The SAF URI grant was revoked while the tool was using it.
     #[error("SAF URI grant revoked mid-operation")]
     SafRevoked,
+    /// A tool refused to operate on a non-SAF path (file picker required).
     #[error("anon-FS path rejected — SAF picker is mandatory")]
     SafRequired,
 
     // ------------------------------------------------------------------
     // Network (TRD §5, §37.2)
     // ------------------------------------------------------------------
+    /// A network request failed at the transport layer.
     #[error("network request failed: {0}")]
     NetworkError(String),
+    /// Generic I/O failure (file system, network adapter).
     #[error("io failure: {0}")]
     Io(String),
+    /// A resumable download saw a SHA-256 mismatch on truncated resume.
     #[error("resumable download hash mismatch on truncated resume")]
     DownloadHashMismatch,
 
     // ------------------------------------------------------------------
     // Domain-specific / diagnostics
     // ------------------------------------------------------------------
+    /// The system prompt was detected in the model output — abort to
+    /// avoid leaking the agent's identity (PRD §12).
     #[error("system prompt leakage detected — aborting generation")]
     PromptLeakage,
+    /// One of the watchdog budgets (iterations / tokens / wall-time)
+    /// was exhausted.
     #[error("watchdog exceeded {kind} budget")]
     WatchdogExceeded {
-        kind: &'static str,    // "seconds" | "tokens" | "memory"
+        /// Which budget tripped: `"seconds"`, `"tokens"`, or `"iterations"`.
+        kind: &'static str,
     },
+    /// The crash-loop tripwire matched a fingerprint that has crashed
+    /// before — boot refuses to retry the same code path automatically.
     #[error("FMEA fingerprint hit — operation previously crashed with this fingerprint")]
-    CrashLoopDetected { fingerprint: String },
+    CrashLoopDetected {
+        /// SHA-256 hex of the crash signature.
+        fingerprint: String,
+    },
+    /// The user (or OS lifecycle) cancelled this operation.
     #[error("operation cancelled by user / OS")]
     Cancelled,
+    /// A code-internal invariant assertion failed. Should be unreachable.
     #[error("invariant violated: {0}")]
     Invariant(String),
+    /// Catch-all for unclassified internal errors; prefer a typed variant.
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -259,15 +341,25 @@ impl MukeiError {
 /// High-level bucket used by the failure-mode tracker (§2.5 / §36.1).
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum ErrorClass {
+    /// OOM, memory preflight refusals.
     Resource,
+    /// Thermal throttle, watchdog wall-time / iteration budget hit.
     Device,
+    /// llama.cpp model load / context / grammar failures.
     Inference,
+    /// SQLite / migrations / corruption.
     Storage,
+    /// `config.toml` validation errors.
     Config,
+    /// Tool execution + validation failures.
     Agent,
+    /// SAF / OS permission rejections.
     Permission,
+    /// Network-layer faults (HTTP, DNS, transport).
     Network,
+    /// Crypto / wrapped-key / secret-leak tripwires.
     Security,
+    /// Catch-all when no other class applies.
     Unknown,
 }
 
@@ -292,6 +384,8 @@ impl std::fmt::Display for ErrorClass {
 // ====================================================================
 // Convenience type alias.
 // ====================================================================
+/// Workspace-wide `Result` shorthand — every fallible function in
+/// `mukei-core` returns `Result<T> = std::result::Result<T, MukeiError>`.
 pub type Result<T> = std::result::Result<T, MukeiError>;
 
 impl MukeiError {

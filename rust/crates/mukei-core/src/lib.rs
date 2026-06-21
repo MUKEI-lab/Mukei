@@ -18,7 +18,15 @@
     deny(unsafe_op_in_unsafe_fn)
 )]
 #![deny(rust_2018_idioms)]
-#![allow(missing_docs)] // temporarily relaxed during scaffolding sweep
+// Gradual `missing_docs` re-enablement. Modules listed under
+// `#[allow(missing_docs)]` below are pending a per-item documentation
+// sweep; everything ELSE in this crate is required to carry doc-comments
+// on every `pub` item.
+//
+// Adding a new pub item to one of the allow-listed modules is fine, but
+// adding a new module here is NOT — every new module ships fully
+// documented from day one.
+#![warn(missing_docs)]
 
 // ---------------------------------------------------------------------
 // Crate-level feature plumbing.
@@ -26,23 +34,24 @@
 #[cfg(feature = "tokio")]
 pub use tokio;
 
-pub mod types;
-
-// Feature-gated heavy modules.
-#[cfg(feature = "tokio")]
-pub mod runtime;
-
+// ----- Public surface modules: missing_docs is ENFORCED ------------------
 pub mod error;
 pub mod guard;
 pub mod ffi;
-pub mod diagnostics;
 
-pub mod agent;
-pub mod engine;
-pub mod rag;
-pub mod tools;
-pub mod storage;
-pub mod config;
+// ----- Crate-internal scaffolding: missing_docs allow-listed for now ----
+// Each of these has a top-level `# Invariants` block; the per-item doc
+// pass is tracked in the engineering backlog.
+#[allow(missing_docs)] pub mod types;
+#[cfg(feature = "tokio")]
+#[allow(missing_docs)] pub mod runtime;
+#[allow(missing_docs)] pub mod diagnostics;
+#[allow(missing_docs)] pub mod agent;
+#[allow(missing_docs)] pub mod engine;
+#[allow(missing_docs)] pub mod rag;
+#[allow(missing_docs)] pub mod tools;
+#[allow(missing_docs)] pub mod storage;
+#[allow(missing_docs)] pub mod config;
 
 // Re-exports for ergonomic use from `mukei-bridge`.
 pub use crate::error::{ErrorClass, MukeiError, Result};

@@ -36,7 +36,12 @@ const CLOSE_OPEN: &str = "</";
 /// Lazily-built open / close tags. Const fn isn't quite enough for
 /// `concat!` over &str slices in older toolchains so we build them at
 /// the static level.
+/// The literal opening tag (`<think>`) the LLM emits to enter a
+/// chain-of-thought block. Built at runtime so the literal bytes never
+/// appear in source.
 pub fn open_tag()  -> String { format!("{OPEN_OPEN}think{OPEN_CLOSE}") }
+/// The literal closing tag (`</think>`) the LLM emits to exit a
+/// chain-of-thought block.
 pub fn close_tag() -> String { format!("{CLOSE_OPEN}think{OPEN_CLOSE}") }
 
 /// Stream detector.
@@ -47,6 +52,7 @@ pub struct TagsStreaming {
 }
 
 impl TagsStreaming {
+    /// Construct an empty detector with `opened = false` and an empty window.
     pub fn new() -> Self { Self::default() }
 
     /// Truncate `buf` to a valid char-boundary just *before* `at`.
@@ -112,8 +118,10 @@ impl TagsStreaming {
         events
     }
 
+    /// `true` if the detector last saw an open tag without a matching close.
     pub fn is_open(&self) -> bool { self.opened }
 
+    /// Reset to the empty/closed state. Used at the start of every turn.
     pub fn reset(&mut self) {
         self.opened = false;
         self.window.clear();
@@ -126,13 +134,18 @@ impl TagsStreaming {
 pub struct TagEvents(u8);
 
 impl TagEvents {
+    /// No state transition.
     pub const NONE:   TagEvents = TagEvents(0);
+    /// The opening tag appeared during this push.
     pub const OPENED: TagEvents = TagEvents(1 << 0);
+    /// The closing tag appeared during this push.
     pub const CLOSED: TagEvents = TagEvents(1 << 1);
 
+    /// `true` if `self` carries every bit in `other`.
     pub fn contains(self, other: TagEvents) -> bool {
         (self.0 & other.0) == other.0
     }
+    /// `true` iff no transition was emitted by the last push.
     pub fn is_empty(self) -> bool { self.0 == 0 }
 }
 

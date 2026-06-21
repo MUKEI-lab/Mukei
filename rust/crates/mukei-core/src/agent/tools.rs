@@ -53,7 +53,16 @@ impl FailureTracker {
         let mut h = Sha256::new();
         h.update(tool_name.as_bytes());
         h.update([0u8]);
-        let bytes = serde_json::to_vec(&canonical).unwrap_or_default();
+        // `canonical` is always a serde_json::Value::Object built from
+        // valid Values — serialisation cannot fail here. If it ever did,
+        // every distinct tool-call would collapse to the same fingerprint
+        // (because to_vec returned empty bytes), silently disabling the
+        // abuse blocker. Fall back to a marker byte stream so a hash
+        // collision is at least visible in the audit log.
+        let bytes = serde_json::to_vec(&canonical).unwrap_or_else(|err| {
+            tracing::error!(?err, tool = %tool_name, "fingerprint canonicalisation failed — using fallback marker");
+            b"<MUKEI_FP_CANONICALISATION_FAILED>".to_vec()
+        });
         h.update(&bytes);
         crate::diagnostics::crash_logger::hex_helper(&h.finalize())
     }

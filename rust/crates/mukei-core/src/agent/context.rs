@@ -62,8 +62,15 @@ impl ContextBudgetManager {
         let rag_hit = !rag.is_empty();
 
         // Trim from the front. Stop when total ≤ max_tokens.
+        // The `while !is_empty()` predicate guarantees `combined.first()` is
+        // `Some(_)`, so we expect (not unwrap) to crash-on-bug rather than
+        // crash-on-degenerate-input. If this ever fires it indicates the
+        // history was mutated mid-loop, which would be a real invariant break.
         while !combined.is_empty() {
-            let placeholder: ChatMessage = combined.first().cloned().unwrap();
+            let placeholder: ChatMessage = combined
+                .first()
+                .cloned()
+                .expect("context: while-loop invariant guarantees a head");
             let trial = std::iter::once(&placeholder)
                 .chain(combined.iter().skip(1))
                 .map(|m| m.content.as_str())

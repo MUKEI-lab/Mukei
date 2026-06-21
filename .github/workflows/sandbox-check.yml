@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: P0 — panic must remain unwind on every profile
         run: |
@@ -57,6 +59,13 @@ jobs:
     needs: invariants
     steps:
       - uses: actions/checkout@v4
+        with:
+          # llama.cpp is shipped as a submodule under
+          # rust/llama-cpp-prebuilt/vendor/llama.cpp. We do NOT need it to
+          # run the sandbox-feature test suite (the bridge build is
+          # gated by feature = "llama_cpp"), but checking it out makes
+          # any future llama-aware test trivial to enable.
+          submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.85"
@@ -64,9 +73,9 @@ jobs:
         with:
           workspaces: rust
 
-      - name: cargo test mukei-core
+      - name: cargo test mukei-core (unit + integration)
         working-directory: rust
-        run: cargo test -p mukei-core --no-default-features --features "std,tokio" --lib
+        run: cargo test -p mukei-core --no-default-features --features "std,tokio"
 
       - name: cargo test mukei-ffi-shim
         working-directory: rust

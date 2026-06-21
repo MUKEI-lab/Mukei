@@ -42,7 +42,12 @@ pub enum GuardError {
     Released,
     /// The generation counter advanced — the original owner is stale.
     #[error("callback guard generation mismatch (expected {expected}, current {current})")]
-    GenerationMismatch { expected: u64, current: u64 },
+    GenerationMismatch {
+        /// The generation snapshot captured when the callback was bound.
+        expected: u64,
+        /// The guard's live generation at the time of dispatch.
+        current:  u64,
+    },
 }
 
 /// ABI-stable handle. On the FFI struct this is exposed as a bare `u64`
@@ -76,6 +81,8 @@ impl CallbackGuard {
         self.0
     }
 
+    /// Returns `true` for any non-zero handle. A zero handle is the
+    /// sentinel produced by [`Self::invalid`].
     pub fn is_valid(self) -> bool {
         self.0 != 0
     }
@@ -108,6 +115,7 @@ pub struct Inner {
 }
 
 impl Inner {
+    /// Allocate a fresh `Arc<Inner>` with `generation = 1`.
     pub fn new() -> Arc<Self> {
         Arc::new(Self { generation: AtomicU64::new(1) })
     }

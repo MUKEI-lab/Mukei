@@ -102,33 +102,40 @@ impl LlamaEngine {
     }
 
     /// Returns true if the *assistant text so far* matches the GBNF
-    /// tool-call envelope (a top-level JSON array of
-    /// `{"name": "...", "arguments": {...}}` objects).
+    /// tool-call envelope as defined by `grammars/tool_calling.gbnf`:
+    /// a top-level JSON array of `{"name": "...", "arguments": {...}}`
+    /// objects.
     ///
-    /// We deliberately do NOT use naive brace counting — the old
-    /// `opens > closes` heuristic produced false positives on any prose
-    /// that contained `{` inside code blocks / LaTeX / unbalanced quotes.
-    /// Instead we:
-    ///   1. Trim whitespace.
-    ///   2. Require the trimmed text to start with `[` and contain `{"name"`
-    ///      — the shape that the grammar in `grammars/tool_calling.gbnf`
-    ///      forces. The grammar is the single source of truth.
-    ///   3. Accept partial / streaming output (closing `]` may not have
-    ///      arrived yet) but reject any prefix that does not begin with
-    ///      `[`.
+    /// Detection strategy (in priority order):
+    ///   1. Trim whitespace and reject anything that does not start with
+    ///      `[` — prose / markdown / code blocks are immediately filtered.
+    ///   2. If the input is a complete JSON document, route it through
+    ///      [`crate::tools::validator::parse_gbnf_output`] (the same
+    ///      parser the agent loop uses) and check that the resulting
+    ///      array is non-empty AND every entry has a string `name`
+    ///      field. **Zero false positives on prose** — prose can't parse
+    ///      as the right JSON shape.
+    ///   3. If the input is a partial / streaming prefix (parser fails
+    ///      mid-document), accept it iff it contains a `"name"` key
+    ///      AFTER the leading `[`. This catches the streaming case while
+    ///      still rejecting bare `[1, 2, 3]` arrays.
     pub fn contains_tool_call(assistant_so_far: &str) -> bool {
         let trimmed = assistant_so_far.trim();
         if !trimmed.starts_with('[') {
             return false;
         }
-        // Tolerate optional internal whitespace; require the name marker.
-        let needles: [&str; 4] = [
-            "{\"name\"",
-            "{ \"name\"",
-            "{\n\"name\"",
-            "{\n  \"name\"",
-        ];
-        needles.iter().any(|needle| trimmed.contains(needle))
+        // Complete-document path: validate via the same parser the agent
+        // loop uses, so detection and dispatch agree by construction.
+        if let Ok(parsed) = crate::tools::validator::parse_gbnf_output(trimmed) {
+            return !parsed.is_empty() && parsed.iter().all(|c| !c.name.is_empty());
+        }
+        // Streaming-prefix fallback: require `"name"` to appear AFTER the
+        // first `{`. Rejects `["hello", "world"]` and `[1, 2, 3]`.
+        let after_bracket = &trimmed[1..];
+        match after_bracket.find('{') {
+            Some(brace_pos) => after_bracket[brace_pos..].contains("\"name\""),
+            None => false,
+        }
     }
 }
 
@@ -199,6 +206,15 @@ mod tests {
         assert!(!has_tool_call("Here is some JSON: {\"name\": \"x\""));
         assert!(!has_tool_call("Use this code: `if cond { do() }`"));
         assert!(!has_tool_call("$$ x = \\frac{a}{b} $$"));
+    }
+
+    #[test]
+    fn contains_tool_call_rejects_arrays_that_are_not_tool_calls() {
+        // Plain JSON arrays MUST NOT trigger tool dispatch.
+        assert!(!has_tool_call("[1, 2, 3]"));
+        assert!(!has_tool_call("[\"hello\", \"world\"]"));
+        assert!(!has_tool_call("[]"));
+        assert!(!has_tool_call("[{\"role\": \"user\", \"content\": \"hi\"}]"));
     }
 
     #[tokio::test]

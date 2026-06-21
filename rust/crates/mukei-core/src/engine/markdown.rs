@@ -8,8 +8,21 @@ use crate::types::{InlineNode, MarkdownNode};
 
 /// Serialise an AST to JSON for QML. QML uses `Repeater { model: ast }`
 /// with each node type mapped to its own delegate.
+///
+/// Serialisation cannot fail for any `MarkdownNode` shape produced by the
+/// in-tree builders (`paragraph`, `sentinel_block`, etc.) — every field
+/// is a plain `String`/`Vec` and serde_json never fails on those. If it
+/// somehow does, we surface the error in the diagnostics log and return
+/// an explicit `[]` JSON literal so QML's `Repeater` produces an empty
+/// list rather than a malformed AST.
 pub fn serialise(nodes: &[MarkdownNode]) -> String {
-    serde_json::to_string(nodes).unwrap_or_default()
+    match serde_json::to_string(nodes) {
+        Ok(json) => json,
+        Err(err) => {
+            tracing::error!(?err, "markdown AST serialisation failed — returning empty AST");
+            String::from("[]")
+        }
+    }
 }
 
 /// Convenience builder that converts a plain markdown fragment into a
