@@ -129,12 +129,19 @@ impl Inner {
 /// - `$guard_ptr`  — expression evaluating to `*const Inner` (or
 ///                   `std::ptr::null()` if the guard is `invalid()`).
 /// - `$snapshot`   — the generation number when the callback was bound.
-/// - `$callback`   — block to invoke; must return `Result<T, E>`.
+/// - `$callback`   — block to invoke; must return `Result<T, GuardError>`.
 ///
 /// # Returns
-/// - `Ok(T)` if generation matched AND callback returned `Ok`.
-/// - `Err(GuardError)` if generation mismatched.
-/// - `Err(GuardError::Panic)` if `catch_unwind` saw a panic.
+/// - `Ok(T)`                                  if generation matched AND callback returned `Ok`.
+/// - `Err(GuardError::Released)`              if the guard is NULL **or** a panic was caught.
+/// - `Err(GuardError::GenerationMismatch)`    if the guard is live but stale.
+///
+/// # Panic policy
+/// A panic inside `$callback` is caught via `std::panic::catch_unwind` and
+/// reported as `Err(GuardError::Released)`. There is no separate `Panic`
+/// variant on [`GuardError`] — callers cannot distinguish "QObject gone"
+/// from "panicked while delivering", which is intentional: both outcomes
+/// require the same recovery action (drop the callback).
 #[macro_export]
 macro_rules! callback_with_guard {
     ($guard_ptr:expr, $snapshot:expr, $callback:block) => {{

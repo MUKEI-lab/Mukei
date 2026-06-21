@@ -11,6 +11,15 @@ authors            = ["Mukei AI Architecture Pass"]
 crate-type         = ["lib"]
 path               = "src/lib.rs"
 
+# ----------------------------------------------------------------------
+# Feature matrix — see README.md "Build matrix" for the canonical names.
+#
+# Naming policy:
+#   * snake_case identifiers (no quoted feature names).
+#   * One capability per feature; no aliases.
+#   * `sqlcipher` is a strict superset of `rusqlite` (encrypted SQLite)
+#     and ENABLES it, instead of duplicating the dep list.
+# ----------------------------------------------------------------------
 [features]
 default            = ["std", "tokio"]
 std                = []
@@ -18,11 +27,10 @@ tokio              = ["dep:tokio", "dep:tokio-util"]
 # Hardware-dependent features; turned off in sandbox / unit tests.
 llama_cpp          = ["dep:llama-cpp-rs"]
 usearch_hnsw       = ["dep:usearch"]
-sqlcipher          = ["dep:rusqlite", "dep:r2d2", "dep:r2d2_sqlite"]
 rusqlite           = ["dep:rusqlite", "dep:r2d2", "dep:r2d2_sqlite"]
+sqlcipher          = ["rusqlite"]  # SQLCipher == rusqlite + encrypted backend
 network            = ["dep:reqwest", "dep:scraper", "dep:url"]
 candle             = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers"]
-"candle-core"     = ["candle"]
 android_keystore   = []
 release-hardening  = []
 

@@ -1,15 +1,27 @@
 //! `mukei_core::rag::embedder` — TRD §4.1.
 //!
-//! Default build uses a deterministic mock embedder. When the `candle` or
-//! `candle-core` feature is enabled, a MiniLM-flavoured candle backend becomes
+//! Default build uses a deterministic mock embedder. When the `candle`
+//! feature is enabled, a MiniLM-flavoured candle backend becomes
 //! available for real local embeddings.
+//!
+//! # Invariants
+//!
+//! - Every embedding returned by any [`Embedder`] impl is L2-normalised
+//!   (unit length) so cosine and dot-product agree.
+//! - The candle-backed embedder reads its tokenizer from
+//!   `<model_dir>/tokenizer.json`. The bridge crate MUST refuse to start
+//!   if the file is missing or its SHA changes between runs — a silent
+//!   tokenizer swap would invalidate every previously-indexed vector.
+//! - The mock embedder is **only** for unit tests / sandbox builds. The
+//!   bridge crate selects the candle backend whenever the `candle`
+//!   feature is on (see `bridge/src/lib.rs::Boot::pick_embedder`).
 
-#[cfg(any(feature = "candle", feature = "candle-core"))]
+#[cfg(feature = "candle")]
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(any(feature = "candle", feature = "candle-core"))]
+#[cfg(feature = "candle")]
 use crate::error::MukeiError;
 use crate::error::Result;
 
@@ -55,7 +67,7 @@ impl Embedder for MockEmbedder {
     }
 }
 
-#[cfg(any(feature = "candle", feature = "candle-core"))]
+#[cfg(feature = "candle")]
 pub struct CandleMiniLmEmbedder {
     model_dir: PathBuf,
     tokenizer: tokenizers::Tokenizer,
@@ -63,7 +75,7 @@ pub struct CandleMiniLmEmbedder {
     dim: usize,
 }
 
-#[cfg(any(feature = "candle", feature = "candle-core"))]
+#[cfg(feature = "candle")]
 impl CandleMiniLmEmbedder {
     pub fn from_model_dir(model_dir: impl AsRef<Path>) -> Result<Self> {
         let model_dir = model_dir.as_ref().to_path_buf();
@@ -127,7 +139,7 @@ impl CandleMiniLmEmbedder {
     }
 }
 
-#[cfg(any(feature = "candle", feature = "candle-core"))]
+#[cfg(feature = "candle")]
 #[async_trait::async_trait]
 impl Embedder for CandleMiniLmEmbedder {
     async fn embed(&self, text: &str) -> Result<Embedding> {

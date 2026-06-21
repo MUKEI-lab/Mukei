@@ -1,4 +1,24 @@
 //! TRD §5.1 — bounded web search tool.
+//!
+//! # Invariants
+//!
+//! - Output is always wrapped in `<external_data source="web_search"
+//!   trust="untrusted">` and prefixed with the prompt-injection refusal
+//!   header. The bridge MUST NOT strip these tags before handing the
+//!   result to the LLM.
+//! - Multi-backend fan-out: DuckDuckGo HTML + Brave JSON API run in
+//!   parallel via `tokio::join!`. If at least one backend succeeds the
+//!   tool reports success; only a double-failure surfaces an error.
+//! - **Selector resilience.** The HTML scraper uses a *cascading* list
+//!   of selectors (current DuckDuckGo class names + legacy fallbacks).
+//!   When the live HTML stops matching all of them we surface
+//!   `WebSearchFailed("selector drift")` rather than silently returning
+//!   zero results — that lets the agent supervisor disable the tool and
+//!   the LLM fall back to its own knowledge. Adding a new DDG layout
+//!   should mean **adding** entries to the cascade, never replacing them.
+//! - URL is never auto-followed. Returning a URL string is fine; the
+//!   model only reasons over text. Following links would require a
+//!   separate, explicitly-permitted tool (out of scope for v0.7.5).
 
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -84,9 +104,22 @@ async fn execute_query(query: &str) -> Result<String> {
             .map_err(|e| MukeiError::WebSearchFailed(e.to_string()))?;
 
         let document = Html::parse_document(&html);
-        let result_selector = Selector::parse(".result").map_err(|e| MukeiError::WebSearchFailed(e.to_string()))?;
-        let title_selector = Selector::parse(".result__title a").map_err(|e| MukeiError::WebSearchFailed(e.to_string()))?;
-        let snippet_selector = Selector::parse(".result__snippet").map_err(|e| MukeiError::WebSearchFailed(e.to_string()))?;
+
+        // Cascading selector list — see module-level invariant.
+        // Adding a layout = APPEND, never replace.
+        const RESULT_SELECTORS:  &[&str] = &[".result", "div.web-result", "article.result", "div[data-testid='result']"];
+        const TITLE_SELECTORS:   &[&str] = &[".result__title a", "h2 a", "a.result-title", "a[data-testid='result-title-a']"];
+        const SNIPPET_SELECTORS: &[&str] = &[".result__snippet", ".snippet", "span.result-snippet", "span[data-testid='result-snippet']"];
+
+        fn first_matching(doc: &Html, candidates: &[&str]) -> Option<Selector> {
+            candidates.iter().find_map(|sel| Selector::parse(sel).ok().filter(|s| doc.select(s).next().is_some()))
+        }
+
+        let result_selector = first_matching(&document, RESULT_SELECTORS)
+            .ok_or_else(|| MukeiError::WebSearchFailed("duckduckgo selector drift: no result block found".to_string()))?;
+        let title_selector = first_matching(&document, TITLE_SELECTORS)
+            .ok_or_else(|| MukeiError::WebSearchFailed("duckduckgo selector drift: no title link found".to_string()))?;
+        let snippet_selector = Selector::parse(SNIPPET_SELECTORS[0]).ok();
 
         let mut results = Vec::new();
         for element in document.select(&result_selector).take(5) {
@@ -99,9 +132,9 @@ async fn execute_query(query: &str) -> Result<String> {
                 .and_then(|node| node.value().attr("href"))
                 .unwrap_or_default()
                 .to_string();
-            let snippet = element
-                .select(&snippet_selector)
-                .next()
+            let snippet = snippet_selector
+                .as_ref()
+                .and_then(|sel| element.select(sel).next())
                 .map(|node| node.text().collect::<String>())
                 .unwrap_or_default();
             if !title.is_empty() {
@@ -112,6 +145,11 @@ async fn execute_query(query: &str) -> Result<String> {
                     engine: "duckduckgo",
                 });
             }
+        }
+        if results.is_empty() {
+            return Err(MukeiError::WebSearchFailed(
+                "duckduckgo returned a page but no result blocks matched any selector cascade".to_string(),
+            ));
         }
         Ok(results)
     }

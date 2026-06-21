@@ -5,6 +5,21 @@
 //! success, `rename(path.<ATOMIC_SUFFIX>, path)` overwrites the live
 //! file in a single syscall. Crash-between is recovered by the boot
 //! path (§4.5 / §11.1).
+//!
+//! # Invariants
+//!
+//! - Every persisted file carries a [`StoreHeader`] (version,
+//!   embedding-model fingerprint, embedding dimension). Boot MUST refuse
+//!   to consume a file whose `embedder_id` differs from the currently
+//!   wired embedder — swapping models without re-indexing produces
+//!   meaningless cosine scores. The header is the single mechanism for
+//!   that check; do not rely on file path or sibling metadata.
+//! - `save()` is **synchronous** — only call it from a non-async context.
+//!   Async paths MUST use [`VectorStore::snapshot_for_save`] +
+//!   [`VectorStore::save_snapshot`] inside `tokio::task::spawn_blocking`
+//!   (TRD §2.4 Golden Rule).
+//! - The atomic-rename pair is the only durable write. A direct
+//!   `fs::write` over `path` would race with concurrent `load()`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,6 +30,26 @@ use crate::error::{MukeiError, Result};
 
 /// Suffix appended to the live path while writing.
 pub const ATOMIC_SUFFIX: &str = "swap";
+
+/// On-disk format version. Bump whenever the [`Inner`] layout changes in
+/// a way that breaks deserialisation. The boot path refuses any file
+/// whose `format_version` is unknown.
+pub const STORE_FORMAT_VERSION: u32 = 1;
+
+/// Header persisted at the top of every store file. Carries the fields
+/// needed to detect embedder / dimension drift across app upgrades.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct StoreHeader {
+    /// Format version of the on-disk layout (see [`STORE_FORMAT_VERSION`]).
+    pub format_version: u32,
+    /// Stable identifier of the embedding model that produced these
+    /// vectors (e.g. `"minilm-l6-v2:sha256:<hex>"`). Mismatch ⇒
+    /// `MukeiError::ModelCorrupted` or a forced reindex.
+    pub embedder_id: String,
+    /// Embedding dimension. A mismatch with the live embedder is a
+    /// fatal load error — cosine over differing dims is undefined.
+    pub embedding_dim: u32,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum VectorStoreError {
@@ -45,6 +80,10 @@ pub struct VectorStore {
 
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct Inner {
+    /// Persisted header. Optional only so V0 files (no header) can be
+    /// detected during migration; new writes always carry a header.
+    #[serde(default)]
+    header: Option<StoreHeader>,
     vectors: Vec<(u64, Vec<f32>, String)>,
 }
 
@@ -56,6 +95,32 @@ impl VectorStore {
     }
 
     pub fn path(&self) -> &Path { &self.path }
+
+    /// Stamp the in-memory state with the embedder identity that produced
+    /// these vectors. Must be called BEFORE the first `add()` of a fresh
+    /// store, and re-checked on `load()`.
+    pub fn set_header(&self, header: StoreHeader) {
+        self.inner.lock().header = Some(header);
+    }
+
+    /// Read the persisted header, if any.
+    pub fn header(&self) -> Option<StoreHeader> {
+        self.inner.lock().header.clone()
+    }
+
+    /// Compatibility check used by the boot path. Returns `Err` if the
+    /// store was previously written by a different embedder / dimension /
+    /// on-disk format than the currently-wired one.
+    pub fn assert_compatible_with(&self, expected: &StoreHeader) -> Result<()> {
+        match self.header() {
+            None => Ok(()), // empty / fresh store — caller must call set_header
+            Some(found) if found == *expected => Ok(()),
+            Some(found) => Err(MukeiError::ModelCorrupted).map_err(|e| {
+                tracing::warn!(?found, ?expected, "vector store header mismatch — forcing reindex");
+                e
+            }),
+        }
+    }
 
     pub fn load(&self) -> Result<()> {
         match fs::read(&self.path) {

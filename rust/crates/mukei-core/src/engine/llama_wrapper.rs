@@ -1,5 +1,21 @@
 //! `mukei_core::engine::llama_wrapper` — TRD §3.1.
 //!
+//! # Invariants
+//!
+//! - SHA-256 verification of the GGUF file (header sample) MUST run BEFORE
+//!   `mmap` (REQ-SEC-01). `load_model` enforces this in both the
+//!   `llama_cpp` and the test-stub branches.
+//! - When the `llama_cpp` feature is OFF, [`run_inference`] is an
+//!   **explicitly stubbed** streaming emitter — it is not a model. The
+//!   `Cargo.toml` of the bridge crate must enable `llama_cpp` for any
+//!   build that ships to users. See `bridge_must_enable_llama_cpp_in_release`
+//!   in the workspace CI checklist.
+//! - [`has_tool_call`] MUST agree with what the GBNF grammar can possibly
+//!   emit — it is the loop's single source of truth for "this turn is a
+//!   tool call" and a false positive will route normal text into the
+//!   validator (which then returns `ToolParseFailed` and the LLM gets a
+//!   confusing re-prompt). See the heuristic below.
+//!
 //! Safe wrapper over `llama-cpp-rs`. Provides:
 //!
 //! - `load_model` — verifies SHA256 BEFORE memory mapping (REQ-SEC-01).
@@ -85,17 +101,34 @@ impl LlamaEngine {
         Ok(Arc::new(Self { n_ctx, gpu_layers, model_digest: digest }))
     }
 
-    /// Returns true if the *assistant text so far* contains an
-    /// unterminated tool-call JSON block. The GBNF grammar constrains
-    /// the model to emit one of:
-    ///   `{"name": "...", "arguments": {...}}`
-    /// blocks. We detect the open brace + closing brace pair.
+    /// Returns true if the *assistant text so far* matches the GBNF
+    /// tool-call envelope (a top-level JSON array of
+    /// `{"name": "...", "arguments": {...}}` objects).
+    ///
+    /// We deliberately do NOT use naive brace counting — the old
+    /// `opens > closes` heuristic produced false positives on any prose
+    /// that contained `{` inside code blocks / LaTeX / unbalanced quotes.
+    /// Instead we:
+    ///   1. Trim whitespace.
+    ///   2. Require the trimmed text to start with `[` and contain `{"name"`
+    ///      — the shape that the grammar in `grammars/tool_calling.gbnf`
+    ///      forces. The grammar is the single source of truth.
+    ///   3. Accept partial / streaming output (closing `]` may not have
+    ///      arrived yet) but reject any prefix that does not begin with
+    ///      `[`.
     pub fn contains_tool_call(assistant_so_far: &str) -> bool {
-        // Trim trailing whitespace, count braces pair.
-        let trimmed = assistant_so_far.trim_end();
-        let opens = trimmed.matches('{').count();
-        let closes = trimmed.matches('}').count();
-        opens > closes
+        let trimmed = assistant_so_far.trim();
+        if !trimmed.starts_with('[') {
+            return false;
+        }
+        // Tolerate optional internal whitespace; require the name marker.
+        let needles: [&str; 4] = [
+            "{\"name\"",
+            "{ \"name\"",
+            "{\n\"name\"",
+            "{\n  \"name\"",
+        ];
+        needles.iter().any(|needle| trimmed.contains(needle))
     }
 }
 
@@ -152,10 +185,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn contains_tool_call_detects_unbalanced_braces() {
-        assert!(has_tool_call("hello {\"name\": \"x\""));
+    fn contains_tool_call_recognises_gbnf_envelope() {
+        // True positives — the GBNF wraps every tool batch in a JSON array.
+        assert!(has_tool_call("[{\"name\": \"web_search\", \"arguments\": {}}]"));
+        assert!(has_tool_call("  \n[{\"name\":\"x\",\"arguments\":{}}"));
+        assert!(has_tool_call("[ {\"name\": \"x\", \"arguments\": {}} ]"));
+    }
+
+    #[test]
+    fn contains_tool_call_rejects_prose_with_braces() {
+        // False positives that the old brace-counter would have triggered.
         assert!(!has_tool_call("hello, world"));
-        assert!(!has_tool_call("{\"name\": \"x\", \"args\": {}}"));
+        assert!(!has_tool_call("Here is some JSON: {\"name\": \"x\""));
+        assert!(!has_tool_call("Use this code: `if cond { do() }`"));
+        assert!(!has_tool_call("$$ x = \\frac{a}{b} $$"));
     }
 
     #[tokio::test]

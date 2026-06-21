@@ -1,6 +1,23 @@
 //! `mukei_core::tools` — TRD §5 and §13.3.
 //!
 //! Registry and execution surface for all LLM-callable tools.
+//!
+//! # Invariants
+//!
+//! - The tool name set is **closed**: every entry in [`ALLOWED_TOOLS`]
+//!   has a `validator.rs` schema, an entry in `grammars/tool_calling.gbnf`,
+//!   and a registered [`Tool`] impl. Adding a tool requires touching all
+//!   three; otherwise the GBNF can emit a name the validator rejects or
+//!   vice versa.
+//! - The validator runs BEFORE the executor. No tool sees raw LLM JSON.
+//! - Every tool's `run()` MUST acquire one slot of
+//!   [`crate::runtime::TOOL_SLOTS`] (via `runtime::spawn_blocking_tool`)
+//!   before doing blocking work. This caps total concurrent blocking
+//!   tool work at [`crate::runtime::TOOL_BLOCKING_SLOTS`] regardless of
+//!   how many tools the LLM emits in one batch (TRD §2.2).
+//! - Tool output crossing back to the LLM MUST be wrapped in
+//!   `<external_data source="..." trust="...">` so prompt injection
+//!   from web pages / files cannot impersonate system instructions.
 
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -1,0 +1,75 @@
+name: sandbox-check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Architectural guardrails — these grep-style checks defend the four
+  # invariants flagged in the v0.7.5 architecture audit. They MUST run
+  # before any compile step so a regression fails fast and obviously.
+  # ---------------------------------------------------------------------
+  invariants:
+    name: architectural invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: P0 — panic must remain unwind on every profile
+        run: |
+          if grep -nE 'panic\s*=\s*"abort"' rust/Cargo.toml ; then
+            echo "::error::panic = \"abort\" found in rust/Cargo.toml — this disables std::panic::catch_unwind and defeats the entire FFI safety lattice (TRD §1.3 / PRD G1)."
+            exit 1
+          fi
+
+      - name: P1 — agent loop must not hard-abort on tool block
+        run: |
+          if grep -n 'return Err(blocked' rust/crates/mukei-core/src/agent/loop_.rs ; then
+            echo "::error::AgentLoop::run hard-aborts on tool block — REQ-AGT-04 mandates graceful degrade via supervisor directive."
+            exit 1
+          fi
+
+      - name: P2 — exactly one CallbackGuard impl in the workspace
+        run: |
+          shim_impl=$(grep -nE '^pub struct CallbackGuard' rust/crates/mukei-ffi-shim/src/lib.rs || true)
+          if [ -n "$shim_impl" ]; then
+            echo "::error::mukei-ffi-shim re-declared CallbackGuard. The canonical impl in mukei_core::guard MUST be the only one."
+            exit 1
+          fi
+
+      - name: P3 — SecretLeaked variant must not carry a String payload
+        run: |
+          if grep -nE 'SecretLeaked\(String\)' rust/crates/mukei-core/src/error.rs ; then
+            echo "::error::SecretLeaked must carry redacted byte-length (usize), never raw plaintext."
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------
+  # The sandbox-buildable feature set — no Qt, no llama.cpp, no candle.
+  # This mirrors what every contributor can run locally before pushing.
+  # ---------------------------------------------------------------------
+  test:
+    name: cargo test (sandbox features)
+    runs-on: ubuntu-latest
+    needs: invariants
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: cargo test mukei-core
+        working-directory: rust
+        run: cargo test -p mukei-core --no-default-features --features "std,tokio" --lib
+
+      - name: cargo test mukei-ffi-shim
+        working-directory: rust
+        env:
+          CARGO_BUILD_JOBS: "1"
+        run: cargo test -p mukei-ffi-shim --lib

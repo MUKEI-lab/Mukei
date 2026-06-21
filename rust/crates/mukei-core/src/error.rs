@@ -86,8 +86,16 @@ pub enum MukeiError {
     WrappedKeyMalformed(String),
     #[error("wrapping key could not unwrap — Android Keystore failure")]
     UnwrapFailed,
-    #[error("plaintext secret must never cross this boundary")]
-    SecretLeaked(String),
+    /// Tripwire variant: signals that a code path almost handed a plaintext
+    /// secret to the FFI / log layer. The payload is **deliberately not a
+    /// `String`** — we only carry a redacted byte-length so the error itself
+    /// can never become an exfiltration channel.
+    ///
+    /// Construction is restricted to [`MukeiError::secret_leaked`] which
+    /// zeroes the input before recording the length. Direct construction is
+    /// discouraged (and grepped against in CI).
+    #[error("plaintext secret would have crossed this boundary (redacted, {0} bytes)")]
+    SecretLeaked(usize),
 
     // ------------------------------------------------------------------
     // Agent / Tool execution (TRD §2.3, §2.5, §13.3)
@@ -286,6 +294,25 @@ impl std::fmt::Display for ErrorClass {
 // ====================================================================
 pub type Result<T> = std::result::Result<T, MukeiError>;
 
+impl MukeiError {
+    /// Tripwire constructor for [`MukeiError::SecretLeaked`].
+    ///
+    /// Takes ownership of a plaintext-secret-bearing `String`, zeroises its
+    /// backing buffer, drops it, and records only the redacted byte length.
+    /// This is the **only** sanctioned construction site for the variant —
+    /// downstream code must call this helper instead of building the variant
+    /// directly, otherwise the error itself becomes an exfiltration channel.
+    pub fn secret_leaked(mut plaintext: String) -> Self {
+        // SAFETY: zeroize the bytes BEFORE drop so a heap-inspecting attacker
+        // (or a panic-handler core dump) cannot recover the secret.
+        use zeroize::Zeroize;
+        let len = plaintext.len();
+        unsafe { plaintext.as_mut_vec().zeroize(); }
+        drop(plaintext);
+        Self::SecretLeaked(len)
+    }
+}
+
 // ====================================================================
 // Tests
 // ====================================================================
@@ -319,10 +346,12 @@ mod tests {
 
     #[test]
     fn display_does_not_leak_secrets() {
-        let err = MukeiError::SecretLeaked("sk-test-123".into());
+        let err = MukeiError::secret_leaked(String::from("sk-test-123"));
         let rendered = format!("{err}");
         assert!(rendered.contains("plaintext secret"));
         assert!(!rendered.contains("sk-test-123")); // never render raw secret
+        // The error MUST carry only the redacted length, never the bytes.
+        assert!(matches!(err, MukeiError::SecretLeaked(n) if n == "sk-test-123".len()));
     }
 
     #[test]
