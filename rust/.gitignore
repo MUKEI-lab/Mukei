@@ -1,0 +1,14 @@
+# Rust build artifacts
+/target/
+
+# llama.cpp prebuilt artifacts (regenerable)
+/llama-cpp-prebuilt/prebuilt/
+
+# OS / IDE noise
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Local config overrides
+mukei.local.toml

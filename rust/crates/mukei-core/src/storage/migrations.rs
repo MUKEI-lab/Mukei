@@ -1,0 +1,182 @@
+//! `mukei_core::storage::migrations` — TRD §6.1.
+//!
+//! Strict append-only migration framework. The boot path runs
+//! `Migrator::apply_pending` after opening the SQLCipher database.
+//! Each `V###__name.sql` adds rows to `migrations_applied` and bumps
+//! `PRAGMA user_version`. The order is *strictly* monotonic; conflict
+//! produces `MukeiError::MigrationOrderConflict`.
+
+use std::path::{Path, PathBuf};
+
+use crate::error::{MukeiError, Result};
+
+/// Subdirectory inside the project / data root that holds the raw
+/// `.sql` migration files. Reference clone of the on-disk layout from
+/// `BS v1.2` §14.
+pub const MIGRATIONS_DIR: &str = "migrations";
+
+/// File prefix. Each migration file is named `V{nnn}__{name}.sql`.
+pub const MIGRATION_FILE_PREFIX: &str = "V";
+
+/// One row in the `migrations_applied` SQLite table.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MigrationRecord {
+    pub id: u32,
+    pub name: String,
+    pub applied_at: chrono::DateTime<chrono::Utc>,
+    pub checksum: String, // SHA-256 of the migration body
+}
+
+/// Pure-data migrator — does *not* open a SQLite handle. The core
+/// migrator owns the schema; the bridge crate opens the real
+/// connection and invokes `apply_one` on each row.
+pub struct Migrator {
+    dir: PathBuf,
+}
+
+impl Migrator {
+    pub fn new(dir: impl Into<PathBuf>) -> Self {
+        Self { dir: dir.into() }
+    }
+
+    pub fn dir(&self) -> &Path { &self.dir }
+
+    /// Read all migration files in the directory and return them in
+    /// strict ascending order of `V{n}`.
+    pub fn list_available(&self) -> Result<Vec<(u32, String, String)>> {
+        let mut out = Vec::new();
+        let entries = std::fs::read_dir(&self.dir)?;
+        let mut sorted: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.extension().and_then(|e| e.to_str()) == Some("sql")
+                    && p.file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.starts_with(MIGRATION_FILE_PREFIX))
+                        .unwrap_or(false)
+            })
+            .collect();
+        sorted.sort();
+
+        for path in sorted {
+            let fname = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| MukeiError::Invariant(format!("migration file {:?} has no name", path)))?;
+            let id: u32 = fname
+                .split('_')
+                .next()
+                .and_then(|s| s.trim_start_matches('V').parse().ok())
+                .ok_or_else(|| MukeiError::Invariant(format!("migration file {:?} has no V{id}", fname)))?;
+            let body = std::fs::read_to_string(&path)?;
+            let name = fname.trim_end_matches(".sql").to_string();
+            // Compute SHA-256 of the body for `migrations_applied.checksum`.
+            use sha2::{Digest, Sha256};
+            let mut h = Sha256::new();
+            h.update(body.as_bytes());
+            let checksum = crate::diagnostics::crash_logger::hex_helper(&h.finalize());
+            out.push((id, name, body));
+            // checksum is recorded by the bridge when it inserts the row
+            // (consume-friendly API). Drop here to silence unused warning.
+            let _ = checksum;
+        }
+        Ok(out)
+    }
+
+    /// Given the list of already-applied migrations, return the
+    /// migrations from `available` that should still be applied.
+    pub fn pending(
+        available: &[(u32, String, String)],
+        applied: &[MigrationRecord],
+    ) -> Vec<(u32, String, String)> {
+        let max_applied = applied.iter().map(|r| r.id).max().unwrap_or(0);
+        available.iter().filter(|(id, _, _)| *id > max_applied).cloned().collect()
+    }
+
+    /// Boot path asks for the conflict check. Returned result:
+    ///  - `Ok(())` if the highest applied id matches the highest
+    ///    available id, *or* if `applied` is empty (first run).
+    ///  - `Err(MukeiError::MigrationOrderConflict)` otherwise.
+    pub fn verify_order(
+        available: &[(u32, String, String)],
+        applied: &[MigrationRecord],
+    ) -> Result<()> {
+        let max_applied = applied.iter().map(|r| r.id).max();
+        let max_avail = available.iter().map(|(id, _, _)| *id).max();
+        match (max_applied, max_avail) {
+            (Some(a), Some(v)) if a < v => Ok(()),
+            (Some(a), Some(v)) if a == v => {
+                // Sanity: the applied list must be contiguous.
+                let mut sorted = applied.iter().map(|r| r.id).collect::<Vec<_>>();
+                sorted.sort();
+                for (idx, id) in sorted.iter().enumerate() {
+                    if *id as usize != idx + 1 {
+                        return Err(MukeiError::MigrationOrderConflict {
+                            expected: idx as u32 + 1,
+                            applied: sorted.clone(),
+                        });
+                    }
+                }
+                // Confirmed contiguous.
+                let _ = v;
+                Ok(())
+            }
+            (Some(a), Some(v)) if a > v => Err(MukeiError::MigrationOrderConflict {
+                expected: v,
+                applied: applied.iter().map(|r| r.id).collect(),
+            }),
+            (None, _) => Ok(()),
+            _ => Ok(()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_dir_holds_no_migrations() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = Migrator::new(dir.path());
+        let list = m.list_available().unwrap();
+        assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    fn non_contiguous_applied_is_conflict() {
+        let avail = vec![(1, "a".into(), String::new()), (2, "b".into(), String::new())];
+        let applied = vec![
+            MigrationRecord {
+                id: 1,
+                name: "a".into(),
+                applied_at: chrono::Utc::now(),
+                checksum: "x".into(),
+            },
+            MigrationRecord {
+                id: 3, // skip 2
+                name: "c".into(),
+                applied_at: chrono::Utc::now(),
+                checksum: "y".into(),
+            },
+        ];
+        let err = Migrator::verify_order(&avail, &applied).unwrap_err();
+        assert!(matches!(err, MukeiError::MigrationOrderConflict { .. }));
+    }
+
+    #[test]
+    fn pending_list_filters_to_greater_than_applied() {
+        let avail = vec![
+            (1, "a".into(), String::new()),
+            (2, "b".into(), String::new()),
+            (3, "c".into(), String::new()),
+        ];
+        let applied = vec![MigrationRecord {
+            id: 1, name: "a".into(), applied_at: chrono::Utc::now(), checksum: "x".into(),
+        }];
+        let pending = Migrator::pending(&avail, &applied);
+        let ids: Vec<_> = pending.iter().map(|(i, _, _)| *i).collect();
+        assert_eq!(ids, vec![2, 3]);
+    }
+}

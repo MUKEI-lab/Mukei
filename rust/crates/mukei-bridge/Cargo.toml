@@ -1,0 +1,43 @@
+[package]
+name               = "mukei-bridge"
+version            = "0.7.5"
+edition            = "2021"
+rust-version       = "1.78"
+description        = "Mukei CXX-Qt bridge — exposes MukeiAgent, MukeiBridge, and JNI helpers to Qt/QML (TRD §1.2, §1.3, §9.4)"
+license            = "Proprietary"
+authors            = ["Mukei AI Architecture Pass"]
+
+[lib]
+crate-type         = ["cdylib", "staticlib"]   # Android .so + Linux .a fallback
+path               = "src/lib.rs"
+
+[features]
+default            = ["android_keystore"]
+android_keystore   = []
+desktop            = []
+rusqlite           = ["mukei-core/rusqlite"]
+
+[dependencies]
+mukei-core = { path = "../mukei-core", default-features = false, features = ["std", "tokio"] }
+
+cxx         = { workspace = true }
+cxx-qt      = { workspace = true }
+cxx-qt-lib  = { workspace = true }
+
+tokio       = { workspace = true, features = ["rt-multi-thread", "sync", "macros"] }
+tokio-util  = { workspace = true }
+
+tracing      = { workspace = true }
+thiserror    = { workspace = true }
+anyhow       = { workspace = true }
+parking_lot  = { workspace = true }
+once_cell    = { workspace = true }
+zeroize      = { workspace = true }
+serde        = { workspace = true, features = ["derive"] }
+serde_json   = { workspace = true }
+chrono       = { workspace = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+# JNI bindings are only meaningful on Android (TRD §9.4).
+# On desktop builds the feature `desktop` replaces the JNI surface.
+nix = { version = "0.27", features = ["term"] }   # terminal helpers & signal handling

@@ -1,0 +1,32 @@
+# Mukei tool-calling grammar — TRD §13.1
+# The grammar encodes the strongest possible syntactic contract.
+# Rust-side validator remains mandatory for semantic checks and limits.
+
+root ::= ws "[" ws tool_call_list? ws "]" ws
+
+tool_call_list ::= tool_call (ws "," ws tool_call)*
+
+tool_call ::= web_search_call | read_file_call | hardware_call | math_eval_call
+
+web_search_call ::= "{" ws "\"name\"" ws ":" ws "\"web_search\"" ws "," ws "\"arguments\"" ws ":" ws web_search_args ws "}"
+read_file_call ::= "{" ws "\"name\"" ws ":" ws "\"read_file\"" ws "," ws "\"arguments\"" ws ":" ws read_file_args ws "}"
+hardware_call ::= "{" ws "\"name\"" ws ":" ws "\"get_hardware_info\"" ws "," ws "\"arguments\"" ws ":" ws hardware_args ws "}"
+math_eval_call ::= "{" ws "\"name\"" ws ":" ws "\"math_eval\"" ws "," ws "\"arguments\"" ws ":" ws math_eval_args ws "}"
+
+web_search_args ::= "{" ws "\"query\"" ws ":" ws nonempty_string ws "}"
+read_file_args ::= "{" ws "\"path\"" ws ":" ws saf_string ws "}"
+hardware_args ::= "{" ws "}"
+math_eval_args ::= "{" ws "\"expression\"" ws ":" ws nonempty_string ws "}"
+
+saf_string ::= "\"saf://" saf_body "\""
+saf_body ::= saf_char saf_char*
+saf_char ::= [A-Za-z0-9._~\/-]
+
+nonempty_string ::= "\"" string_char+ "\""
+string ::= "\"" string_char* "\""
+string_char ::= [^"\\\u0000-\u001F] | escape
+escape ::= "\\" (["\\/bfnrt] | unicode_escape)
+unicode_escape ::= "u" hex hex hex hex
+hex ::= [0-9A-Fa-f]
+
+ws ::= [ \t\n\r]*
