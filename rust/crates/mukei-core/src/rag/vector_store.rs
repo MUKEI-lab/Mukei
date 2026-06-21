@@ -88,18 +88,33 @@ impl VectorStore {
     /// Save atomically. Writes to `<path>.<ATOMIC_SUFFIX>` first, then
     /// renames over the live path. Crash-between leaves the live file
     /// untouched.
+    ///
+    /// **Synchronous** — only call this from a non-async context, or
+    /// (preferably) use [`Self::snapshot_for_save`] + [`Self::save_snapshot`]
+    /// from an async task (TRD §2.4 Golden Rule: never block the runtime).
     pub fn save(&self) -> Result<()> {
-        let tmp = swap_path(&self.path);
-        let bytes = {
-            let g = self.inner.lock();
-            serde_json::to_vec(&*g)
-                .map_err(|e| MukeiError::Internal(e.to_string()))?
-        };
-        if let Some(parent) = self.path.parent() {
+        let snapshot = self.snapshot_for_save()?;
+        Self::save_snapshot(&self.path, &snapshot)
+    }
+
+    /// Take an FFI-safe snapshot of the current vector set. Cheap — only
+    /// touches the in-memory mutex briefly. Use this from an async
+    /// context, then hand the snapshot to [`Self::save_snapshot`] inside
+    /// `tokio::task::spawn_blocking`.
+    pub fn snapshot_for_save(&self) -> Result<Vec<u8>> {
+        let g = self.inner.lock();
+        serde_json::to_vec(&*g).map_err(|e| MukeiError::Internal(e.to_string()))
+    }
+
+    /// Persist a pre-serialised snapshot atomically. Pure file I/O —
+    /// safe to call from a `spawn_blocking` worker.
+    pub fn save_snapshot(path: &Path, bytes: &[u8]) -> Result<()> {
+        let tmp = swap_path(path);
+        if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| MukeiError::Io(e.to_string()))?;
         }
         fs::write(&tmp, bytes).map_err(|e| MukeiError::Io(e.to_string()))?;
-        fs::rename(&tmp, &self.path).map_err(|e| MukeiError::Io(e.to_string()))?;
+        fs::rename(&tmp, path).map_err(|e| MukeiError::Io(e.to_string()))?;
         Ok(())
     }
 

@@ -65,6 +65,10 @@ impl<'a> IndexingTransaction<'a> {
     }
 
     /// Finalise — flush SQL rows + atomic-rename save the vector store.
+    ///
+    /// TRD §2.4 "Golden Rule": `VectorStore::save()` performs synchronous
+    /// `fs::write` + `fs::rename`. It MUST run inside `spawn_blocking` so
+    /// the async runtime worker never blocks on disk I/O.
     pub async fn commit(mut self) -> Result<()> {
         #[cfg(feature = "rusqlite")]
         if let Some(db) = self.db.as_ref() {
@@ -83,7 +87,15 @@ impl<'a> IndexingTransaction<'a> {
                 Ok(())
             }).await?;
         }
-        self.store.save()?;
+        // Snapshot the in-memory state OFF the runtime worker, then hand
+        // the (sync) atomic-rename save to a blocking thread.
+        let snapshot = self.store.snapshot_for_save()?;
+        let path = self.store.path().to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            crate::rag::vector_store::VectorStore::save_snapshot(&path, &snapshot)
+        })
+        .await
+        .map_err(|e| MukeiError::BlockingJoinFailed(e.to_string()))??;
         self.committed = true;
         Ok(())
     }

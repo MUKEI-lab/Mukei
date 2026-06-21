@@ -93,10 +93,17 @@ meval      = "0.2"
 # ============================================================================
 # Workspace metadata
 # ============================================================================
+# IMPORTANT (TRD §1.3 / PRD G1 / REQ-ARCH-01 / REQ-DIA-04):
+#   `panic = "unwind"` is MANDATORY for every shipped profile.
+#   `std::panic::catch_unwind` (used by `mukei_core::guard::callback_with_guard!`,
+#   the `mukei-ffi-shim` callback wrapper, and the panic-hook sink) is a no-op
+#   under `panic = "abort"` — a single panic anywhere in the agent loop would
+#   then SIGABRT the entire process instead of being caught at the FFI boundary.
+#   Do NOT switch any profile back to `panic = "abort"`.
 [profile.release]
 lto              = "thin"
 codegen-units    = 1
-panic            = "abort"
+panic            = "unwind"   # REQUIRED — see note above
 strip            = true
 opt-level        = 3
 
@@ -104,9 +111,11 @@ opt-level        = 3
 opt-level        = 0
 debug            = true
 incremental      = true
+panic            = "unwind"   # REQUIRED — see note above
 
 # Android target uses the cheaper `z` because `wasm`-time profiling is off.
 [profile.android-release]
-inherits = "release"
+inherits  = "release"
 opt-level = "z"
 lto       = "fat"
+panic     = "unwind"          # REQUIRED — inherited but pinned explicitly
