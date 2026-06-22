@@ -36,8 +36,15 @@ persist_grants_to_db = true
 prompt_on_first_use  = true
 
 [agent]
-max_failures_per_tool       = 2     ; REQ-AGT-05
+; Number of consecutive failures on the SAME (tool, fingerprint) pair
+; before the abuse blocker fires. Raised from 2 → 5 per the v0.7.5
+; audit — the legacy value was too brittle for transient network errors
+; on tools like web_search. See `ToolPolicy::DEFAULT_MAX_FAILURES`.
+max_failures_per_tool       = 5     ; REQ-AGT-05
 recovered_history_window    = 12
+; Repeat-output / no-progress detection (TRD §2.5, v0.7.5 audit P7).
+repeat_output_window        = 2     ; consecutive identical outputs to trigger backoff
+repeat_output_backoff_secs  = 10    ; advisory pause hinted to the LLM
 
 [defaults]
 prompt_card_auto_send = false      ; false = fill-only, opt-in (PRD §7.4 + AF §6.6)

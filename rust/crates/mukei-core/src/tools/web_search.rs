@@ -35,6 +35,10 @@ struct WebSearchArgs {
     query: String,
 }
 
+// Constructed inside the `network` feature block; the sandbox build
+// keeps the type definition compiled so the executor signature does
+// not flip between feature configurations.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct SearchResult {
     title: String,

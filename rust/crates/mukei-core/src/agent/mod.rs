@@ -12,7 +12,15 @@ pub mod watchdog;
 
 pub use context::{ContextBudget, ContextBudgetManager};
 pub use loop_::{AgentLoop, AgentLoopHandle};
-pub use tools::{FailureTracker, ToolExecutor, MAX_FAILURES_PER_TOOL};
+#[allow(deprecated)]
+pub use tools::{
+    FailureKind, FailureTracker, OutputRepeatTracker, ToolExecutionPolicy, ToolExecutor,
+    ToolOutcome,
+};
+#[allow(deprecated)]
+pub use tools::{ToolPolicy, MAX_FAILURES_PER_TOOL}; // legacy aliases
+#[allow(deprecated)]
+pub use tools::{render_repeat_output_envelope, render_tool_error_envelope};
 pub use watchdog::{Watchdog, WatchdogHandle};
 
 /// Global state machine snapshot. Mirrors `crate::ffi::agent`.

@@ -12,7 +12,9 @@
 //! # Multi-thread safety
 /// Panics can fire from any tokio worker. The hook is `Send + Sync` and
 /// uses a `Mutex` over a thread-safe sink.
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
+#[cfg(test)]
+use std::sync::Mutex;
 
 static INSTALLED: OnceLock<()> = OnceLock::new();
 

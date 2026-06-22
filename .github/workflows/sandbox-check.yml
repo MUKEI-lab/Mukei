@@ -22,10 +22,31 @@ jobs:
 
       - name: P0 — panic must remain unwind on every profile
         run: |
-          if grep -nE 'panic\s*=\s*"abort"' rust/Cargo.toml ; then
-            echo "::error::panic = \"abort\" found in rust/Cargo.toml — this disables std::panic::catch_unwind and defeats the entire FFI safety lattice (TRD §1.3 / PRD G1)."
+          # Strip comments first, THEN grep. The comment block in
+          # rust/Cargo.toml explains *why* panic must stay unwind and
+          # therefore legitimately contains the string `panic = "abort"`
+          # as a tripwire reference — we must not fail on that.
+          violation=$(sed 's/#.*$//' rust/Cargo.toml | grep -nE 'panic[[:space:]]*=[[:space:]]*"abort"' || true)
+          if [ -n "$violation" ]; then
+            echo "::error::panic = \"abort\" found in active config of rust/Cargo.toml — this disables std::panic::catch_unwind and defeats the entire FFI safety lattice (TRD §1.3 / PRD G1)."
+            echo "$violation"
             exit 1
           fi
+
+      - name: P0b — every shipped profile must explicitly pin panic = unwind
+        run: |
+          # Strip comments, then verify each profile we ship sets panic = unwind
+          stripped=$(sed 's/#.*$//' rust/Cargo.toml)
+          for profile in 'profile.release' 'profile.android-release' 'profile.dev'; do
+            block=$(echo "$stripped" | awk -v p="[$profile]" '
+              $0 ~ "^\\[" { in_block=($0==p); next }
+              in_block { print }
+            ')
+            if ! echo "$block" | grep -qE 'panic[[:space:]]*=[[:space:]]*"unwind"' ; then
+              echo "::error::[$profile] in rust/Cargo.toml is missing an explicit panic = \"unwind\" pin (TRD §1.3 / PRD G1)."
+              exit 1
+            fi
+          done
 
       - name: P1 — agent loop must not hard-abort on tool block
         run: |
@@ -46,6 +67,37 @@ jobs:
         run: |
           if grep -nE 'SecretLeaked\(String\)' rust/crates/mukei-core/src/error.rs ; then
             echo "::error::SecretLeaked must carry redacted byte-length (usize), never raw plaintext."
+            exit 1
+          fi
+
+      - name: P4 — tool execution policy default threshold must be at least 5
+        run: |
+          # The legacy default of 2 was too brittle for transient errors.
+          # The audit set the floor at 5; CI defends against accidental
+          # regressions back to a tighter default.
+          line=$(grep -E 'pub const DEFAULT_MAX_FAILURES: u32' rust/crates/mukei-core/src/agent/tools/policy.rs | head -1)
+          val=$(echo "$line" | grep -oE '[0-9]+' | head -1)
+          if [ -z "$val" ] || [ "$val" -lt 5 ]; then
+            echo "::error::ToolExecutionPolicy::DEFAULT_MAX_FAILURES is '$val' — must be ≥ 5 per the v0.7.5 audit recommendation."
+            exit 1
+          fi
+
+      - name: P5 — every FailureKind variant must have a remediation hint
+        run: |
+          # Each variant's hint is what the LLM sees on failure. A blank
+          # hint defeats the structured-feedback design (REQ-AGT-04).
+          missing=$(awk '
+            /pub fn remediation_hint/ { in_fn=1; next }
+            in_fn && /^}/ { in_fn=0 }
+            in_fn && /=>/ {
+              # Capture the right-hand side; if it is the empty string
+              # literal we flag this variant.
+              if ($0 ~ /=>[[:space:]]*""/) print NR": "$0
+            }
+          ' rust/crates/mukei-core/src/agent/tools/policy.rs)
+          if [ -n "$missing" ]; then
+            echo "::error::FailureKind::remediation_hint has blank arms:"
+            echo "$missing"
             exit 1
           fi
 

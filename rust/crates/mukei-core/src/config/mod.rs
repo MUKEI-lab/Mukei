@@ -68,8 +68,31 @@ pub struct SafCfg {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AgentCfg {
+    /// Consecutive failures on the same `(tool, fingerprint)` pair
+    /// before the abuse blocker fires. Default 5 (raised from 2 per
+    /// the v0.7.5 audit — the legacy value was too brittle for transient
+    /// network errors).
     pub max_failures_per_tool: u32,
+    /// Number of recent messages replayed into the context window when
+    /// the recovery_state table indicates an OS-kill resume.
     pub recovered_history_window: u32,
+    /// Number of consecutive byte-identical tool outputs that trigger
+    /// the no-progress / backoff envelope.
+    #[serde(default = "AgentCfg::default_repeat_output_window")]
+    pub repeat_output_window: u32,
+    /// Advisory backoff (in seconds) inserted into the no-progress
+    /// envelope handed back to the LLM.
+    #[serde(default = "AgentCfg::default_repeat_output_backoff_secs")]
+    pub repeat_output_backoff_secs: u32,
+}
+
+impl AgentCfg {
+    /// Default value for `repeat_output_window` when the field is omitted
+    /// from `config.toml` (kept for forward compatibility with v0.7.4
+    /// configs that pre-date the policy field).
+    pub fn default_repeat_output_window() -> u32 { 2 }
+    /// Default value for `repeat_output_backoff_secs`.
+    pub fn default_repeat_output_backoff_secs() -> u32 { 10 }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -90,7 +113,6 @@ pub struct WrappedSecretRef {
 /// is [`MukeiConfig::load_and_validate`] which pokes the keys not in
 /// [`Self::KNOWN_KEYS`] through a tighter filter.
 mod raw {
-    use super::*;
     use serde::Deserialize;
 
     #[derive(Deserialize)]
@@ -240,8 +262,10 @@ persist_grants_to_db = true
 prompt_on_first_use  = true
 
 [agent]
-max_failures_per_tool       = 2
+max_failures_per_tool       = 5
 recovered_history_window    = 12
+repeat_output_window        = 2
+repeat_output_backoff_secs  = 10
 
 [defaults]
 prompt_card_auto_send = false

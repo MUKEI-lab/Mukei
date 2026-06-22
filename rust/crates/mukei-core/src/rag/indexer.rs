@@ -32,7 +32,10 @@ pub struct IndexingTransaction<'a> {
     store:     &'a mut VectorStore,
     embedder:  &'a dyn Embedder,
     pending:   Vec<u64>,
-    file_id:   String,           // SAF token / file URI
+    /// SAF token / file URI — propagated into the on-disk `chunks.file_id`
+    /// column when the transaction commits. Kept for SAF revoke handling.
+    #[allow(dead_code)]
+    file_id:   String,
     committed: bool,
 }
 
