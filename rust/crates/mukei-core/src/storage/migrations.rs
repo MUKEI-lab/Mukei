@@ -94,6 +94,107 @@ impl Migrator {
         available.iter().filter(|(id, _, _)| *id > max_applied).cloned().collect()
     }
 
+    /// Apply every pending migration inside its own SQLite transaction
+    /// and record the row in `migrations_applied`. Returns the list of
+    /// migrations that were applied in this call.
+    ///
+    /// PRD REQ-DB-04 (Versioned Migration Engine) — this is the single
+    /// public entry point that centralises migration execution. The
+    /// bridge crate MUST NOT issue ad-hoc DDL outside this path.
+    pub async fn apply_pending(
+        &self,
+        pool: &super::pool::DatabasePool,
+    ) -> Result<Vec<MigrationRecord>> {
+        use super::pool::PooledConnectionExt;
+
+        // Discover all migrations on disk + their checksums.
+        let mut bundle = Vec::new();
+        for (id, name, body) in self.list_available()? {
+            use sha2::{Digest, Sha256};
+            let mut h = Sha256::new();
+            h.update(body.as_bytes());
+            let checksum = crate::diagnostics::crash_logger::hex_helper(&h.finalize());
+            bundle.push((id, name, body, checksum));
+        }
+
+        pool.with_conn(move |c| {
+            // Bootstrap the migrations_applied table itself if absent.
+            c.execute_batch(
+                "CREATE TABLE IF NOT EXISTS migrations_applied ( \
+                    version INTEGER PRIMARY KEY, \
+                    name TEXT NOT NULL UNIQUE, \
+                    applied_at TEXT NOT NULL, \
+                    checksum TEXT, \
+                    execution_ms INTEGER, \
+                    success INTEGER NOT NULL DEFAULT 1 CHECK (success IN (0, 1)) \
+                 )",
+            )?;
+
+            // Read the already-applied set.
+            let mut stmt = c.prepare("SELECT version, name, applied_at, checksum FROM migrations_applied ORDER BY version")?;
+            let applied: Vec<MigrationRecord> = stmt
+                .query_map([], |row| {
+                    let applied_at: String = row.get(2)?;
+                    Ok(MigrationRecord {
+                        id: row.get::<_, i64>(0)? as u32,
+                        name: row.get(1)?,
+                        applied_at: chrono::DateTime::parse_from_rfc3339(&applied_at)
+                            .map(|d| d.with_timezone(&chrono::Utc))
+                            .unwrap_or_else(|_| chrono::Utc::now()),
+                        checksum: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            drop(stmt);
+
+            // Determine pending.
+            let available_brief: Vec<(u32, String, String)> = bundle
+                .iter()
+                .map(|(id, name, body, _)| (*id, name.clone(), body.clone()))
+                .collect();
+            // Order check first — surface conflict BEFORE running any DDL.
+            Self::verify_order(&available_brief, &applied)
+                .map_err(|e| super::pool::DbError::Manager(e.to_string()))?;
+            let pending_ids: Vec<u32> = Self::pending(&available_brief, &applied)
+                .iter()
+                .map(|(id, _, _)| *id)
+                .collect();
+
+            // Apply each pending migration inside its own SQL transaction.
+            let mut applied_now = Vec::new();
+            for (id, name, body, checksum) in &bundle {
+                if !pending_ids.contains(id) {
+                    continue;
+                }
+                let started = std::time::Instant::now();
+                let tx = c.transaction()?;
+                tx.execute_batch(body)?;
+                let now = chrono::Utc::now();
+                tx.execute(
+                    "INSERT INTO migrations_applied (version, name, applied_at, checksum, execution_ms, success) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+                    rusqlite::params![
+                        *id as i64,
+                        name,
+                        now.to_rfc3339(),
+                        checksum,
+                        started.elapsed().as_millis() as i64,
+                    ],
+                )?;
+                tx.commit()?;
+                applied_now.push(MigrationRecord {
+                    id: *id,
+                    name: name.clone(),
+                    applied_at: now,
+                    checksum: checksum.clone(),
+                });
+            }
+
+            Ok::<_, super::pool::DbError>(applied_now)
+        })
+        .await
+    }
+
     /// Boot path asks for the conflict check. Returned result:
     ///  - `Ok(())` if the highest applied id matches the highest
     ///    available id, *or* if `applied` is empty (first run).

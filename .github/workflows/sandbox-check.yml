@@ -16,7 +16,7 @@ jobs:
     name: architectural invariants
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -57,9 +57,15 @@ jobs:
 
       - name: P2 — exactly one CallbackGuard impl in the workspace
         run: |
-          shim_impl=$(grep -nE '^pub struct CallbackGuard' rust/crates/mukei-ffi-shim/src/lib.rs || true)
+          # Match `pub struct CallbackGuard` ONLY as a whole identifier
+          # — i.e. followed by `(`, `{`, `<`, or whitespace. This
+          # excludes legitimate opaque newtype wrappers like
+          # `CallbackGuardHandle` which only carry a typed pointer back
+          # into the canonical mukei_core::guard::Inner.
+          shim_impl=$(grep -nE '^pub struct CallbackGuard($|[[:space:]]|[(<{])' rust/crates/mukei-ffi-shim/src/lib.rs || true)
           if [ -n "$shim_impl" ]; then
             echo "::error::mukei-ffi-shim re-declared CallbackGuard. The canonical impl in mukei_core::guard MUST be the only one."
+            echo "$shim_impl"
             exit 1
           fi
 
@@ -82,7 +88,21 @@ jobs:
             exit 1
           fi
 
-      - name: P5 — every FailureKind variant must have a remediation hint
+      - name: P5 — DuckDuckGo is permanently removed from the search architecture
+        run: |
+          # Migration document §2: DDG is gone from production. CI
+          # blocks any reintroduction — file, type variant, or runtime
+          # selector entry.
+          if find rust/crates/mukei-core/src/search -name 'ddg*.rs' -o -name 'duck*.rs' | grep -q . ; then
+            echo "::error::DDG file present under search/. Migration §2 forbids reintroduction."
+            exit 1
+          fi
+          if grep -REn 'SearchEngineKind::(Ddg|Duck|DuckDuckGo)' rust/crates/mukei-core/src/ ; then
+            echo "::error::SearchEngineKind variant for DDG detected. Migration §2 forbids reintroduction."
+            exit 1
+          fi
+
+      - name: P6 — every FailureKind variant must have a remediation hint
         run: |
           # Each variant's hint is what the LLM sees on failure. A blank
           # hint defeats the structured-feedback design (REQ-AGT-04).
@@ -110,7 +130,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: invariants
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # llama.cpp is shipped as a submodule under
           # rust/llama-cpp-prebuilt/vendor/llama.cpp. We do NOT need it to

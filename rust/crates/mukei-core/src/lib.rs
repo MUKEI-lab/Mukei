@@ -50,6 +50,7 @@ pub mod ffi;
 #[allow(missing_docs)] pub mod engine;
 #[allow(missing_docs)] pub mod rag;
 #[allow(missing_docs)] pub mod tools;
+#[allow(missing_docs)] pub mod search;
 #[allow(missing_docs)] pub mod storage;
 #[allow(missing_docs)] pub mod config;
 

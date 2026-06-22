@@ -31,11 +31,15 @@ pub mod migrations;
 #[cfg(feature = "rusqlite")]
 pub mod pool;
 #[cfg(feature = "rusqlite")]
+pub mod recovery;
+#[cfg(feature = "rusqlite")]
 pub mod saf;
 
 #[cfg(feature = "rusqlite")]
-pub use migrations::{Migrator, MigrationRecord, MIGRATIONS_DIR, MIGRATION_FILE_PREFIX};
+pub use migrations::{MigrationRecord, Migrator, MIGRATIONS_DIR, MIGRATION_FILE_PREFIX};
 #[cfg(feature = "rusqlite")]
 pub use pool::{DatabasePool, DbError, PooledConnectionExt};
+#[cfg(feature = "rusqlite")]
+pub use recovery::{RecoveryState, RecoveryStore};
 #[cfg(feature = "rusqlite")]
 pub use saf::{SafRegistry, SafTokenRow};

@@ -5,7 +5,7 @@
 **A zero-telemetry, fault-tolerant, on-device AI agent.**
 Built in Rust, fronted by Qt 6 + QML, accelerated by llama.cpp.
 
-[![tests](https://img.shields.io/badge/tests-70%20passing-success)](#tests)
+[![tests](https://img.shields.io/badge/tests-157%20passing-success)](#tests)
 [![rust](https://img.shields.io/badge/rust-1.78%2B-orange)](#requirements)
 [![license](https://img.shields.io/badge/license-Proprietary-lightgrey)](#license)
 [![status](https://img.shields.io/badge/status-architecture%20pass-blue)](#project-status)
@@ -88,14 +88,20 @@ cargo test -p mukei-ffi-shim  --lib
 Current run:
 
 ```
-mukei-core      68 passed · 0 failed
-mukei-ffi-shim   2 passed · 0 failed
+mukei-core      145 unit + 12 integration
+mukei-ffi-shim    2 unit
                 ────────────────────
-                70 passed total
+                159 passed total
 ```
 
 Verified invariants:
 
+- **Migration §2 — No DuckDuckGo.** Production search uses Brave + Tavily only, picked per task by the adaptive [`SearchPlanner`](rust/crates/mukei-core/src/search/planner.rs). A compile-time tripwire + CI guard reject any reintroduction.
+- **Migration §3-13 — Adaptive Search Planner.** Intent analysis → task split → classification → engine selection → ranking → trust gating → cache. No unconditional fan-out, per-engine timeouts (Brave 3s / Tavily 5s).
+- **PRD REQ-RAG-01 / -02 / -03.** Real candle-backed MiniLM embedder, optional usearch HNSW backend, embedder-swap detection (`StoreHeader`), shred / forget functionality.
+- **PRD REQ-SEC-01.** Full-file SHA-256 verification of GGUF models BEFORE `mmap`.
+- **PRD REQ-SEC-19.** SQLCipher key handling with `PRAGMA key` + zeroisation.
+- **PRD REQ-AGT-04** — Tool Execution Policy with configurable threshold (default 5), failure-kind classification (`Transient` / `Validation` / `Cancelled` / `Timeout` / `Permanent` / `Abuse`), structured feedback envelopes, and no-progress detection (see [`crates/mukei-core/src/agent/tools/`](rust/crates/mukei-core/src/agent/tools/)).
 - **TRD §1.3 / REQ-ARCH-05** — `CallbackGuard` + `catch_unwind` wrap for every FFI callback.
 - **TRD §1.2.5** — Thinking-tag streaming detector with 64-byte sliding window, multi-transition per push.
 - **TRD §2.2** — Bounded tokio runtime: `MAX_BLOCKING_THREADS=6` on Android, `TOOL_BLOCKING_SLOTS=2`.

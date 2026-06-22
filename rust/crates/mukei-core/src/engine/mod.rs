@@ -1,16 +1,15 @@
-//! `mukei_core::engine` — TRD §3.
-//!
-//! The Rust half of the `llama-cpp-rs` wrapper. The crate builds
-//! against either the precompiled `llama-cpp-sys` archive (TRD §8.2
-//! — preferred, no per-PR 30-min CI rebuild) or against a stub
-//! `InferenceBackend` trait for unit tests.
+//! `mukei_core::engine` — TRD §3 / PRD §9.
 //!
 //! Modules:
-//!   - `tokenizer`       — token counter shared with the agent loop.
-//!   - `llama_wrapper`   — `LlamaEngine` stub + streaming entry point.
-//!   - `gpu_strategy`    — Mali / Adreno layer-splitting heuristic.
-//!   - `streaming`       — 50 ms-batched token drain from raw mpsc.
-//!   - `markdown`        — pre-typed AST serializer for QML (TRD §35.1.1).
+//!   - [`tokenizer`]    — token counter (heuristic + real BPE).
+//!   - [`llama_wrapper`] — `LlamaEngine`, `EngineConfig`,
+//!                         `InferenceBackend`, `MockInferenceBackend`,
+//!                         `StopReason`, full-file SHA verification,
+//!                         GBNF-aware tool-call detection.
+//!   - [`gpu_strategy`]  — Mali / Adreno / Sugarloaf detection with
+//!                         thermal-aware fallback.
+//!   - [`streaming`]     — 50 ms-batched token drain from raw mpsc.
+//!   - [`markdown`]      — pre-typed AST serializer for QML.
 
 pub mod gpu_strategy;
 pub mod llama_wrapper;
@@ -18,6 +17,12 @@ pub mod markdown;
 pub mod streaming;
 pub mod tokenizer;
 
-pub use llama_wrapper::{run_inference, has_tool_call};
+pub use gpu_strategy::{GpuKind, GpuStrategy};
+pub use llama_wrapper::{
+    has_tool_call, run_inference, run_inference_typed, EngineConfig, InferenceBackend,
+    InferenceOutcome, LlamaEngine, MockInferenceBackend, ModelPinnedHash, StopReason,
+};
 pub use streaming::{Drainer, TokenStreamConfig};
 pub use tokenizer::{CharCountTokenizer, TokenCount};
+#[cfg(feature = "candle")]
+pub use tokenizer::BpeTokenizer;
