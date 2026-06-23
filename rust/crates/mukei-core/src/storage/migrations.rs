@@ -39,13 +39,15 @@ impl Migrator {
         Self { dir: dir.into() }
     }
 
-    pub fn dir(&self) -> &Path { &self.dir }
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
 
     /// Read all migration files in the directory and return them in
     /// strict ascending order of `V{n}`.
     pub fn list_available(&self) -> Result<Vec<(u32, String, String)>> {
         let mut out = Vec::new();
-        let entries = std::fs::read_dir(&self.dir)?;
+        let entries = std::fs::read_dir(&self.dir).map_err(|e| MukeiError::Io(e.to_string()))?;
         let mut sorted: Vec<_> = entries
             .filter_map(|e| e.ok())
             .map(|e| e.path())
@@ -60,16 +62,20 @@ impl Migrator {
         sorted.sort();
 
         for path in sorted {
-            let fname = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .ok_or_else(|| MukeiError::Invariant(format!("migration file {:?} has no name", path)))?;
+            let fname = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
+                MukeiError::Invariant(format!("migration file {:?} has no name", path))
+            })?;
             let id: u32 = fname
                 .split('_')
                 .next()
                 .and_then(|s| s.trim_start_matches('V').parse().ok())
-                .ok_or_else(|| MukeiError::Invariant(format!("migration file {:?} has no V{id}", fname)))?;
-            let body = std::fs::read_to_string(&path)?;
+                .ok_or_else(|| {
+                    MukeiError::Invariant(format!(
+                        "migration file {:?} has no V-prefix numeric id",
+                        fname
+                    ))
+                })?;
+            let body = std::fs::read_to_string(&path).map_err(|e| MukeiError::Io(e.to_string()))?;
             let name = fname.trim_end_matches(".sql").to_string();
             // Compute SHA-256 of the body for `migrations_applied.checksum`.
             use sha2::{Digest, Sha256};
@@ -91,7 +97,11 @@ impl Migrator {
         applied: &[MigrationRecord],
     ) -> Vec<(u32, String, String)> {
         let max_applied = applied.iter().map(|r| r.id).max().unwrap_or(0);
-        available.iter().filter(|(id, _, _)| *id > max_applied).cloned().collect()
+        available
+            .iter()
+            .filter(|(id, _, _)| *id > max_applied)
+            .cloned()
+            .collect()
     }
 
     /// Apply every pending migration inside its own SQLite transaction
@@ -285,7 +295,10 @@ mod tests {
 
     #[test]
     fn non_contiguous_applied_is_conflict() {
-        let avail = vec![(1, "a".into(), String::new()), (2, "b".into(), String::new())];
+        let avail = vec![
+            (1, "a".into(), String::new()),
+            (2, "b".into(), String::new()),
+        ];
         let applied = vec![
             MigrationRecord {
                 id: 1,
@@ -312,7 +325,10 @@ mod tests {
             (3, "c".into(), String::new()),
         ];
         let applied = vec![MigrationRecord {
-            id: 1, name: "a".into(), applied_at: chrono::Utc::now(), checksum: "x".into(),
+            id: 1,
+            name: "a".into(),
+            applied_at: chrono::Utc::now(),
+            checksum: "x".into(),
         }];
         let pending = Migrator::pending(&avail, &applied);
         let ids: Vec<_> = pending.iter().map(|(i, _, _)| *i).collect();

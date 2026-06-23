@@ -14,7 +14,7 @@
 mod agent_runtime;
 
 #[cfg(feature = "rusqlite")]
-use mukei_core::storage::saf as core_saf;
+use mukei_core::storage::{saf as core_saf, AuditLogWriter};
 
 #[cfg(not(feature = "rusqlite"))]
 mod core_saf {
@@ -24,19 +24,29 @@ mod core_saf {
     #[derive(Clone, Debug)]
     pub struct SafTokenRow {
         pub token_id: String,
-        pub source:   String,
-        pub target:   String,
-        pub mime:     String,
-        pub revoked:  bool,
-        pub created:  chrono::DateTime<chrono::Utc>,
+        pub source: String,
+        pub target: String,
+        pub mime: String,
+        pub revoked: bool,
+        pub created: chrono::DateTime<chrono::Utc>,
     }
 
     impl SafRegistry {
-        pub fn new() -> Self { Self }
-        pub fn count(&self) -> usize { 0 }
-        pub fn upsert(&self, _row: SafTokenRow) -> Result<(), ()> { Ok(()) }
-        pub fn revoke(&self, _token: &str) -> Result<(), ()> { Ok(()) }
-        pub fn resolve(&self, _token: &str) -> Result<String, ()> { Err(()) }
+        pub fn new() -> Self {
+            Self
+        }
+        pub fn count(&self) -> usize {
+            0
+        }
+        pub fn upsert(&self, _row: SafTokenRow) -> Result<(), ()> {
+            Ok(())
+        }
+        pub fn revoke(&self, _token: &str) -> Result<(), ()> {
+            Ok(())
+        }
+        pub fn resolve(&self, _token: &str) -> Result<String, ()> {
+            Err(())
+        }
     }
 }
 
@@ -57,8 +67,7 @@ use mukei_core::types::BranchId;
 
 static GLOBAL_SAF_REGISTRY: Lazy<Arc<core_saf::SafRegistry>> =
     Lazy::new(|| Arc::new(core_saf::SafRegistry::new()));
-static GLOBAL_THERMAL_STATUS: Lazy<Arc<Mutex<i32>>> =
-    Lazy::new(|| Arc::new(Mutex::new(0)));
+static GLOBAL_THERMAL_STATUS: Lazy<Arc<Mutex<i32>>> = Lazy::new(|| Arc::new(Mutex::new(0)));
 
 /// Wrapped-secrets registry. The unwrap step (`feature = "android_keystore"`)
 /// happens in the bridge and the *plaintext* lives only inside this
@@ -73,24 +82,28 @@ static GLOBAL_TAVILY_API_KEY: Lazy<Arc<Mutex<Option<String>>>> =
 /// whenever the Brave or Tavily key changes so the next tool call sees
 /// the new credentials without restarting the agent loop.
 static GLOBAL_TOOL_REGISTRY: Lazy<Arc<Mutex<Arc<ToolRegistry>>>> = Lazy::new(|| {
-    Arc::new(Mutex::new(Arc::new(
-        ToolRegistry::with_web_search_keys("missing-brave-key", "missing-tavily-key"),
-    )))
+    Arc::new(Mutex::new(Arc::new(ToolRegistry::with_web_search_keys(
+        "missing-brave-key",
+        "missing-tavily-key",
+    ))))
 });
 
 /// Shared `Arc<AgentLoop>` — `None` until `initialize()` builds it.
-static GLOBAL_AGENT_LOOP: Lazy<Mutex<Option<Arc<AgentLoop>>>> =
-    Lazy::new(|| Mutex::new(None));
+static GLOBAL_AGENT_LOOP: Lazy<Mutex<Option<Arc<AgentLoop>>>> = Lazy::new(|| Mutex::new(None));
 
 /// Optional shared `DatabasePool` (gated behind `rusqlite`).
 #[cfg(feature = "rusqlite")]
 static GLOBAL_DATABASE_POOL: Lazy<Mutex<Option<Arc<mukei_core::storage::DatabasePool>>>> =
     Lazy::new(|| Mutex::new(None));
 
+/// Append-only audit writer for `tool_audit_log`.
+#[cfg(feature = "rusqlite")]
+static GLOBAL_AUDIT_LOG_WRITER: Lazy<Arc<AuditLogWriter>> =
+    Lazy::new(|| Arc::new(AuditLogWriter::new()));
+
 /// Shared validated config snapshot so we can rebuild the loop when web-search
 /// credentials rotate.
-static GLOBAL_CONFIG: Lazy<Mutex<Option<MukeiConfig>>> =
-    Lazy::new(|| Mutex::new(None));
+static GLOBAL_CONFIG: Lazy<Mutex<Option<MukeiConfig>>> = Lazy::new(|| Mutex::new(None));
 
 /// Bridge-side wrapped-secrets helper. The bridge crate is responsible
 /// for unwrapping the Keystore-protected ciphertext that arrives over
@@ -116,7 +129,12 @@ async fn rebuild_tool_registry_from_secrets() {
         #[cfg(feature = "rusqlite")]
         {
             if let Some(pool) = GLOBAL_DATABASE_POOL.lock().await.clone() {
-                let loop_handle = agent_runtime::build_agent_loop(&cfg, registry.clone(), pool);
+                let loop_handle = agent_runtime::build_agent_loop(
+                    &cfg,
+                    registry.clone(),
+                    pool,
+                    GLOBAL_AUDIT_LOG_WRITER.clone(),
+                );
                 *GLOBAL_AGENT_LOOP.lock().await = Some(loop_handle);
                 tracing::info!("agent loop rebuilt alongside tool registry");
             }
@@ -198,7 +216,12 @@ pub mod ffi {
         fn token_revoked(self: Pin<&mut SafRegistry>, token: QString);
 
         #[qinvokable]
-        fn upsert_grant(self: Pin<&mut SafRegistry>, token: QString, target: QString, mime: QString) -> bool;
+        fn upsert_grant(
+            self: Pin<&mut SafRegistry>,
+            token: QString,
+            target: QString,
+            mime: QString,
+        ) -> bool;
         #[qinvokable]
         fn resolve_token(self: Pin<&mut SafRegistry>, token: QString) -> QString;
         #[qinvokable]
@@ -291,6 +314,17 @@ impl MukeiAgentRust {
                 };
                 *GLOBAL_DATABASE_POOL.lock().await = Some(pool.clone());
 
+                if let Err(e) = GLOBAL_AUDIT_LOG_WRITER.hydrate_from_pool(&pool).await {
+                    let code = e.error_code().to_string();
+                    let msg = e.to_string();
+                    let _ = qt.queue(move |mut qobject| {
+                        qobject
+                            .as_mut()
+                            .error_occurred(QString::from(code), QString::from(msg));
+                    });
+                    return;
+                }
+
                 if let Err(e) = agent_runtime::hydrate_saf_registry(&GLOBAL_SAF_REGISTRY, &pool).await {
                     tracing::warn!(error = %e, "SafRegistry hydration failed; starting empty");
                 }
@@ -314,7 +348,12 @@ impl MukeiAgentRust {
                 }
 
                 let registry_arc = GLOBAL_TOOL_REGISTRY.lock().await.clone();
-                let loop_handle = agent_runtime::build_agent_loop(&cfg, registry_arc, pool.clone());
+                let loop_handle = agent_runtime::build_agent_loop(
+                    &cfg,
+                    registry_arc,
+                    pool.clone(),
+                    GLOBAL_AUDIT_LOG_WRITER.clone(),
+                );
                 *GLOBAL_AGENT_LOOP.lock().await = Some(loop_handle);
             }
             #[cfg(not(feature = "rusqlite"))]
@@ -344,7 +383,8 @@ impl MukeiAgentRust {
             while let Some(chunk) = chunk_rx.recv().await {
                 if chunk == "\u{0001}STREAM_FINAL\u{0001}" {
                     if tags.is_open() {
-                        let _ = ui_thread.queue(|mut qobject| qobject.as_mut().thinking_completed());
+                        let _ =
+                            ui_thread.queue(|mut qobject| qobject.as_mut().thinking_completed());
                         tags.reset();
                     }
                     let _ = ui_thread.queue(|mut qobject| qobject.as_mut().stream_finalized());
@@ -468,14 +508,19 @@ impl MukeiBridgeRust {
 }
 
 impl SafRegistryRust {
-    pub fn upsert_grant(self: Pin<&mut Self>, token: QString, target: QString, mime: QString) -> bool {
+    pub fn upsert_grant(
+        self: Pin<&mut Self>,
+        token: QString,
+        target: QString,
+        mime: QString,
+    ) -> bool {
         let row = core_saf::SafTokenRow {
             token_id: token.to_string(),
-            source:   "jni".to_string(),
-            target:   target.to_string(),
-            mime:     mime.to_string(),
-            revoked:  false,
-            created:  chrono::Utc::now(),
+            source: "jni".to_string(),
+            target: target.to_string(),
+            mime: mime.to_string(),
+            revoked: false,
+            created: chrono::Utc::now(),
         };
         mukei_core::runtime::get().spawn(async move {
             let _ = GLOBAL_SAF_REGISTRY.upsert(row.clone());

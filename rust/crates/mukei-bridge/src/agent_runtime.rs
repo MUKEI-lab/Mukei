@@ -57,7 +57,9 @@ pub struct CharHeuristicTokens {
 }
 
 impl Default for CharHeuristicTokens {
-    fn default() -> Self { Self { bytes_per_token: 4 } }
+    fn default() -> Self {
+        Self { bytes_per_token: 4 }
+    }
 }
 
 #[async_trait::async_trait]
@@ -161,7 +163,9 @@ pub struct BridgeContextBackend {
 
 #[cfg(not(feature = "rusqlite"))]
 impl BridgeContextBackend {
-    pub fn new(limit: i64) -> Self { Self { limit } }
+    pub fn new(limit: i64) -> Self {
+        Self { limit }
+    }
 }
 
 #[cfg(not(feature = "rusqlite"))]
@@ -184,9 +188,10 @@ pub fn build_agent_loop(
     cfg: &MukeiConfig,
     registry: Arc<ToolRegistry>,
     pool: Arc<mukei_core::storage::DatabasePool>,
+    audit_writer: Arc<mukei_core::storage::AuditLogWriter>,
 ) -> Arc<AgentLoop> {
     let backend = Arc::new(BridgeContextBackend::new(
-        pool,
+        pool.clone(),
         cfg.agent.recovered_history_window as i64,
     ));
     let tokenizer = Arc::new(CharHeuristicTokens::default());
@@ -194,7 +199,8 @@ pub fn build_agent_loop(
 
     let policy = mukei_core::agent::tools::ToolExecutionPolicy::from(&cfg.agent);
     let tracker = Arc::new(FailureTracker::new());
-    let executor = ToolExecutor::with_policy(registry, tracker, policy);
+    let executor =
+        ToolExecutor::with_policy_and_audit(registry, tracker, policy, pool, audit_writer);
 
     let watchdog = WatchdogHandle::new(Watchdog::new(
         cfg.watchdog.max_iterations,
@@ -206,10 +212,7 @@ pub fn build_agent_loop(
 }
 
 #[cfg(not(feature = "rusqlite"))]
-pub fn build_agent_loop(
-    cfg: &MukeiConfig,
-    registry: Arc<ToolRegistry>,
-) -> Arc<AgentLoop> {
+pub fn build_agent_loop(cfg: &MukeiConfig, registry: Arc<ToolRegistry>) -> Arc<AgentLoop> {
     let backend = Arc::new(BridgeContextBackend::new(
         cfg.agent.recovered_history_window as i64,
     ));
@@ -239,10 +242,7 @@ pub async fn hydrate_saf_registry(
 }
 
 #[cfg(not(feature = "rusqlite"))]
-pub async fn hydrate_saf_registry(
-    _saf: &core_saf::SafRegistry,
-    _pool: &(),
-) -> Result<usize> {
+pub async fn hydrate_saf_registry(_saf: &core_saf::SafRegistry, _pool: &()) -> Result<usize> {
     Ok(0)
 }
 
@@ -276,10 +276,7 @@ pub async fn reconcile_vector_store(
 }
 
 #[cfg(not(feature = "rusqlite"))]
-pub async fn reconcile_vector_store(
-    _cfg: &MukeiConfig,
-    _pool: &(),
-) -> Result<()> {
+pub async fn reconcile_vector_store(_cfg: &MukeiConfig, _pool: &()) -> Result<()> {
     Ok(())
 }
 

@@ -66,8 +66,7 @@ impl AuditEntry {
                 sorted.insert(k.clone(), map[k].clone());
             }
         }
-        serde_json::to_string(&Value::Object(sorted))
-            .unwrap_or_else(|_| "{}".to_string())
+        serde_json::to_string(&Value::Object(sorted)).unwrap_or_else(|_| "{}".to_string())
     }
 }
 
@@ -97,9 +96,8 @@ impl AuditLogWriter {
     pub async fn hydrate_from_pool(&self, pool: &DatabasePool) -> Result<()> {
         let hash: Option<String> = pool
             .with_conn(|c| {
-                let mut stmt = c.prepare(
-                    "SELECT entry_hash FROM tool_audit_log ORDER BY id DESC LIMIT 1",
-                )?;
+                let mut stmt =
+                    c.prepare("SELECT entry_hash FROM tool_audit_log ORDER BY id DESC LIMIT 1")?;
                 let mut rows = stmt.query([])?;
                 if let Some(row) = rows.next()? {
                     Ok::<_, DbError>(Some(row.get::<_, String>(0)?))
@@ -192,7 +190,7 @@ fn truncate_preview(s: &str) -> String {
         return s.to_string();
     }
     let mut out: String = s.chars().take(PREVIEW_MAX).collect();
-    out.push_str(" \u2026 [truncated]");
+    out.push_str(" \u{2026} [truncated]");
     out
 }
 
@@ -205,7 +203,10 @@ mod tests {
     fn canonical_args_is_key_order_invariant() {
         let a = json!({"a": 1, "b": 2});
         let b = json!({"b": 2, "a": 1});
-        assert_eq!(AuditEntry::canonical_args(&a), AuditEntry::canonical_args(&b));
+        assert_eq!(
+            AuditEntry::canonical_args(&a),
+            AuditEntry::canonical_args(&b)
+        );
     }
 
     #[test]

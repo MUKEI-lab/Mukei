@@ -17,9 +17,6 @@ use std::path::Path;
 use std::time::Duration;
 
 #[cfg(feature = "rusqlite")]
-use r2d2::ManageConnection;
-
-#[cfg(feature = "rusqlite")]
 use crate::error::{MukeiError, Result};
 
 /// Pool-specific error mapped into [`MukeiError`].
@@ -38,10 +35,17 @@ pub enum DbError {
 impl From<DbError> for MukeiError {
     fn from(e: DbError) -> Self {
         match e {
-            DbError::Sqlite(_)        => MukeiError::DatabaseInitFailed(e.to_string()),
-            DbError::Manager(_)       => MukeiError::DatabaseInitFailed(e.to_string()),
-            DbError::PoolTimeout(_)   => MukeiError::DatabaseInitFailed(e.to_string()),
+            DbError::Sqlite(_) => MukeiError::DatabaseInitFailed(e.to_string()),
+            DbError::Manager(_) => MukeiError::DatabaseInitFailed(e.to_string()),
+            DbError::PoolTimeout(_) => MukeiError::DatabaseInitFailed(e.to_string()),
         }
+    }
+}
+
+#[cfg(feature = "rusqlite")]
+impl From<r2d2::Error> for DbError {
+    fn from(e: r2d2::Error) -> Self {
+        DbError::Manager(e.to_string())
     }
 }
 
@@ -73,14 +77,13 @@ impl DatabasePool {
     /// [`Self::open_with_cipher_key`] for the encrypted production path
     /// (PRD REQ-SEC-19).
     pub fn open(path: &Path) -> Result<Self> {
-        let manager = r2d2_sqlite::SqliteConnectionManager::file(path)
-            .with_init(|c| {
-                c.pragma_update(None, "journal_mode", "WAL")?;
-                c.pragma_update(None, "synchronous", "NORMAL")?;
-                c.pragma_update(None, "foreign_keys", "ON")?;
-                c.pragma_update(None, "busy_timeout", "5000")?;
-                Ok(())
-            });
+        let manager = r2d2_sqlite::SqliteConnectionManager::file(path).with_init(|c| {
+            c.pragma_update(None, "journal_mode", "WAL")?;
+            c.pragma_update(None, "synchronous", "NORMAL")?;
+            c.pragma_update(None, "foreign_keys", "ON")?;
+            c.pragma_update(None, "busy_timeout", "5000")?;
+            Ok(())
+        });
         let pool = r2d2::Pool::builder()
             .max_size(8)
             .build(manager)
@@ -138,14 +141,11 @@ impl DatabasePool {
 
     /// Acquire one connection synchronously. Only callable from
     /// `spawn_blocking` contexts.
-    pub fn blocking_acquire(&self) -> std::result::Result<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>, DbError> {
-        self.inner.get().map_err(|e| {
-            let dur = Duration::from_secs(5);
-            match e {
-                r2d2::Error::Timeout(_) => DbError::PoolTimeout(dur),
-                _ => DbError::Manager(e.to_string()),
-            }
-        })
+    pub fn blocking_acquire(
+        &self,
+    ) -> std::result::Result<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>, DbError>
+    {
+        self.inner.get().map_err(DbError::from)
     }
 
     /// Direct access to the r2d2 pool (escape hatch).

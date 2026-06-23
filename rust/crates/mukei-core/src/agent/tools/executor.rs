@@ -19,6 +19,9 @@ use crate::error::{MukeiError, Result};
 use crate::tools::validator::TypedToolCall;
 use crate::types::ToolResult;
 
+#[cfg(feature = "rusqlite")]
+use crate::storage::{AuditEntry, AuditLogWriter, DatabasePool};
+
 // ---------------------------------------------------------------------
 // FailureTracker
 // ---------------------------------------------------------------------
@@ -136,13 +139,29 @@ pub struct ToolOutcome {
 // ToolExecutor
 // ---------------------------------------------------------------------
 
+#[cfg(feature = "rusqlite")]
+#[derive(Clone)]
+pub struct ToolAuditSink {
+    pool: Arc<DatabasePool>,
+    writer: Arc<AuditLogWriter>,
+}
+
+#[cfg(feature = "rusqlite")]
+impl ToolAuditSink {
+    pub fn new(pool: Arc<DatabasePool>, writer: Arc<AuditLogWriter>) -> Self {
+        Self { pool, writer }
+    }
+}
+
 /// Parallel tokio executor — owns the [`FailureTracker`], the
 /// [`OutputRepeatTracker`], and the [`ToolExecutionPolicy`].
 pub struct ToolExecutor {
     registry: Arc<crate::tools::ToolRegistry>,
-    tracker:  Arc<FailureTracker>,
-    repeats:  Arc<OutputRepeatTracker>,
-    policy:   ToolExecutionPolicy,
+    tracker: Arc<FailureTracker>,
+    repeats: Arc<OutputRepeatTracker>,
+    policy: ToolExecutionPolicy,
+    #[cfg(feature = "rusqlite")]
+    audit: Option<ToolAuditSink>,
 }
 
 impl ToolExecutor {
@@ -162,20 +181,88 @@ impl ToolExecutor {
             tracker,
             repeats: Arc::new(OutputRepeatTracker::new()),
             policy,
+            #[cfg(feature = "rusqlite")]
+            audit: None,
+        }
+    }
+
+    /// Construct with a custom policy plus a hash-chained audit sink.
+    #[cfg(feature = "rusqlite")]
+    pub fn with_policy_and_audit(
+        registry: Arc<crate::tools::ToolRegistry>,
+        tracker: Arc<FailureTracker>,
+        policy: ToolExecutionPolicy,
+        pool: Arc<DatabasePool>,
+        writer: Arc<AuditLogWriter>,
+    ) -> Self {
+        Self {
+            registry,
+            tracker,
+            repeats: Arc::new(OutputRepeatTracker::new()),
+            policy,
+            audit: Some(ToolAuditSink::new(pool, writer)),
         }
     }
 
     /// Access the underlying failure tracker.
-    pub fn tracker(&self) -> &FailureTracker { &self.tracker }
+    pub fn tracker(&self) -> &FailureTracker {
+        &self.tracker
+    }
 
     /// Access the same-output / no-progress detector. The agent loop
     /// uses this to clear the ring at the start of every new turn
     /// (Issue #5 — the doc comment on `OutputRepeatTracker::clear`
     /// explicitly says "called at the start of each new run()").
-    pub fn repeats(&self) -> &OutputRepeatTracker { &self.repeats }
+    pub fn repeats(&self) -> &OutputRepeatTracker {
+        &self.repeats
+    }
 
     /// Access the effective policy.
-    pub fn policy(&self) -> &ToolExecutionPolicy { &self.policy }
+    pub fn policy(&self) -> &ToolExecutionPolicy {
+        &self.policy
+    }
+
+    #[cfg(feature = "rusqlite")]
+    async fn audit_outcome(
+        &self,
+        call: &TypedToolCall,
+        fingerprint: &str,
+        output: &str,
+        success: bool,
+        took: std::time::Duration,
+        error_code: Option<String>,
+    ) -> Result<()> {
+        let Some(audit) = &self.audit else {
+            return Ok(());
+        };
+        let duration_ms = took.as_millis().min(u64::MAX as u128) as u64;
+        let entry = AuditEntry {
+            conversation_id: None,
+            message_id: None,
+            tool_call_id: call.id.0.to_string(),
+            tool_name: call.name.clone(),
+            args_json: AuditEntry::canonical_args(&call.arguments),
+            result_preview: output.to_string(),
+            success,
+            duration_ms,
+            error_code,
+            fingerprint_sha256: fingerprint.to_string(),
+        };
+        audit.writer.record(&audit.pool, entry).await
+    }
+
+    #[cfg(not(feature = "rusqlite"))]
+    async fn audit_outcome(
+        &self,
+        _call: &TypedToolCall,
+        _fingerprint: &str,
+        _output: &str,
+        _success: bool,
+        _took: std::time::Duration,
+        _error_code: Option<String>,
+    ) -> Result<()> {
+        Ok(())
+    }
 
     /// Clear ALL per-`(tool, fingerprint)` failure counters AND the
     /// same-output ring. Issue #4: the FailureTracker outlives the
@@ -229,6 +316,15 @@ impl ToolExecutor {
                     pre_count,
                     self.tracker.threshold(),
                 );
+                self.audit_outcome(
+                    &call,
+                    &fp,
+                    &envelope,
+                    false,
+                    std::time::Duration::from_millis(0),
+                    Some(synthetic_err.error_code().to_string()),
+                )
+                .await?;
                 outcomes.push(ToolOutcome {
                     result: ToolResult {
                         call_id: call.id,
@@ -260,6 +356,15 @@ impl ToolExecutor {
                     pre_count,
                     self.tracker.threshold(),
                 );
+                self.audit_outcome(
+                    &call,
+                    &fp,
+                    &envelope,
+                    false,
+                    std::time::Duration::from_millis(0),
+                    Some(synthetic_err.error_code().to_string()),
+                )
+                .await?;
                 outcomes.push(ToolOutcome {
                     result: ToolResult {
                         call_id: call.id,
@@ -280,9 +385,11 @@ impl ToolExecutor {
             let registry = self.registry.clone();
             let token = cancel_token.clone();
             handles.push(tokio::spawn(async move {
-                let tool = registry.get(&call.name).ok_or_else(|| MukeiError::UnknownTool {
-                    tool_name: call.name.clone(),
-                })?;
+                let tool = registry
+                    .get(&call.name)
+                    .ok_or_else(|| MukeiError::UnknownTool {
+                        tool_name: call.name.clone(),
+                    })?;
                 let started = Instant::now();
                 let result = tokio::select! {
                     res = tool.run(call.arguments.clone()) => res,
@@ -316,10 +423,12 @@ impl ToolExecutor {
                     }
 
                     let repeat_output_notice = if no_progress {
-                        Some(crate::agent::tools::feedback::render_repeat_output_envelope(
-                            &call.name,
-                            self.policy.repeat_output_backoff,
-                        ))
+                        Some(
+                            crate::agent::tools::feedback::render_repeat_output_envelope(
+                                &call.name,
+                                self.policy.repeat_output_backoff,
+                            ),
+                        )
                     } else {
                         None
                     };
@@ -327,6 +436,8 @@ impl ToolExecutor {
                     // A success resets the failure streak for this
                     // (tool, fingerprint).
                     self.tracker.clear_fingerprint(&call.name, &fp);
+                    self.audit_outcome(&call, &fp, &out, true, took, None)
+                        .await?;
 
                     outcomes.push(ToolOutcome {
                         result: ToolResult {
@@ -337,7 +448,11 @@ impl ToolExecutor {
                             took,
                             trust: "computed".to_string(),
                         },
-                        failure_kind: if no_progress { Some(FailureKind::Abuse) } else { None },
+                        failure_kind: if no_progress {
+                            Some(FailureKind::Abuse)
+                        } else {
+                            None
+                        },
                         repeat_output_notice,
                         attempt: 0,
                     });
@@ -379,6 +494,15 @@ impl ToolExecutor {
                         attempt,
                         self.tracker.threshold(),
                     );
+                    self.audit_outcome(
+                        &call,
+                        &fp,
+                        &envelope,
+                        false,
+                        took,
+                        Some(err.error_code().to_string()),
+                    )
+                    .await?;
 
                     outcomes.push(ToolOutcome {
                         result: ToolResult {
@@ -430,7 +554,7 @@ mod tests {
         assert!(!t.record_failure("tool", &fp)); // 1
         assert!(!t.record_failure("tool", &fp)); // 2
         assert!(!t.record_failure("tool", &fp)); // 3 == threshold
-        assert!( t.record_failure("tool", &fp)); // 4 > threshold
+        assert!(t.record_failure("tool", &fp)); // 4 > threshold
     }
 
     #[test]
