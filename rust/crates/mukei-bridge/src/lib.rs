@@ -11,6 +11,35 @@
 //! into [`mukei_core::tools::ToolRegistry::with_web_search_keys`] so
 //! a typo becomes a compile error.
 
+mod agent_runtime;
+
+#[cfg(feature = "rusqlite")]
+use mukei_core::storage::saf as core_saf;
+
+#[cfg(not(feature = "rusqlite"))]
+mod core_saf {
+    #[derive(Clone, Debug, Default)]
+    pub struct SafRegistry;
+
+    #[derive(Clone, Debug)]
+    pub struct SafTokenRow {
+        pub token_id: String,
+        pub source:   String,
+        pub target:   String,
+        pub mime:     String,
+        pub revoked:  bool,
+        pub created:  chrono::DateTime<chrono::Utc>,
+    }
+
+    impl SafRegistry {
+        pub fn new() -> Self { Self }
+        pub fn count(&self) -> usize { 0 }
+        pub fn upsert(&self, _row: SafTokenRow) -> Result<(), ()> { Ok(()) }
+        pub fn revoke(&self, _token: &str) -> Result<(), ()> { Ok(()) }
+        pub fn resolve(&self, _token: &str) -> Result<String, ()> { Err(()) }
+    }
+}
+
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -20,8 +49,11 @@ use once_cell::sync::Lazy;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use mukei_core::storage::saf as core_saf;
+use mukei_core::agent::AgentLoop;
+use mukei_core::config::MukeiConfig;
+use mukei_core::ffi::tags::{TagEvents, TagsStreaming};
 use mukei_core::tools::ToolRegistry;
+use mukei_core::types::BranchId;
 
 static GLOBAL_SAF_REGISTRY: Lazy<Arc<core_saf::SafRegistry>> =
     Lazy::new(|| Arc::new(core_saf::SafRegistry::new()));
@@ -46,6 +78,20 @@ static GLOBAL_TOOL_REGISTRY: Lazy<Arc<Mutex<Arc<ToolRegistry>>>> = Lazy::new(|| 
     )))
 });
 
+/// Shared `Arc<AgentLoop>` — `None` until `initialize()` builds it.
+static GLOBAL_AGENT_LOOP: Lazy<Mutex<Option<Arc<AgentLoop>>>> =
+    Lazy::new(|| Mutex::new(None));
+
+/// Optional shared `DatabasePool` (gated behind `rusqlite`).
+#[cfg(feature = "rusqlite")]
+static GLOBAL_DATABASE_POOL: Lazy<Mutex<Option<Arc<mukei_core::storage::DatabasePool>>>> =
+    Lazy::new(|| Mutex::new(None));
+
+/// Shared validated config snapshot so we can rebuild the loop when web-search
+/// credentials rotate.
+static GLOBAL_CONFIG: Lazy<Mutex<Option<MukeiConfig>>> =
+    Lazy::new(|| Mutex::new(None));
+
 /// Bridge-side wrapped-secrets helper. The bridge crate is responsible
 /// for unwrapping the Keystore-protected ciphertext that arrives over
 /// the JNI boundary and handing the plaintext to the core; the
@@ -62,8 +108,26 @@ async fn rebuild_tool_registry_from_secrets() {
         .clone()
         .unwrap_or_else(|| "missing-tavily-key".to_string());
     let registry = Arc::new(ToolRegistry::with_web_search_keys(brave, tavily));
-    *GLOBAL_TOOL_REGISTRY.lock().await = registry;
+    *GLOBAL_TOOL_REGISTRY.lock().await = registry.clone();
     tracing::info!("tool registry rebuilt with wrapped-secrets keys");
+
+    let cfg_opt = GLOBAL_CONFIG.lock().await.clone();
+    if let Some(cfg) = cfg_opt {
+        #[cfg(feature = "rusqlite")]
+        {
+            if let Some(pool) = GLOBAL_DATABASE_POOL.lock().await.clone() {
+                let loop_handle = agent_runtime::build_agent_loop(&cfg, registry.clone(), pool);
+                *GLOBAL_AGENT_LOOP.lock().await = Some(loop_handle);
+                tracing::info!("agent loop rebuilt alongside tool registry");
+            }
+        }
+        #[cfg(not(feature = "rusqlite"))]
+        {
+            let loop_handle = agent_runtime::build_agent_loop(&cfg, registry.clone());
+            *GLOBAL_AGENT_LOOP.lock().await = Some(loop_handle);
+            tracing::info!("agent loop rebuilt alongside tool registry");
+        }
+    }
 }
 
 #[cxx_qt::bridge]
@@ -178,31 +242,18 @@ impl CxxQtType for MukeiBridgeRust {}
 impl CxxQtType for SafRegistryRust {}
 
 impl MukeiAgentRust {
-    /// Boot path. Loads `config.toml`, constructs the tool registry
-    /// with placeholder keys (the real keys arrive via
-    /// `MukeiBridge::set_brave_api_key` / `set_tavily_api_key` shortly
-    /// after), and transitions the state machine to `IDLE_READY`.
-    ///
-    /// Issues #13 / #14: the previous implementation discarded its
-    /// `config_path` argument and never touched `config.toml`, so the
-    /// `[agent]` section had zero runtime effect. The new path calls
-    /// `MukeiConfig::load_and_validate` and stores the result.
+    /// Boot path. Loads + validates `config.toml`, opens the SQLite /
+    /// SQLCipher pool, runs pending migrations, hydrates the SAF
+    /// registry from disk, reconciles persisted vector state, and
+    /// constructs the shared `Arc<AgentLoop>`.
     pub fn initialize(self: Pin<&mut Self>, config_path: QString) -> bool {
         let qt = self.qt_thread();
         let state = self.state.clone();
         let config_path = config_path.to_string();
         mukei_core::runtime::get().spawn(async move {
-            // Load + validate the config off the bridge thread. Failure
-            // is surfaced via `error_occurred`; the state machine stays
-            // in UNINITIALIZED so QML knows the bridge is unsafe to use.
-            match mukei_core::config::MukeiConfig::load_and_validate(std::path::Path::new(&config_path)) {
-                Ok(cfg) => {
-                    tracing::info!(?cfg.gpu_layers, n_ctx = cfg.n_ctx, "config loaded");
-                    // Build the initial registry (keys arrive later via
-                    // wrapped-secrets setters). Rebuild on every key
-                    // change so the next tool call observes them.
-                    rebuild_tool_registry_from_secrets().await;
-                }
+            let cfg_path = std::path::PathBuf::from(&config_path);
+            let cfg = match agent_runtime::load_config(&cfg_path) {
+                Ok(c) => c,
                 Err(e) => {
                     let code = e.error_code().to_string();
                     let msg = e.to_string();
@@ -213,6 +264,64 @@ impl MukeiAgentRust {
                     });
                     return;
                 }
+            };
+            tracing::info!(
+                ?cfg.gpu_layers, n_ctx = cfg.n_ctx,
+                max_iterations = cfg.watchdog.max_iterations,
+                "config loaded"
+            );
+            *GLOBAL_CONFIG.lock().await = Some(cfg.clone());
+
+            rebuild_tool_registry_from_secrets().await;
+
+            #[cfg(feature = "rusqlite")]
+            {
+                let pool = match agent_runtime::open_pool(&cfg).await {
+                    Ok(p) => Arc::new(p),
+                    Err(e) => {
+                        let code = e.error_code().to_string();
+                        let msg = e.to_string();
+                        let _ = qt.queue(move |mut qobject| {
+                            qobject
+                                .as_mut()
+                                .error_occurred(QString::from(code), QString::from(msg));
+                        });
+                        return;
+                    }
+                };
+                *GLOBAL_DATABASE_POOL.lock().await = Some(pool.clone());
+
+                if let Err(e) = agent_runtime::hydrate_saf_registry(&GLOBAL_SAF_REGISTRY, &pool).await {
+                    tracing::warn!(error = %e, "SafRegistry hydration failed; starting empty");
+                }
+
+                match agent_runtime::reconcile_vector_store(&cfg, &pool).await {
+                    Ok(report) => {
+                        tracing::info!(
+                            orphan_sql_rows = report.orphan_sql_rows.len(),
+                            orphan_vectors = report.orphan_vectors.len(),
+                            total_sql_rows = report.total_sql_rows,
+                            total_vectors = report.total_vectors,
+                            "boot-time RAG reconciliation completed"
+                        );
+                        if !report.orphan_sql_rows.is_empty() || !report.orphan_vectors.is_empty() {
+                            tracing::warn!(?report, "RAG SQL/vector mismatch detected on boot; re-index recommended");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "RAG reconciliation failed during boot; continuing without blocking startup");
+                    }
+                }
+
+                let registry_arc = GLOBAL_TOOL_REGISTRY.lock().await.clone();
+                let loop_handle = agent_runtime::build_agent_loop(&cfg, registry_arc, pool.clone());
+                *GLOBAL_AGENT_LOOP.lock().await = Some(loop_handle);
+            }
+            #[cfg(not(feature = "rusqlite"))]
+            {
+                let registry_arc = GLOBAL_TOOL_REGISTRY.lock().await.clone();
+                let loop_handle = agent_runtime::build_agent_loop(&cfg, registry_arc);
+                *GLOBAL_AGENT_LOOP.lock().await = Some(loop_handle);
             }
 
             *state.lock().await = "IDLE_READY".to_string();
@@ -231,18 +340,23 @@ impl MukeiAgentRust {
         let ui_thread = qt_thread.clone();
 
         mukei_core::runtime::get().spawn(async move {
+            let mut tags = TagsStreaming::new();
             while let Some(chunk) = chunk_rx.recv().await {
                 if chunk == "\u{0001}STREAM_FINAL\u{0001}" {
+                    if tags.is_open() {
+                        let _ = ui_thread.queue(|mut qobject| qobject.as_mut().thinking_completed());
+                        tags.reset();
+                    }
                     let _ = ui_thread.queue(|mut qobject| qobject.as_mut().stream_finalized());
                     continue;
                 }
-                if chunk == "\u{0001}THINKING_STARTED\u{0001}" {
+
+                let events = tags.push(&chunk);
+                if events.contains(TagEvents::OPENED) {
                     let _ = ui_thread.queue(|mut qobject| qobject.as_mut().thinking_started());
-                    continue;
                 }
-                if chunk == "\u{0001}THINKING_COMPLETED\u{0001}" {
+                if events.contains(TagEvents::CLOSED) {
                     let _ = ui_thread.queue(|mut qobject| qobject.as_mut().thinking_completed());
-                    continue;
                 }
                 let _ = ui_thread.queue(move |mut qobject| {
                     qobject.as_mut().chunk_generated(QString::from(&chunk));
@@ -252,15 +366,29 @@ impl MukeiAgentRust {
 
         mukei_core::runtime::get().spawn(async move {
             let _ = qt_thread.queue(|mut qobject| qobject.as_mut().state_changed(QString::from("INFERRING")));
-            let _ = chunk_tx.send("\u{0001}THINKING_STARTED\u{0001}".to_string()).await;
-            let result = mukei_core::engine::llama_wrapper::run_inference(&input, cancel_token, chunk_tx.clone()).await;
-            let _ = chunk_tx.send("\u{0001}THINKING_COMPLETED\u{0001}".to_string()).await;
-            if let Err(error) = result {
-                let code = error.error_code().to_string();
-                let message = error.to_string();
-                let _ = qt_thread.queue(move |mut qobject| {
-                    qobject.as_mut().error_occurred(QString::from(code), QString::from(message));
-                });
+
+            let loop_handle = { GLOBAL_AGENT_LOOP.lock().await.clone() };
+            match loop_handle {
+                Some(handle) => {
+                    let result = handle
+                        .run(input, BranchId::default(), cancel_token, chunk_tx.clone())
+                        .await;
+                    if let Err(error) = result {
+                        let code = error.error_code().to_string();
+                        let message = error.to_string();
+                        let _ = qt_thread.queue(move |mut qobject| {
+                            qobject.as_mut().error_occurred(QString::from(code), QString::from(message));
+                        });
+                    }
+                }
+                None => {
+                    let _ = qt_thread.queue(|mut qobject| {
+                        qobject.as_mut().error_occurred(
+                            QString::from("BRIDGE_NOT_INITIALIZED"),
+                            QString::from("AgentLoop was never constructed — call MukeiAgent.initialize(config_path) first."),
+                        );
+                    });
+                }
             }
             let _ = chunk_tx.send("\u{0001}STREAM_FINAL\u{0001}".to_string()).await;
             let _ = qt_thread.queue(|mut qobject| qobject.as_mut().state_changed(QString::from("IDLE_READY")));
@@ -341,56 +469,59 @@ impl MukeiBridgeRust {
 
 impl SafRegistryRust {
     pub fn upsert_grant(self: Pin<&mut Self>, token: QString, target: QString, mime: QString) -> bool {
-        #[cfg(feature = "rusqlite")]
-        {
-            let row = core_saf::SafTokenRow {
-                token_id: token.to_string(),
-                source: "jni".to_string(),
-                target: target.to_string(),
-                mime: mime.to_string(),
-                revoked: false,
-                created: chrono::Utc::now(),
-            };
-            return GLOBAL_SAF_REGISTRY.upsert(row).is_ok();
-        }
-        #[cfg(not(feature = "rusqlite"))]
-        {
-            let _ = (token, target, mime);
-            false
-        }
+        let row = core_saf::SafTokenRow {
+            token_id: token.to_string(),
+            source:   "jni".to_string(),
+            target:   target.to_string(),
+            mime:     mime.to_string(),
+            revoked:  false,
+            created:  chrono::Utc::now(),
+        };
+        mukei_core::runtime::get().spawn(async move {
+            let _ = GLOBAL_SAF_REGISTRY.upsert(row.clone());
+            #[cfg(feature = "rusqlite")]
+            {
+                let pool = GLOBAL_DATABASE_POOL.lock().await.clone();
+                if let Some(p) = pool {
+                    if let Err(e) = GLOBAL_SAF_REGISTRY.persist_upsert(&p, row).await {
+                        tracing::warn!(error = %e, "SAF grant persist_upsert failed; in-memory mirror will diverge until restart");
+                    }
+                }
+            }
+        });
+        true
     }
 
     pub fn resolve_token(self: Pin<&mut Self>, token: QString) -> QString {
-        #[cfg(feature = "rusqlite")]
-        {
-            return GLOBAL_SAF_REGISTRY
-                .resolve(&token.to_string())
-                .map(QString::from)
-                .unwrap_or_else(|_| QString::from(""));
-        }
-        #[cfg(not(feature = "rusqlite"))]
-        {
-            let _ = token;
-            QString::from("")
-        }
+        GLOBAL_SAF_REGISTRY
+            .resolve(&token.to_string())
+            .map(QString::from)
+            .unwrap_or_else(|_| QString::from(""))
     }
 
     pub fn revoke_token(self: Pin<&mut Self>, token: QString) -> bool {
-        #[cfg(feature = "rusqlite")]
-        {
-            let qt = self.qt_thread();
-            let token_string = token.to_string();
-            if GLOBAL_SAF_REGISTRY.revoke(&token_string).is_ok() {
-                let _ = qt.queue(move |mut qobject| qobject.as_mut().token_revoked(QString::from(token_string)));
-                return true;
+        let qt = self.qt_thread();
+        let token_string = token.to_string();
+        let qt_clone = qt.clone();
+        mukei_core::runtime::get().spawn(async move {
+            let _ = GLOBAL_SAF_REGISTRY.revoke(&token_string);
+            #[cfg(feature = "rusqlite")]
+            {
+                let pool = GLOBAL_DATABASE_POOL.lock().await.clone();
+                if let Some(p) = pool {
+                    if let Err(e) = GLOBAL_SAF_REGISTRY
+                        .persist_revoke(&p, &token_string, "user_revoke")
+                        .await
+                    {
+                        tracing::warn!(error = %e, "SAF token persist_revoke failed; in-memory mirror will diverge until restart");
+                    }
+                }
             }
-            return false;
-        }
-        #[cfg(not(feature = "rusqlite"))]
-        {
-            let _ = token;
-            false
-        }
+            let _ = qt_clone.queue(move |mut qobject| {
+                qobject.as_mut().token_revoked(QString::from(token_string));
+            });
+        });
+        true
     }
 
     pub fn count(self: Pin<&mut Self>) -> i32 {

@@ -104,16 +104,18 @@ impl TagsStreaming {
                     self.opened = false;
                     events |= TagEvents::CLOSED;
                     let close_end = pos + close.len();
-                    debug_assert!(self.window.is_char_boundary(close_end));
+                    let mut consumed = self.window[..close_end].to_string();
+                    Self::truncate_safe(&mut consumed, close_end);
                     // Drop everything up to AND INCLUDING the close tag
                     // itself, but keep whatever followed it.
-                    self.window.drain(..close_end);
+                    self.window.drain(..consumed.len());
                     progressed = true;
                 }
             } else if let Some(pos) = self.window.find(open.as_str()) {
                 let end = pos + open.len();
-                debug_assert!(self.window.is_char_boundary(end));
-                self.window.drain(..end);
+                let mut consumed = self.window[..end].to_string();
+                Self::truncate_safe(&mut consumed, end);
+                self.window.drain(..consumed.len());
                 self.opened = true;
                 events |= TagEvents::OPENED;
                 progressed = true;

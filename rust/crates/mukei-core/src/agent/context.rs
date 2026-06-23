@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::tools::sentinel::escape_untrusted;
-use crate::types::ChatMessage;
+use crate::types::{ChatMessage, Role};
 
 /// Outcome of a single [`ContextBudgetManager::build_for`] call.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -131,10 +131,17 @@ impl ContextBudgetManager {
             }
             out.push_str("\n</external_data>\n\n");
         }
-        // History interpolation: `content` is mixed-trust (user + assistant +
-        // tool). The role tag is from a closed Rust enum so it is safe.
+        // History interpolation: `content` is mixed-trust.
+        //   * `Role::User` / `Role::Assistant`: free text — MUST be escaped.
+        //   * `Role::Tool`: already a finished, safely-built envelope by
+        //     construction. Re-escaping would mangle the trust markers.
+        //   * `Role::System` / `Role::RedTeam`: written by Rust code.
         for m in &combined {
-            out.push_str(&format!("[{:?}]: {}\n", m.role, escape_untrusted(&m.content)));
+            let rendered: std::borrow::Cow<'_, str> = match m.role {
+                Role::User | Role::Assistant => escape_untrusted(&m.content),
+                Role::Tool | Role::System | Role::RedTeam => std::borrow::Cow::Borrowed(&m.content),
+            };
+            out.push_str(&format!("[{:?}]: {}\n", m.role, rendered));
         }
 
         Ok(out)
@@ -186,5 +193,37 @@ mod tests {
         }];
         let out = mgr.build_for(&input).await.unwrap();
         assert!(out.contains("[User]: hi"));
+    }
+
+    #[tokio::test]
+    async fn tool_envelope_does_not_get_double_escaped_on_replay() {
+        let envelope = concat!(
+            "<external_data source=\"web_search\" trust=\"untrusted\">\n",
+            "[1] &lt;script&gt;alert(1)&lt;/script&gt;\n",
+            "</external_data>",
+        );
+
+        let msg = ChatMessage {
+            id: MessageId::default(),
+            role: Role::Tool,
+            branch: BranchId::default(),
+            is_active: true,
+            created_at: chrono::Utc::now(),
+            content: envelope.into(),
+            parent: None,
+            token_count: None,
+        };
+
+        let mgr = ContextBudgetManager::new(
+            Arc::new(StaticBackend),
+            Arc::new(FixLenTokens(0)),
+            4096,
+        );
+        let rendered = mgr.build_for(std::slice::from_ref(&msg)).await.unwrap();
+
+        assert!(rendered.contains("[Tool]: <external_data"), "outer tag must round-trip literally, got:\n{rendered}");
+        assert!(!rendered.contains("&lt;external_data"), "outer tag must not be re-escaped, got:\n{rendered}");
+        assert!(rendered.contains("&lt;script&gt;"), "inner escapes from first turn must stay at depth 1, got:\n{rendered}");
+        assert!(!rendered.contains("&amp;lt;"), "inner escapes must NOT be doubled to &amp;lt;, got:\n{rendered}");
     }
 }
