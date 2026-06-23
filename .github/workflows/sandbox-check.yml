@@ -102,6 +102,70 @@ jobs:
             exit 1
           fi
 
+      - name: P7 — every untrusted <external_data> interpolation must be sentinel-escaped
+        run: |
+          # Issue #1: untrusted strings interpolated into
+          # <external_data> wrappers MUST flow through
+          # crate::tools::sentinel::escape_untrusted, otherwise a
+          # hostile web page / RAG snippet can forge a closing tag and
+          # impersonate a trust="trusted" block.
+          #
+          # The four production interpolation sites are:
+          #   tools/web_search.rs
+          #   tools/file_tool.rs
+          #   agent/context.rs       (RAG block)
+          #   agent/tools/feedback.rs
+          # Every one of them must `use crate::tools::sentinel::escape_untrusted;`.
+          missing=$(for f in \
+            rust/crates/mukei-core/src/tools/web_search.rs \
+            rust/crates/mukei-core/src/tools/file_tool.rs \
+            rust/crates/mukei-core/src/agent/context.rs \
+            rust/crates/mukei-core/src/agent/tools/feedback.rs ; do
+            if ! grep -q 'tools::sentinel::escape_untrusted' "$f" ; then
+              echo "$f"
+            fi
+          done)
+          if [ -n "$missing" ]; then
+            echo "::error::Untrusted <external_data> interpolation site is missing escape_untrusted import (Issue #1):"
+            echo "$missing"
+            exit 1
+          fi
+
+      - name: P8 — agent loop must not propagate ? from validator/parse paths
+        run: |
+          # Issue #10: parse / validation errors must be converted to
+          # structured `tool_error` envelopes, not propagated via `?`
+          # to abort the whole turn.
+          violation=$(grep -nE 'parse_gbnf_output\(&assistant_text\)\?|validate_tool_calls\([a-z_]+\)\?' rust/crates/mukei-core/src/agent/loop_.rs || true)
+          if [ -n "$violation" ]; then
+            echo "::error::AgentLoop::run hard-aborts on parse/validate failure — REQ-AGT-04 mandates graceful degrade via structured envelope (Issue #10)."
+            echo "$violation"
+            exit 1
+          fi
+
+      - name: P9 — duplicate MAX_FAILURES_PER_TOOL constant must stay deleted
+        run: |
+          # Issue #18: two `MAX_FAILURES_PER_TOOL` constants with
+          # DIFFERENT VALUES existed in the codebase. The one under
+          # `crate::tools` (stale value `2`) was removed. CI defends
+          # against accidental reintroduction.
+          if grep -nE '^[[:space:]]*pub const MAX_FAILURES_PER_TOOL' rust/crates/mukei-core/src/tools/mod.rs ; then
+            echo "::error::tools/mod.rs reintroduced the duplicate MAX_FAILURES_PER_TOOL constant — Issue #18. Use ToolExecutionPolicy::max_failures_per_tool."
+            exit 1
+          fi
+
+      - name: P10 — PermissionMatrix must cover every ALLOWED_TOOLS entry
+        run: |
+          # Issue scaffold (user priority #4): the permission matrix is
+          # the authoritative declaration of what each tool can do. Any
+          # new tool added to ALLOWED_TOOLS must also gain a row in the
+          # default matrix; the unit test enforces this, but CI fails
+          # fast on the structural mismatch even if tests are skipped.
+          if [ ! -f rust/crates/mukei-core/src/tools/permission.rs ]; then
+            echo "::error::PermissionMatrix scaffold file is missing."
+            exit 1
+          fi
+
       - name: P6 — every FailureKind variant must have a remediation hint
         run: |
           # Each variant's hint is what the LLM sees on failure. A blank

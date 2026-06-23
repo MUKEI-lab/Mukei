@@ -317,6 +317,18 @@ impl VectorStore {
         self.inner.lock().vectors.len()
     }
 
+    /// Snapshot of every `chunk_id` currently in the store. Used by
+    /// [`crate::rag::indexer::reconcile`] (Issue #11) to find SQL
+    /// rows whose vector was lost in a partial commit.
+    pub fn chunk_ids(&self) -> Vec<u64> {
+        self.inner
+            .lock()
+            .vectors
+            .iter()
+            .map(|(id, _, _)| *id)
+            .collect()
+    }
+
     /// Save atomically. Writes to `<path>.<ATOMIC_SUFFIX>` first, then
     /// renames over the live path. Crash-between leaves the live file
     /// untouched.

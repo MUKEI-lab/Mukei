@@ -92,16 +92,22 @@ impl TagsStreaming {
             let mut progressed = false;
             if self.opened {
                 if let Some(pos) = self.window.find(close.as_str()) {
-                    Self::truncate_safe(&mut self.window, pos);
+                    // Issue #8: the previous implementation called
+                    // `self.window.clear()` here, which wiped ALL text
+                    // that arrived after `</think>` in the same chunk.
+                    // A model emitting `</think>Hello!` in one push
+                    // would silently lose `Hello!`. We now keep the
+                    // tail (`pos + close.len()` onwards) so a
+                    // subsequent open within the same chunk is still
+                    // detected AND the answer text following the close
+                    // tag survives.
                     self.opened = false;
                     events |= TagEvents::CLOSED;
-                    // Drop the close tag itself from the window so a
-                    // subsequent open within the same chunk is detected.
-                    let after = (pos + close.len()).min(self.window.len());
-                    if after <= self.window.len() {
-                        // window was truncated to `pos`; nothing more to drain
-                    }
-                    self.window.clear();
+                    let close_end = pos + close.len();
+                    debug_assert!(self.window.is_char_boundary(close_end));
+                    // Drop everything up to AND INCLUDING the close tag
+                    // itself, but keep whatever followed it.
+                    self.window.drain(..close_end);
                     progressed = true;
                 }
             } else if let Some(pos) = self.window.find(open.as_str()) {
@@ -178,6 +184,25 @@ mod tests {
         let ev = d.push(&chunk2);
         assert!(ev.contains(TagEvents::CLOSED));
         assert!(!d.is_open());
+    }
+
+    #[test]
+    fn close_tag_does_not_eat_trailing_text_in_same_chunk() {
+        // Issue #8 regression: the previous `self.window.clear()` on the
+        // close branch wiped any text after `</think>` in the same chunk.
+        // A model emitting `</think>visible answer` in one push would
+        // silently lose `visible answer`. The new code drains only up
+        // to the close tag's end, preserving the tail in the window
+        // for subsequent state transitions.
+        let mut d = TagsStreaming::new();
+        let combined = format!("{}thinking aloud{} now a new open: {}", open(), close(), open());
+        let ev = d.push(&combined);
+        // The same chunk should report ALL of: opened, closed, opened.
+        assert!(ev.contains(TagEvents::OPENED));
+        assert!(ev.contains(TagEvents::CLOSED));
+        // We end up open again because the second `<think>` follows the
+        // close in the same window.
+        assert!(d.is_open());
     }
 
     #[test]

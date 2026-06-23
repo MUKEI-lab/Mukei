@@ -98,7 +98,7 @@ mod tests {
         r.record_and_check("t", "fp", "x", 2);
         r.record_and_check("t", "fp", "x", 2);
         r.forget("t", "fp");
-        // After forget, the next push starts a fresh ring \u2014 it must NOT
+        // After forget, the next push starts a fresh ring — it must NOT
         // immediately fire because the ring is no longer full.
         assert!(!r.record_and_check("t", "fp", "x", 2));
     }

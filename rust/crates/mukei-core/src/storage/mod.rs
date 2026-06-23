@@ -27,6 +27,8 @@
 //! even on hosts where SQLite is not desirable.
 
 #[cfg(feature = "rusqlite")]
+pub mod audit_log;
+#[cfg(feature = "rusqlite")]
 pub mod migrations;
 #[cfg(feature = "rusqlite")]
 pub mod pool;
@@ -35,6 +37,8 @@ pub mod recovery;
 #[cfg(feature = "rusqlite")]
 pub mod saf;
 
+#[cfg(feature = "rusqlite")]
+pub use audit_log::{AuditEntry, AuditLogWriter};
 #[cfg(feature = "rusqlite")]
 pub use migrations::{MigrationRecord, Migrator, MIGRATIONS_DIR, MIGRATION_FILE_PREFIX};
 #[cfg(feature = "rusqlite")]

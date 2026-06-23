@@ -88,14 +88,28 @@ cargo test -p mukei-ffi-shim  --lib
 Current run:
 
 ```
-mukei-core      145 unit + 12 integration
+mukei-core      160 unit + 12 integration
 mukei-ffi-shim    2 unit
                 ────────────────────
-                159 passed total
+                174 passed total
 ```
 
 Verified invariants:
 
+- **Issue #1 (REQ-SEC-04 strengthened).** Every untrusted string interpolated into a `<external_data>` wrapper is passed through [`crate::tools::sentinel::escape_untrusted`](rust/crates/mukei-core/src/tools/sentinel.rs). A hostile web page / file / RAG snippet cannot forge a closing tag and impersonate a `trust="trusted"` block.
+- **Issue #9 / #10 (REQ-AGT-04 strengthened).** The agent loop never hard-aborts on tool-call parse / validation errors. Malformed calls become structured `tool_error` envelopes; valid calls in a mixed batch still execute. Abuse-blocked fingerprints are caught BEFORE dispatch so a maxed-out tool never burns network / disk again.
+- **Issues #4 / #5 / #6 / #7 (per-turn reset).** `AgentLoop::run` rearms the wall-clock watchdog, clears the failure tracker + same-output ring, and resets `HardwareTool` cache generation at the top of every invocation. State no longer leaks across turns / conversations.
+- **Issue #2 (SAF + audit log persistence).** SAF grants persist through `saf_tokens` via [`SafRegistry::persist_upsert`](rust/crates/mukei-core/src/storage/saf.rs); tool-call rows are written through the hash-chained [`AuditLogWriter`](rust/crates/mukei-core/src/storage/audit_log.rs).
+- **Issue #3 (wrapped-secrets key delivery).** Brave / Tavily API keys flow `Bridge → with_keys → SearchPlanner` directly. No process env vars; a typo is a compile error.
+- **Issue #11 (RAG reconciliation).** Boot-time [`rag::reconcile`](rust/crates/mukei-core/src/rag/indexer.rs) walks `chunks` rows and the vector store and reports orphans created by mid-commit kills.
+- **Issue #12 (migration gap check).** `Migrator::verify_order` runs the contiguity check **unconditionally**; a `[1,3]` applied set cannot quietly receive migration 4 anymore.
+- **Issue #13 / #14 (config wiring).** `MukeiConfig::load_and_validate` runs in `MukeiAgent::initialize`; `AgentCfg → ToolExecutionPolicy` conversion lets `config.toml::[agent]` actually take effect.
+- **Issue #15 (O(n) context trim).** Per-message tokens are computed once and the running total is decremented on each trim; the RAG block's own tokens count against `max_tokens`.
+- **Issue #16 (math timeout slot release).** On timeout, `JoinHandle::abort()` is called so `TOOL_BLOCKING_SLOTS` is reaped instead of leaked.
+- **Issue #17 (embedder soundness).** `CandleMiniLmEmbedder::embed` no longer casts `&self` to `usize` for `spawn_blocking`; an explicit `clone_for_blocking` keeps the model alive via candle's internal Arc-sharing.
+- **Issue #18 / #19 / #20 (hygiene).** Duplicate `MAX_FAILURES_PER_TOOL` constant deleted; `MukeiError::classification` is exhaustive (no silent `_ => Unknown`); the stale `ToolResult::ok` hard-abort doc comment is gone.
+- **Issue #8 (TagsStreaming).** Close-tag branch no longer wipes text following `</think>` in the same chunk; tail is preserved so a same-chunk follow-up open is still detected and visible answer text survives.
+- **PermissionMatrix scaffold.** [`crate::tools::permission::PermissionMatrix`](rust/crates/mukei-core/src/tools/permission.rs) declares per-tool `Capability` requirements (Internet / DiskRead / DeviceState / SandboxEval / …). Covers every tool in `ALLOWED_TOOLS` (enforced by unit test).
 - **Migration §2 — No DuckDuckGo.** Production search uses Brave + Tavily only, picked per task by the adaptive [`SearchPlanner`](rust/crates/mukei-core/src/search/planner.rs). A compile-time tripwire + CI guard reject any reintroduction.
 - **Migration §3-13 — Adaptive Search Planner.** Intent analysis → task split → classification → engine selection → ranking → trust gating → cache. No unconditional fan-out, per-engine timeouts (Brave 3s / Tavily 5s).
 - **PRD REQ-RAG-01 / -02 / -03.** Real candle-backed MiniLM embedder, optional usearch HNSW backend, embedder-swap detection (`StoreHeader`), shred / forget functionality.
@@ -144,7 +158,7 @@ Mukei/
 │   ├── Cargo.toml               ← panic = "unwind" pinned on every profile
 │   ├── README.md                ← engineering README
 │   ├── crates/
-│   │   ├── mukei-core/          ← pure-Rust kernel · 68 tests
+│   │   ├── mukei-core/          ← pure-Rust kernel · 160 unit + 12 integration tests
 │   │   ├── mukei-bridge/        ← CXX-Qt + JNI surface (Qt host required)
 │   │   ├── mukei-ffi-shim/      ← manual extern "C" escape hatch · 2 tests
 │   │   └── llama-cpp-stub/      ← workspace placeholder for the vendor build

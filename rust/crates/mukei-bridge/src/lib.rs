@@ -1,4 +1,15 @@
 //! CXX-Qt bridge — TRD §1.2 / §1.3 / §9.4.
+//!
+//! # Wrapped-secrets registry (Issue #3, user priority #1)
+//!
+//! The bridge owns three global Tokio-locked slots for the wrapped
+//! Brave / Tavily API keys and a `ToolRegistry` whose `WebSearchTool`
+//! is rebuilt every time a key arrives. The old design read process
+//! env vars (`BRAVE_API_KEY`) while the bridge wrote a different name
+//! (`CIPHER_BRAVE_API_KEY`); the names never met, so search never
+//! actually worked. The new design passes the unwrapped keys directly
+//! into [`mukei_core::tools::ToolRegistry::with_web_search_keys`] so
+//! a typo becomes a compile error.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -10,13 +21,50 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use mukei_core::storage::saf as core_saf;
+use mukei_core::tools::ToolRegistry;
 
 static GLOBAL_SAF_REGISTRY: Lazy<Arc<core_saf::SafRegistry>> =
     Lazy::new(|| Arc::new(core_saf::SafRegistry::new()));
 static GLOBAL_THERMAL_STATUS: Lazy<Arc<Mutex<i32>>> =
     Lazy::new(|| Arc::new(Mutex::new(0)));
-static GLOBAL_CIPHER_API_KEY: Lazy<Arc<Mutex<Option<String>>>> =
+
+/// Wrapped-secrets registry. The unwrap step (`feature = "android_keystore"`)
+/// happens in the bridge and the *plaintext* lives only inside this
+/// mutex — the QString that arrives from QML is overwritten before
+/// being passed any further.
+static GLOBAL_BRAVE_API_KEY: Lazy<Arc<Mutex<Option<String>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
+static GLOBAL_TAVILY_API_KEY: Lazy<Arc<Mutex<Option<String>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(None)));
+
+/// Tool registry shared across every `send_message` invocation. Rebuilt
+/// whenever the Brave or Tavily key changes so the next tool call sees
+/// the new credentials without restarting the agent loop.
+static GLOBAL_TOOL_REGISTRY: Lazy<Arc<Mutex<Arc<ToolRegistry>>>> = Lazy::new(|| {
+    Arc::new(Mutex::new(Arc::new(
+        ToolRegistry::with_web_search_keys("missing-brave-key", "missing-tavily-key"),
+    )))
+});
+
+/// Bridge-side wrapped-secrets helper. The bridge crate is responsible
+/// for unwrapping the Keystore-protected ciphertext that arrives over
+/// the JNI boundary and handing the plaintext to the core; the
+/// plaintext never returns to Java.
+async fn rebuild_tool_registry_from_secrets() {
+    let brave = GLOBAL_BRAVE_API_KEY
+        .lock()
+        .await
+        .clone()
+        .unwrap_or_else(|| "missing-brave-key".to_string());
+    let tavily = GLOBAL_TAVILY_API_KEY
+        .lock()
+        .await
+        .clone()
+        .unwrap_or_else(|| "missing-tavily-key".to_string());
+    let registry = Arc::new(ToolRegistry::with_web_search_keys(brave, tavily));
+    *GLOBAL_TOOL_REGISTRY.lock().await = registry;
+    tracing::info!("tool registry rebuilt with wrapped-secrets keys");
+}
 
 #[cxx_qt::bridge]
 pub mod ffi {
@@ -66,8 +114,14 @@ pub mod ffi {
         #[qsignal]
         fn saf_grant_revoked(self: Pin<&mut MukeiBridge>, token: QString);
 
+        // Wrapped-secrets API — each setter accepts the UNWRAPPED key
+        // material (the bridge unwraps via Android Keystore *before*
+        // calling these). The names match the wrapped-secrets registry
+        // slots in `config.toml::wrapped_secrets`.
         #[qinvokable]
-        fn set_cipher_api_key(self: Pin<&mut MukeiBridge>, api_key: QString);
+        fn set_brave_api_key(self: Pin<&mut MukeiBridge>, api_key: QString);
+        #[qinvokable]
+        fn set_tavily_api_key(self: Pin<&mut MukeiBridge>, api_key: QString);
         #[qinvokable]
         fn note_thermal_status(self: Pin<&mut MukeiBridge>, status: i32);
         #[qinvokable]
@@ -124,10 +178,43 @@ impl CxxQtType for MukeiBridgeRust {}
 impl CxxQtType for SafRegistryRust {}
 
 impl MukeiAgentRust {
-    pub fn initialize(self: Pin<&mut Self>, _config_path: QString) -> bool {
+    /// Boot path. Loads `config.toml`, constructs the tool registry
+    /// with placeholder keys (the real keys arrive via
+    /// `MukeiBridge::set_brave_api_key` / `set_tavily_api_key` shortly
+    /// after), and transitions the state machine to `IDLE_READY`.
+    ///
+    /// Issues #13 / #14: the previous implementation discarded its
+    /// `config_path` argument and never touched `config.toml`, so the
+    /// `[agent]` section had zero runtime effect. The new path calls
+    /// `MukeiConfig::load_and_validate` and stores the result.
+    pub fn initialize(self: Pin<&mut Self>, config_path: QString) -> bool {
         let qt = self.qt_thread();
         let state = self.state.clone();
+        let config_path = config_path.to_string();
         mukei_core::runtime::get().spawn(async move {
+            // Load + validate the config off the bridge thread. Failure
+            // is surfaced via `error_occurred`; the state machine stays
+            // in UNINITIALIZED so QML knows the bridge is unsafe to use.
+            match mukei_core::config::MukeiConfig::load_and_validate(std::path::Path::new(&config_path)) {
+                Ok(cfg) => {
+                    tracing::info!(?cfg.gpu_layers, n_ctx = cfg.n_ctx, "config loaded");
+                    // Build the initial registry (keys arrive later via
+                    // wrapped-secrets setters). Rebuild on every key
+                    // change so the next tool call observes them.
+                    rebuild_tool_registry_from_secrets().await;
+                }
+                Err(e) => {
+                    let code = e.error_code().to_string();
+                    let msg = e.to_string();
+                    let _ = qt.queue(move |mut qobject| {
+                        qobject
+                            .as_mut()
+                            .error_occurred(QString::from(code), QString::from(msg));
+                    });
+                    return;
+                }
+            }
+
             *state.lock().await = "IDLE_READY".to_string();
             let _ = qt.queue(|mut qobject| {
                 qobject.as_mut().state_changed(QString::from("IDLE_READY"));
@@ -214,12 +301,27 @@ impl MukeiAgentRust {
 }
 
 impl MukeiBridgeRust {
-    pub fn set_cipher_api_key(self: Pin<&mut Self>, api_key: QString) {
-        let store = GLOBAL_CIPHER_API_KEY.clone();
+    /// Inject the unwrapped Brave API key and rebuild the shared tool
+    /// registry so the next `web_search` call uses the new credential.
+    /// (Issue #3.)
+    pub fn set_brave_api_key(self: Pin<&mut Self>, api_key: QString) {
+        let store = GLOBAL_BRAVE_API_KEY.clone();
         let api_key = api_key.to_string();
-        std::env::set_var("CIPHER_BRAVE_API_KEY", &api_key);
         mukei_core::runtime::get().spawn(async move {
             *store.lock().await = Some(api_key);
+            rebuild_tool_registry_from_secrets().await;
+        });
+    }
+
+    /// Inject the unwrapped Tavily API key (Issue #3). Symmetric with
+    /// `set_brave_api_key` — the previous bridge had no Tavily setter
+    /// at all.
+    pub fn set_tavily_api_key(self: Pin<&mut Self>, api_key: QString) {
+        let store = GLOBAL_TAVILY_API_KEY.clone();
+        let api_key = api_key.to_string();
+        mukei_core::runtime::get().spawn(async move {
+            *store.lock().await = Some(api_key);
+            rebuild_tool_registry_from_secrets().await;
         });
     }
 

@@ -30,10 +30,16 @@ use crate::error::{MukeiError, Result};
 pub mod file_tool;
 pub mod hardware;
 pub mod math;
+pub mod permission;
+pub mod sentinel;
 pub mod validator;
 pub mod web_search;
 
-pub const MAX_FAILURES_PER_TOOL: usize = 2;
+// NOTE: the `MAX_FAILURES_PER_TOOL` constant that used to live here held a
+// stale value (`2`) that disagreed with the audit-recommended threshold
+// (`5`) defined by [`crate::agent::tools::ToolExecutionPolicy`]. It was
+// deleted in Issue #18 to remove the grep-trap. Use
+// `ToolExecutionPolicy::max_failures_per_tool` instead.
 pub const ALLOWED_TOOLS: &[&str] = &[
     "web_search",
     "read_file",
@@ -72,6 +78,23 @@ impl ToolRegistry {
     pub fn with_file_tool(file_tool: file_tool::FileTool) -> Self {
         let mut registry = Self::new();
         registry.register(file_tool);
+        registry
+    }
+
+    /// Bridge entry point: build the registry with a `WebSearchTool`
+    /// whose planner has the wrapped-secrets-derived API keys injected
+    /// (Issue #3). All other tools are constructed with their defaults.
+    pub fn with_web_search_keys(
+        brave_key: impl Into<String>,
+        tavily_key: impl Into<String>,
+    ) -> Self {
+        let mut registry = Self {
+            inner: HashMap::new(),
+        };
+        registry.register(web_search::WebSearchTool::with_keys(brave_key, tavily_key));
+        registry.register(file_tool::FileTool::default());
+        registry.register(hardware::HardwareTool::default());
+        registry.register(math::MathTool::default());
         registry
     }
 

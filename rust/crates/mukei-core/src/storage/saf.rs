@@ -51,6 +51,112 @@ impl SafRegistry {
         Ok(())
     }
 
+    // ----- Issue #2: SAF grants must persist to disk -----------------
+    //
+    // The previous implementation kept grants only in this `HashMap` and
+    // their lifetime ended at process kill. The bridge crate's
+    // `upsert_grant` now calls `persist_upsert` after the in-memory
+    // mirror is updated; on boot, `hydrate_from_pool` re-populates the
+    // map. Both paths respect the TRD §2.4 Golden Rule by routing the
+    // SQL through `DatabasePool::with_conn`.
+
+    /// Read every non-revoked row from the `saf_tokens` table and seed
+    /// the in-memory map. Called by the bridge's `initialize()` once
+    /// the SQLCipher pool is open.
+    pub async fn hydrate_from_pool(
+        &self,
+        pool: &super::pool::DatabasePool,
+    ) -> Result<usize> {
+        use super::pool::PooledConnectionExt;
+        let rows: Vec<SafTokenRow> = pool
+            .with_conn(|c| {
+                let mut stmt = c.prepare(
+                    "SELECT token_id, source, target, mime_type, revoked, created_at \
+                     FROM saf_tokens WHERE revoked = 0",
+                )?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        let created: String = row.get(5)?;
+                        Ok(SafTokenRow {
+                            token_id: row.get(0)?,
+                            source: row.get(1)?,
+                            target: row.get(2)?,
+                            mime: row.get(3)?,
+                            revoked: row.get::<_, i64>(4)? != 0,
+                            created: chrono::DateTime::parse_from_rfc3339(&created)
+                                .map(|d| d.with_timezone(&chrono::Utc))
+                                .unwrap_or_else(|_| chrono::Utc::now()),
+                        })
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok::<_, super::pool::DbError>(rows)
+            })
+            .await?;
+        self.load_from_db(rows.clone())?;
+        Ok(rows.len())
+    }
+
+    /// Write a grant row through to SQL. Idempotent (UPSERT) so the
+    /// bridge crate can call this on every `upsert` regardless of
+    /// prior state.
+    pub async fn persist_upsert(
+        &self,
+        pool: &super::pool::DatabasePool,
+        row: SafTokenRow,
+    ) -> Result<()> {
+        use super::pool::PooledConnectionExt;
+        let to_write = row.clone();
+        pool.with_conn(move |c| {
+            c.execute(
+                "INSERT INTO saf_tokens \
+                   (token_id, source, user_facing_label, target, mime_type, \
+                    persistable, revoked, created_at) \
+                 VALUES (?1, ?2, ?2, ?3, ?4, 1, ?5, ?6) \
+                 ON CONFLICT(token_id) DO UPDATE SET \
+                   target        = excluded.target, \
+                   mime_type     = excluded.mime_type, \
+                   revoked       = excluded.revoked, \
+                   last_used_at  = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                rusqlite::params![
+                    to_write.token_id,
+                    to_write.source,
+                    to_write.target,
+                    to_write.mime,
+                    if to_write.revoked { 1_i64 } else { 0 },
+                    to_write.created.to_rfc3339(),
+                ],
+            )?;
+            Ok::<_, super::pool::DbError>(())
+        })
+        .await?;
+        // Mirror in memory after a successful write — readers must not
+        // see an in-memory state that disagrees with disk.
+        self.upsert(row)?;
+        Ok(())
+    }
+
+    /// Soft-delete a grant on disk + in memory.
+    pub async fn persist_revoke(
+        &self,
+        pool: &super::pool::DatabasePool,
+        token: &str,
+        reason: &str,
+    ) -> Result<()> {
+        use super::pool::PooledConnectionExt;
+        let token_owned = token.to_string();
+        let reason_owned = reason.to_string();
+        pool.with_conn(move |c| {
+            c.execute(
+                "UPDATE saf_tokens SET revoked = 1, revoke_reason = ?2 WHERE token_id = ?1",
+                rusqlite::params![token_owned, reason_owned],
+            )?;
+            Ok::<_, super::pool::DbError>(())
+        })
+        .await?;
+        self.revoke(token)?;
+        Ok(())
+    }
+
     /// `SafRegistry::resolve` — opaque-token → URI string. Returns
     /// `Err(MukeiError::SafRevoked)` for revoked rows.
     pub fn resolve(&self, token: &str) -> Result<String> {

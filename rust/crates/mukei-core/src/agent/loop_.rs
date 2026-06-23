@@ -29,6 +29,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::agent::context::ContextBudgetManager;
 use crate::agent::tools::ToolExecutor;
+use crate::agent::tools::{FailureKind, ToolExecutionPolicy};
 use crate::agent::watchdog::WatchdogHandle;
 use crate::error::MukeiError;
 use crate::types::{BranchId, ChatMessage, MessageId, Role};
@@ -68,6 +69,17 @@ impl AgentLoop {
         cancel_token: CancellationToken,
         token_sender: mpsc::Sender<String>,
     ) -> Result<(), MukeiError> {
+        // ---- Per-turn reset contract (Issues #4 / #5 / #6 / #7) ----
+        // AgentLoop is constructed ONCE (model loading is expensive)
+        // and reused across every user message. Several subsystems
+        // were designed with per-turn reset in mind but were never
+        // wired up. We wire them here, at THE turn boundary, so the
+        // contract has exactly one enforcement point.
+        self.watchdog.rearm();                       // #6
+        self.tools.reset_for_new_turn();             // #4 + #5
+        crate::tools::hardware::HardwareTool::begin_turn(); // #7
+        tracing::debug!("agent loop: per-turn subsystems rearmed");
+
         let mut history: Vec<ChatMessage> = vec![ChatMessage::user(branch, user_input)];
         // `last_id` tracks the parent pointer for the NEXT appended turn so
         // the conversation forms a real tree, not a flat list.
@@ -96,13 +108,18 @@ impl AgentLoop {
 
             if crate::engine::llama_wrapper::has_tool_call(&assistant_text) {
                 // Tool dispatch path (TRD §2.3).
-                let tool_calls =
-                    crate::tools::validator::parse_gbnf_output(&assistant_text)?;
-                let validated =
-                    crate::tools::validator::validate_tool_calls(tool_calls)?;
-                let (tool_outcomes, blocked) =
-                    self.tools.execute_parallel(validated, cancel_token.clone()).await?;
-
+                //
+                // Issue #10 (CRITICAL): NEVER hard-abort the turn on a
+                // parse / validation error. The loop's own header says
+                // "on tool-abuse block: NEVER hard-abort" — the same
+                // contract must hold for malformed tool calls. We:
+                //   1. Push the assistant turn first (so the LLM's
+                //      attempt is preserved in history).
+                //   2. Convert parse failures into a tool_error envelope
+                //      and continue.
+                //   3. Use the partial `validate()` helper so VALID calls
+                //      in a mixed-validity batch still execute; invalid
+                //      ones become structured envelopes.
                 let assistant_id = MessageId::default();
                 history.push(ChatMessage {
                     id: assistant_id,
@@ -110,11 +127,85 @@ impl AgentLoop {
                     branch,
                     is_active: true,
                     created_at: chrono::Utc::now(),
-                    content: assistant_text,
+                    content: assistant_text.clone(),
                     parent: Some(last_id),
                     token_count: Some(used_tokens as u32),
                 });
                 last_id = assistant_id;
+
+                let raw_calls = match crate::tools::validator::parse_gbnf_output(&assistant_text) {
+                    Ok(calls) => calls,
+                    Err(parse_err) => {
+                        // Inject a structured envelope and let the LLM
+                        // produce a final answer (or retry on next turn).
+                        let envelope = crate::agent::tools::feedback::render_tool_error_envelope(
+                            "validator",
+                            &parse_err,
+                            FailureKind::Validation,
+                            1,
+                            ToolExecutionPolicy::DEFAULT_MAX_FAILURES,
+                        );
+                        let parse_id = MessageId::default();
+                        history.push(ChatMessage {
+                            id: parse_id,
+                            role: Role::Tool,
+                            branch,
+                            is_active: true,
+                            created_at: chrono::Utc::now(),
+                            content: envelope,
+                            parent: Some(last_id),
+                            token_count: None,
+                        });
+                        last_id = parse_id;
+                        tracing::warn!(err = ?parse_err, "tool-call parse failed — graceful degrade, LLM retries from envelope");
+                        iteration += 1;
+                        continue;
+                    }
+                };
+
+                // Partial validation: execute the ACCEPTED calls and
+                // turn each rejection into a per-call tool_error envelope.
+                let (validated, validation_errors) =
+                    crate::tools::validator::validate(raw_calls);
+                for verr in &validation_errors {
+                    let rejection_err = MukeiError::ToolArgsRejected {
+                        tool_name: "validator".to_string(),
+                        reason: crate::tools::validator::format_for_llm(std::slice::from_ref(verr)),
+                    };
+                    let envelope = crate::agent::tools::feedback::render_tool_error_envelope(
+                        "validator",
+                        &rejection_err,
+                        FailureKind::Validation,
+                        1,
+                        ToolExecutionPolicy::DEFAULT_MAX_FAILURES,
+                    );
+                    let rejection_id = MessageId::default();
+                    history.push(ChatMessage {
+                        id: rejection_id,
+                        role: Role::Tool,
+                        branch,
+                        is_active: true,
+                        created_at: chrono::Utc::now(),
+                        content: envelope,
+                        parent: Some(last_id),
+                        token_count: None,
+                    });
+                    last_id = rejection_id;
+                }
+                tracing::debug!(
+                    accepted = validated.len(),
+                    rejected = validation_errors.len(),
+                    "validator partition"
+                );
+                if validated.is_empty() {
+                    // Nothing executable left to dispatch — give the
+                    // model a chance to recover on the next turn.
+                    iteration += 1;
+                    continue;
+                }
+                let (tool_outcomes, blocked) =
+                    self.tools.execute_parallel(validated, cancel_token.clone()).await?;
+
                 // Each ToolOutcome carries the typed result (success OR a
                 // structured `<external_data source="tool_error">` envelope
                 // with failure kind + remediation hint) plus an optional

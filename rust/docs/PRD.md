@@ -320,7 +320,76 @@ Mukei has a strict **Zero-Telemetry** policy. No data leaves the device. However
 ## 16. Tool Execution Sandboxing & Edge Cases
 Tools are the agent's hands. If the hands get stuck, the brain keeps waiting. Tool execution must be ruthlessly defensive against external chaos.
 
-### 16.1 Web Search Tool (DuckDuckGo)
+### 16.1 Web Search Tool (Adaptive Search Planner — v0.7.5 amendment)
+
+> **v0.7.5 amendment supersedes the previous "Brave + DDG + scraper" design.**
+> The legacy text below is preserved for historical context only; the
+> canonical contract is the Adaptive Search Planner.
+
+**Canonical engines (v0.7.5):**
+- **Brave Search API** — factual / current-events queries.
+- **Tavily Search API** — research / multi-source synthesis.
+- **DuckDuckGo** — **PERMANENTLY REMOVED.** A compile-time tripwire in
+  `crates/mukei-core/src/search/engines/mod.rs` rejects any future
+  `feature = "ddg"`. HTML scraping is gone from the production path.
+
+**REQ-TOOL-WEB-02 (Adaptive Search Planner):** The `web_search` tool
+MUST delegate to `crate::search::SearchPlanner`. The planner pipeline
+is: `User Query → IntentAnalyzer → TaskSplitter → TaskClassifier →
+EngineSelector → per-engine FuturesUnordered dispatch → SearchResultRanker
+→ Trust filter → cache write`. Brave and Tavily MUST NOT be queried in
+parallel for the same task unless the EngineSelector matrix explicitly
+selects both.
+
+**REQ-TOOL-WEB-03 (Wrapped-Secrets API Keys):** Brave and Tavily API
+keys MUST be delivered to the planner via
+`ToolRegistry::with_web_search_keys(brave_key, tavily_key)`, called by
+the bridge crate from the wrapped-secrets registry. Process
+environment variables are forbidden for key delivery — they previously
+decoupled key-writer from key-reader and broke search silently
+(Issue #3).
+
+**REQ-TOOL-WEB-04 (Sentinel escaping):** Every untrusted field
+(title, URL, snippet, query) interpolated into the `<external_data>`
+wrapper MUST be passed through `crate::tools::sentinel::escape_untrusted`
+before interpolation. The escaper neutralises the four bytes that
+could let a hostile page forge a closing tag and break out of the
+untrusted envelope (REQ-SEC-04 strengthening, Issue #1).
+
+**REQ-TOOL-WEB-05 (Permission Matrix):** `web_search` declares the
+`Internet` capability in `crate::tools::permission::PermissionMatrix`.
+Dispatch is short-circuited into a `Permanent` failure envelope when
+the user has not granted `Internet`.
+
+**Selector matrix (engines per task class):**
+
+| Task class  | Engines selected |
+|-------------|------------------|
+| Fact        | Brave only |
+| News        | Brave only (max_age_days set) |
+| Local       | Brave only |
+| Shopping    | Brave only |
+| Research    | Tavily only |
+| Compare     | Tavily preferred |
+| Academic    | Tavily only |
+| MultiStep   | Split per sub-task; each sub-task routes independently |
+
+**Cache (per task class):**
+
+| Task class | TTL |
+|------------|-----|
+| Fact / Shopping / Local | 24 h |
+| News | 10 min |
+| Research / Compare / Academic | 1 h |
+
+**Per-engine timeout:** Brave 3 s, Tavily 5 s. On timeout the planner
+continues with whichever engines have replied; an empty result set
+surfaces as `MukeiError::WebSearchFailed`.
+
+---
+
+#### Legacy text (pre-v0.7.5, retained for historical context)
+
 *   **REQ-TOOL-WEB-01:** Must handle IP bans, CAPTCHAs, and HTML layout changes gracefully.
 *   **FMEA (The CAPTCHA Trap):** DDG detects automated scraping and returns a 403 Forbidden or a CAPTCHA HTML page instead of JSON.
     *   *Mitigation:* The Rust `scraper` must validate the DOM structure. If the expected result nodes are missing and a CAPTCHA signature is detected, the tool must immediately return `{"status": "blocked", "reason": "Search engine requires human verification"}` to the LLM. The LLM is instructed to inform the user, rather than hallucinating facts based on an empty context.
@@ -396,10 +465,29 @@ Mobile SoCs are not created equal. Snapdragon (Adreno) and MediaTek/Exynos (Mali
 | **Parallel Search Latency** | < 3.0 sec | < 2.0 sec | < 1.2 sec | < 1.2 sec |
 | **RAM Footprint (Idle)** | < 350 MB | < 350 MB | < 400 MB | < 400 MB |
 
-### 19.3 Parallel Search Routing (DDG + Brave)
-*   **REQ-PERF-04:** To eliminate the fragility of HTML scraping, the Rust Agent will execute **Parallel Redundant Searches** if the user opts in.
-*   **Behavior:** When `web_search` is triggered, Rust uses `tokio::join!` to hit DuckDuckGo (HTML/Instant) AND Brave Search API simultaneously.
-*   **Resolution:** Whichever API returns a valid, structured JSON payload *first* (within a 3-second timeout) is fed to the LLM. The slower/failing request is aggressively cancelled. This guarantees near-instant tool execution even if one network route is blocked or CAPTCHA-gated.
+### 19.3 Adaptive Search Routing (v0.7.5 amendment, replaces "DDG + Brave")
+
+> **Supersedes the parallel DDG+Brave design.** DuckDuckGo is removed
+> and the unconditional `tokio::join!` fan-out is replaced by the
+> planner-routed selector matrix in §16.1.
+
+*   **REQ-PERF-04 (v0.7.5):** The Rust Agent MUST route `web_search`
+    through `SearchPlanner` (see §16.1). The planner uses a closed
+    engine set ({Brave, Tavily}) and a `FuturesUnordered` fan-in where
+    the SELECTOR matrix decides whether 1 or 2 engines run for a given
+    task class.
+*   **Behavior:** Each selected engine is called with its own timeout
+    (Brave 3 s, Tavily 5 s); the planner harvests every reply that
+    arrived within its deadline and feeds the ranker.
+*   **Resolution:** The ranker scores hits across (relevance, freshness,
+    authority, citation, quality) and surfaces the top-K (default 8)
+    to the LLM. Unsafe-trust hits are dropped before ranking. The
+    response envelope embeds engine + trust + score for citation
+    enforcement.
+*   **Budget:** API keys arrive via the wrapped-secrets registry; the
+    planner MUST NOT query both engines for low-cost task classes
+    (Fact, Shopping, Local, News). The selector matrix in §16.1 is the
+    source of truth for which classes fan out.
 
 ---
 

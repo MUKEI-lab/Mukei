@@ -168,8 +168,30 @@ impl ToolExecutor {
     /// Access the underlying failure tracker.
     pub fn tracker(&self) -> &FailureTracker { &self.tracker }
 
+    /// Access the same-output / no-progress detector. The agent loop
+    /// uses this to clear the ring at the start of every new turn
+    /// (Issue #5 — the doc comment on `OutputRepeatTracker::clear`
+    /// explicitly says "called at the start of each new run()").
+    pub fn repeats(&self) -> &OutputRepeatTracker { &self.repeats }
+
     /// Access the effective policy.
     pub fn policy(&self) -> &ToolExecutionPolicy { &self.policy }
+
+    /// Clear ALL per-`(tool, fingerprint)` failure counters AND the
+    /// same-output ring. Issue #4: the FailureTracker outlives the
+    /// AgentLoop instance, so state from a previous turn / previous
+    /// conversation must not leak into the next one.
+    ///
+    /// `AgentLoop::run` calls this once at the top of every invocation.
+    pub fn reset_for_new_turn(&self) {
+        // FailureTracker::reset takes a tool name — so we walk the
+        // registry and reset each registered tool. New tools added in
+        // the future inherit this behaviour automatically.
+        for name in self.registry.names() {
+            self.tracker.reset(&name);
+        }
+        self.repeats.clear();
+    }
 
     /// Run a set of validated tool calls **in parallel** via
     /// `tokio::spawn`. Returns one [`ToolOutcome`] per call plus an
@@ -180,9 +202,81 @@ impl ToolExecutor {
         calls: Vec<TypedToolCall>,
         cancel_token: CancellationToken,
     ) -> Result<(Vec<ToolOutcome>, Option<MukeiError>)> {
+        // ----- Issue #9 (CRITICAL): pre-dispatch block check ----------
+        // Don't spawn a network / disk call we already know is going to
+        // be blocked by the abuse tracker. We emit a structured
+        // `tool_error` envelope upfront and skip the spawn entirely.
+        let mut outcomes: Vec<ToolOutcome> = Vec::with_capacity(calls.len());
+        let mut blocked: Option<MukeiError> = None;
         let mut handles = Vec::with_capacity(calls.len());
 
         for call in calls {
+            let fp = FailureTracker::fingerprint(&call.name, &call.arguments);
+            // (a) Already-blocked fingerprint — the tracker has it AT or
+            //     OVER threshold.
+            let pre_count = self.tracker.count_for(&call.name, &fp);
+            if pre_count > self.tracker.threshold() {
+                blocked.get_or_insert_with(|| MukeiError::ToolAbuseBlocked {
+                    tool_name: call.name.clone(),
+                });
+                let synthetic_err = MukeiError::ToolAbuseBlocked {
+                    tool_name: call.name.clone(),
+                };
+                let envelope = render_tool_error_envelope(
+                    &call.name,
+                    &synthetic_err,
+                    FailureKind::Abuse,
+                    pre_count,
+                    self.tracker.threshold(),
+                );
+                outcomes.push(ToolOutcome {
+                    result: ToolResult {
+                        call_id: call.id,
+                        name: call.name,
+                        output: envelope,
+                        ok: false,
+                        took: std::time::Duration::from_millis(0),
+                        trust: "system".to_string(),
+                    },
+                    failure_kind: Some(FailureKind::Abuse),
+                    repeat_output_notice: None,
+                    attempt: pre_count,
+                });
+                continue;
+            }
+            // (b) Tool not in the registry — instant Permanent block.
+            //     No need to spawn a task only to discover the same.
+            if self.registry.get(&call.name).is_none() {
+                let synthetic_err = MukeiError::UnknownTool {
+                    tool_name: call.name.clone(),
+                };
+                blocked.get_or_insert_with(|| MukeiError::UnknownTool {
+                    tool_name: call.name.clone(),
+                });
+                let envelope = render_tool_error_envelope(
+                    &call.name,
+                    &synthetic_err,
+                    FailureKind::Permanent,
+                    pre_count,
+                    self.tracker.threshold(),
+                );
+                outcomes.push(ToolOutcome {
+                    result: ToolResult {
+                        call_id: call.id,
+                        name: call.name,
+                        output: envelope,
+                        ok: false,
+                        took: std::time::Duration::from_millis(0),
+                        trust: "system".to_string(),
+                    },
+                    failure_kind: Some(FailureKind::Permanent),
+                    repeat_output_notice: None,
+                    attempt: pre_count,
+                });
+                continue;
+            }
+
+            // ----- Live dispatch path ----------------------------------
             let registry = self.registry.clone();
             let token = cancel_token.clone();
             handles.push(tokio::spawn(async move {
@@ -190,7 +284,6 @@ impl ToolExecutor {
                     tool_name: call.name.clone(),
                 })?;
                 let started = Instant::now();
-                let fp = FailureTracker::fingerprint(&call.name, &call.arguments);
                 let result = tokio::select! {
                     res = tool.run(call.arguments.clone()) => res,
                     _ = token.cancelled() => Err(MukeiError::Cancelled),
@@ -198,9 +291,6 @@ impl ToolExecutor {
                 Ok::<_, MukeiError>((call, fp, started.elapsed(), result))
             }));
         }
-
-        let mut outcomes = Vec::new();
-        let mut blocked: Option<MukeiError> = None;
 
         for h in handles {
             match h.await {

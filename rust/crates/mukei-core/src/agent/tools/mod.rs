@@ -51,17 +51,7 @@ pub use feedback::{
 pub use policy::{FailureKind, ToolExecutionPolicy};
 pub use watchdog::OutputRepeatTracker;
 
-// ----- Backwards-compatibility shims ------------------------------------
-// External call sites still occasionally reference `ToolPolicy` and the
-// `MAX_FAILURES_PER_TOOL` constant. Keep them alive as deprecated aliases
-// so a future round can drop them without a flag-day rewrite.
-
-/// Deprecated alias for [`ToolExecutionPolicy`]. New code should use the
-/// full name.
-#[deprecated(since = "0.7.5", note = "use ToolExecutionPolicy")]
-pub type ToolPolicy = ToolExecutionPolicy;
-
-/// Deprecated constant — superseded by
-/// [`ToolExecutionPolicy::max_failures_per_tool`].
-#[deprecated(since = "0.7.5", note = "use ToolExecutionPolicy::max_failures_per_tool")]
-pub const MAX_FAILURES_PER_TOOL: u32 = ToolExecutionPolicy::DEFAULT_MAX_FAILURES;
+// Issue #18: legacy `ToolPolicy` alias and `MAX_FAILURES_PER_TOOL`
+// constant were deleted. The compile-time landmine (two constants with
+// the same name and different values) is now gone. New code uses
+// `ToolExecutionPolicy::max_failures_per_tool` directly.

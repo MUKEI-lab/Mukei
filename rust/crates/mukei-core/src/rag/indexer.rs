@@ -323,6 +323,75 @@ pub async fn handle_revoke(trans: IndexingTransaction<'_>, _reason: MukeiError) 
     trans.rollback().await
 }
 
+// ---------------------------------------------------------------------
+// Issue #11: boot-time reconciliation of SQL chunks vs vector store
+// ---------------------------------------------------------------------
+
+/// Outcome of a single boot-time reconciliation pass.
+#[derive(Clone, Debug, Default)]
+pub struct ReconciliationReport {
+    /// `chunks` rows whose `chunk_uuid` does not appear in the vector
+    /// store. The bridge crate must either re-embed or quarantine these.
+    pub orphan_sql_rows: Vec<String>,
+    /// Vectors present in the store that have no `chunks` row. These
+    /// are safe to remove on the next `save()`.
+    pub orphan_vectors: Vec<u64>,
+    /// Total `chunks` rows considered.
+    pub total_sql_rows: usize,
+    /// Total vectors considered.
+    pub total_vectors: usize,
+}
+
+/// Walk the `chunks` table and the in-memory vector store and report
+/// any disagreement. The commit path writes SQL first, then snapshots
+/// the vector store — a kill (OOM, force-stop) between the two leaves
+/// a `chunks` row with no matching vector. This boot-time pass detects
+/// the discrepancy so the bridge crate can re-embed the orphan rows
+/// before the agent loop starts taking RAG queries.
+#[cfg(feature = "rusqlite")]
+pub async fn reconcile(
+    pool: &crate::storage::pool::DatabasePool,
+    store: &VectorStore,
+) -> Result<ReconciliationReport> {
+    use crate::storage::pool::PooledConnectionExt;
+    // Fetch the canonical key set from SQL.
+    let sql_keys: Vec<String> = pool
+        .with_conn(|c| {
+            let mut stmt = c.prepare("SELECT chunk_uuid FROM chunks")?;
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok::<_, crate::storage::pool::DbError>(rows)
+        })
+        .await?;
+
+    // The vector store keys chunks by `u64`; the SQL side stringifies
+    // them. We project both into the same shape.
+    let vec_keys: std::collections::BTreeSet<u64> = store.chunk_ids().into_iter().collect();
+    let sql_keys_u64: std::collections::BTreeMap<String, u64> = sql_keys
+        .iter()
+        .filter_map(|k| k.parse::<u64>().ok().map(|n| (k.clone(), n)))
+        .collect();
+
+    let mut report = ReconciliationReport {
+        total_sql_rows: sql_keys.len(),
+        total_vectors: vec_keys.len(),
+        ..Default::default()
+    };
+    for (raw, parsed) in &sql_keys_u64 {
+        if !vec_keys.contains(parsed) {
+            report.orphan_sql_rows.push(raw.clone());
+        }
+    }
+    let sql_set: std::collections::BTreeSet<u64> = sql_keys_u64.values().copied().collect();
+    for v in &vec_keys {
+        if !sql_set.contains(v) {
+            report.orphan_vectors.push(*v);
+        }
+    }
+    Ok(report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

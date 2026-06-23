@@ -12,14 +12,12 @@ pub mod watchdog;
 
 pub use context::{ContextBudget, ContextBudgetManager};
 pub use loop_::{AgentLoop, AgentLoopHandle};
-#[allow(deprecated)]
 pub use tools::{
     FailureKind, FailureTracker, OutputRepeatTracker, ToolExecutionPolicy, ToolExecutor,
     ToolOutcome,
 };
-#[allow(deprecated)]
-pub use tools::{ToolPolicy, MAX_FAILURES_PER_TOOL}; // legacy aliases
-#[allow(deprecated)]
+// Issue #18: legacy aliases (`ToolPolicy`, `MAX_FAILURES_PER_TOOL`) were
+// removed. New code uses `ToolExecutionPolicy` / `policy.max_failures_per_tool`.
 pub use tools::{render_repeat_output_envelope, render_tool_error_envelope};
 pub use watchdog::{Watchdog, WatchdogHandle};
 

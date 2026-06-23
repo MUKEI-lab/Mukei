@@ -196,40 +196,49 @@ impl Migrator {
     }
 
     /// Boot path asks for the conflict check. Returned result:
-    ///  - `Ok(())` if the highest applied id matches the highest
-    ///    available id, *or* if `applied` is empty (first run).
+    ///  - `Ok(())` iff the applied IDs form a contiguous prefix of
+    ///    `[1, 2, ...]` AND the maximum applied id does not exceed the
+    ///    maximum available id.
     ///  - `Err(MukeiError::MigrationOrderConflict)` otherwise.
+    ///
+    /// Issue #12: the previous implementation only ran the contiguity
+    /// check inside the `max_applied == max_avail` branch. A database
+    /// whose applied set already had a gap (e.g. `[1, 3]` from manual
+    /// tampering) would happily receive new migrations on top, leaving
+    /// the schema in an unknown intermediate state. The contiguity
+    /// check now runs unconditionally, before the high-water comparison.
     pub fn verify_order(
         available: &[(u32, String, String)],
         applied: &[MigrationRecord],
     ) -> Result<()> {
+        // (1) Applied list MUST be contiguous from 1. Run this check
+        //     first — a gap is always an order conflict regardless of
+        //     whether new migrations are pending.
+        let mut sorted = applied.iter().map(|r| r.id).collect::<Vec<_>>();
+        sorted.sort();
+        for (idx, id) in sorted.iter().enumerate() {
+            if *id as usize != idx + 1 {
+                return Err(MukeiError::MigrationOrderConflict {
+                    expected: idx as u32 + 1,
+                    applied: sorted,
+                });
+            }
+        }
+
+        // (2) The maximum applied id must not exceed the highest
+        //     available id (would imply we forgot to ship a migration
+        //     file the DB knows about).
         let max_applied = applied.iter().map(|r| r.id).max();
         let max_avail = available.iter().map(|(id, _, _)| *id).max();
-        match (max_applied, max_avail) {
-            (Some(a), Some(v)) if a < v => Ok(()),
-            (Some(a), Some(v)) if a == v => {
-                // Sanity: the applied list must be contiguous.
-                let mut sorted = applied.iter().map(|r| r.id).collect::<Vec<_>>();
-                sorted.sort();
-                for (idx, id) in sorted.iter().enumerate() {
-                    if *id as usize != idx + 1 {
-                        return Err(MukeiError::MigrationOrderConflict {
-                            expected: idx as u32 + 1,
-                            applied: sorted.clone(),
-                        });
-                    }
-                }
-                // Confirmed contiguous.
-                let _ = v;
-                Ok(())
+        if let (Some(a), Some(v)) = (max_applied, max_avail) {
+            if a > v {
+                return Err(MukeiError::MigrationOrderConflict {
+                    expected: v,
+                    applied: applied.iter().map(|r| r.id).collect(),
+                });
             }
-            (Some(a), Some(v)) if a > v => Err(MukeiError::MigrationOrderConflict {
-                expected: v,
-                applied: applied.iter().map(|r| r.id).collect(),
-            }),
-            (None, _) => Ok(()),
-            _ => Ok(()),
         }
+        Ok(())
     }
 }
 
@@ -243,6 +252,35 @@ mod tests {
         let m = Migrator::new(dir.path());
         let list = m.list_available().unwrap();
         assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    fn gap_in_applied_set_with_pending_is_still_conflict() {
+        // Issue #12 regression: the old gap-check only ran when there
+        // was nothing left to apply. A DB at applied=[1,3] with new
+        // migrations pending (avail=[1,2,3,4]) used to slip through.
+        let avail = vec![
+            (1, "a".into(), String::new()),
+            (2, "b".into(), String::new()),
+            (3, "c".into(), String::new()),
+            (4, "d".into(), String::new()),
+        ];
+        let applied = vec![
+            MigrationRecord {
+                id: 1,
+                name: "a".into(),
+                applied_at: chrono::Utc::now(),
+                checksum: "x".into(),
+            },
+            MigrationRecord {
+                id: 3, // gap at 2
+                name: "c".into(),
+                applied_at: chrono::Utc::now(),
+                checksum: "y".into(),
+            },
+        ];
+        let err = Migrator::verify_order(&avail, &applied).unwrap_err();
+        assert!(matches!(err, MukeiError::MigrationOrderConflict { .. }));
     }
 
     #[test]

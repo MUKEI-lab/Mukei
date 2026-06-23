@@ -2129,7 +2129,61 @@ impl Drop for IndexingTransaction<'_> {
 
 ## 5. Tool Implementations
 
-### 5.1 Web Search (DDG + Brave Parallel)
+### 5.1 Web Search — Adaptive Search Planner (v0.7.5)
+
+> **v0.7.5 amendment supersedes the "DDG + Brave parallel scraper" design.**
+> DuckDuckGo is permanently removed; `tokio::join!`-style unconditional
+> fan-out is replaced by a selector matrix that decides 1- vs 2-engine
+> dispatch per task class. The legacy code block lower in this section
+> is preserved for historical context only.
+
+**Canonical contract:**
+
+```text
+User query
+  -> IntentAnalyzer       (crate::search::intent)
+  -> TaskSplitter         (split multi-step queries)
+  -> TaskClassifier       (Fact / News / Local / Shopping / Research /
+                           Compare / Academic / MultiStep)
+  -> EngineSelector       (closed set: {Brave, Tavily}; matrix per class)
+  -> FuturesUnordered     (per-engine timeout: Brave 3 s, Tavily 5 s)
+  -> SearchResultRanker   (relevance + freshness + authority +
+                           citation + quality, weighted)
+  -> Trust filter         (drop Unsafe; keep Trusted / SemiTrusted)
+  -> Cache write          (per-class TTL; see PRD §16.1)
+  -> <external_data source="web_search" trust="untrusted"> envelope
+     (sentinel-escaped per `crate::tools::sentinel::escape_untrusted`)
+```
+
+**Required Rust types** (defined in `crate::search`):
+
+- `SearchPlanner` — owns the engine map + policy + ranker + cache.
+- `SearchEngineKind` — closed enum {`Brave`, `Tavily`}. Re-introducing
+  any other variant requires a TRD amendment.
+- `SearchHit`, `SearchTask`, `SourceTrust`, `RankedHit` — wire types.
+- `PlannerPolicy` — holds per-engine timeouts and concurrency caps.
+
+**API key delivery (REQ-TOOL-WEB-03 / Issue #3):** Brave and Tavily
+keys are NEVER read from process env vars. The bridge crate hydrates
+them from the wrapped-secrets registry and passes them to
+`ToolRegistry::with_web_search_keys(brave, tavily)`. The tool registry
+is rebuilt whenever a key changes so the next dispatch sees the new
+credential without restarting the agent.
+
+**Sentinel escaping (REQ-TOOL-WEB-04 / Issue #1):** Every untrusted
+field (title, URL, snippet, query, RAG snippets, file content) flowing
+into the `<external_data>` envelope is passed through
+`crate::tools::sentinel::escape_untrusted`. This neutralises `<`, `>`,
+`&`, and `"` so a hostile page cannot forge a closing tag.
+
+**Compile-time tripwire:** `crates/mukei-core/src/search/engines/mod.rs`
+uses `#[cfg(feature = "ddg")] compile_error!(...)` so any future PR
+that reintroduces DuckDuckGo fails to build.
+
+---
+
+#### Legacy code block (pre-v0.7.5, retained for historical context)
+
 ```rust
 // rust/src/tools/web_search.rs
 use reqwest::Client;

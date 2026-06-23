@@ -332,8 +332,14 @@ impl MukeiError {
             Self::ToolLoopDetected(_) | Self::ToolTimeout(_) | Self::ToolAbuseBlocked { .. } | Self::ToolPermanentlyDisabled { .. } | Self::UnknownTool { .. } | Self::ToolArgsRejected { .. } | Self::ToolParseFailed(_) | Self::ToolArgumentInvalid { .. } | Self::ToolExecutionFailed(_) | Self::WebSearchFailed(_) | Self::HttpClientFailed(_) | Self::FileReadFailed(_) | Self::BinaryFile | Self::SandboxViolation => ErrorClass::Agent,
             Self::SafRevoked | Self::SafRequired | Self::PermissionDenied => ErrorClass::Permission,
             Self::NetworkError(_) | Self::DownloadHashMismatch | Self::Io(_) => ErrorClass::Network,
-            Self::SecretLeaked(_) | Self::UnwrapFailed | Self::WrappedKeyMalformed(_) | Self::SafeStorageUnavailable(_) => ErrorClass::Security,
-            _ => ErrorClass::Unknown,
+            Self::SecretLeaked(_) | Self::UnwrapFailed | Self::WrappedKeyMalformed(_) | Self::SafeStorageUnavailable(_) | Self::PromptLeakage => ErrorClass::Security,
+            // Issue #19: the previous `_ => Unknown` wildcard let new error
+            // variants silently land in Unknown. We list every remaining
+            // variant explicitly so the compiler enforces classification
+            // for any future variant via E0004 (non-exhaustive match).
+            Self::FFIPanic | Self::CallbackGuardExpired | Self::BlockingJoinFailed(_) => ErrorClass::Resource,
+            Self::CrashLoopDetected { .. } => ErrorClass::Device,
+            Self::Cancelled | Self::Invariant(_) | Self::Internal(_) => ErrorClass::Unknown,
         }
     }
 }

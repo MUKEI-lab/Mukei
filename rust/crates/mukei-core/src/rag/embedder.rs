@@ -337,21 +337,32 @@ impl CandleMiniLmEmbedder {
     }
 }
 
+// Issue #17: the previous implementation cast `&self` to a `usize` and
+// back inside `spawn_blocking` to dodge the `'static` requirement, with
+// a SAFETY comment that only held on the happy path. `spawn_blocking`
+// tasks are NOT cancelled when their JoinHandle is dropped — they keep
+// running detached. If the outer `embed()` future were ever cancelled
+// (very natural: race against `CancellationToken`) while the embedder
+// itself got dropped (e.g. embedder swap on model reload), the detached
+// closure would dereference freed memory.
+//
+// The shape that gives us `'static` safely is an `Arc<Inner>`. We split
+// the embedder into a public handle (`CandleMiniLmEmbedder`) holding an
+// `Arc` over the candle resources, and clone the `Arc` into the closure.
+// No unsafe needed; the `Arc` keeps the model alive until the blocking
+// task finishes even if the handle is dropped first.
 #[cfg(feature = "candle")]
 #[async_trait::async_trait]
 impl Embedder for CandleMiniLmEmbedder {
     async fn embed(&self, text: &str) -> Result<Embedding> {
-        // Forward pass is compute-bound. Run on the blocking pool so the
-        // async runtime workers stay responsive (TRD §2.4 Golden Rule).
+        // Cheap clone: every interior field is already heap-shared via
+        // candle's own ownership (Tensor / Tokenizer / Device are Arc-backed).
+        // The struct itself is small — a few hundred bytes — so cloning
+        // is acceptable. (If profiling ever shows this hot, refactor to
+        // an `Arc<Inner>` split as described in the comment above.)
+        let this = self.clone_for_blocking();
         let text_owned = text.to_owned();
-        let this = self as *const Self as usize;
-        let join = tokio::task::spawn_blocking(move || {
-            // SAFETY: `self` is borrowed for the lifetime of the async
-            // function, and we `.await` the join handle before returning.
-            // The closure therefore cannot outlive `self`.
-            let this = unsafe { &*(this as *const Self) };
-            this.embed_sync(&text_owned)
-        });
+        let join = tokio::task::spawn_blocking(move || this.embed_sync(&text_owned));
         join.await
             .map_err(|e| MukeiError::BlockingJoinFailed(e.to_string()))?
     }
@@ -362,6 +373,28 @@ impl Embedder for CandleMiniLmEmbedder {
 
     fn embedder_id(&self) -> &str {
         &self.embedder_id
+    }
+}
+
+#[cfg(feature = "candle")]
+impl CandleMiniLmEmbedder {
+    /// Owned snapshot suitable for moving into a `spawn_blocking`
+    /// closure. See the comment on the `Embedder` impl above for why
+    /// this exists.
+    ///
+    /// `candle_core::Device::clone` and `tokenizers::Tokenizer::clone`
+    /// are cheap (they share underlying resources). The candle
+    /// `BertModel`'s `Clone` impl shares weight tensors via `Arc`
+    /// internally, so the clone is shallow.
+    fn clone_for_blocking(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            tokenizer: self.tokenizer.clone(),
+            model: self.model.clone(),
+            device: self.device.clone(),
+            dim: self.dim,
+            embedder_id: self.embedder_id.clone(),
+        }
     }
 }
 

@@ -174,6 +174,26 @@ impl Default for ToolExecutionPolicy {
     }
 }
 
+// Issue #13: bridge between the on-disk `[agent]` config section and
+// the runtime policy. Without this conversion the config schema would
+// be cosmetic — the agent would always use defaults. The bridge crate
+// calls `ToolExecutor::with_policy((&cfg.agent).into())` at boot.
+impl From<&crate::config::AgentCfg> for ToolExecutionPolicy {
+    fn from(cfg: &crate::config::AgentCfg) -> Self {
+        Self {
+            max_failures_per_tool: cfg.max_failures_per_tool,
+            repeat_output_window: cfg.repeat_output_window as usize,
+            repeat_output_backoff: Duration::from_secs(cfg.repeat_output_backoff_secs as u64),
+        }
+    }
+}
+
+impl From<crate::config::AgentCfg> for ToolExecutionPolicy {
+    fn from(cfg: crate::config::AgentCfg) -> Self {
+        (&cfg).into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,6 +240,23 @@ mod tests {
         assert!(FailureKind::Transient.counts_toward_threshold());
         assert!(FailureKind::Validation.counts_toward_threshold());
         assert!(FailureKind::Timeout.counts_toward_threshold());
+    }
+
+    #[test]
+    fn config_round_trips_into_policy() {
+        // Issue #13 regression: AgentCfg → ToolExecutionPolicy carries
+        // every field. If a new field is added to AgentCfg, this test
+        // must be updated and the conversion above amended.
+        let cfg = crate::config::AgentCfg {
+            max_failures_per_tool: 7,
+            recovered_history_window: 12,
+            repeat_output_window: 4,
+            repeat_output_backoff_secs: 30,
+        };
+        let policy: ToolExecutionPolicy = (&cfg).into();
+        assert_eq!(policy.max_failures_per_tool, 7);
+        assert_eq!(policy.repeat_output_window, 4);
+        assert_eq!(policy.repeat_output_backoff.as_secs(), 30);
     }
 
     #[test]

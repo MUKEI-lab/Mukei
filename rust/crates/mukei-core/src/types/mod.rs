@@ -128,8 +128,14 @@ pub struct ToolResult {
     /// on the tool). Wrapped in prompt-injection sentinels before
     /// insertion into LLM context.
     pub output:  String,
-    /// True if the tool returned successfully. False aborts the agent
-    /// loop after `MAX_FAILURES_PER_TOOL`.
+    /// True if the tool returned successfully. False routes the call
+    /// through the graceful-degrade path: the executor classifies the
+    /// failure via [`crate::agent::tools::FailureKind`], counts it
+    /// against [`crate::agent::tools::ToolExecutionPolicy::max_failures_per_tool`],
+    /// renders a structured `<external_data source="tool_error">`
+    /// envelope, and lets the LLM produce a recovery answer. The agent
+    /// loop is NEVER hard-aborted on `ok == false` (Issue #10 / #20 —
+    /// the old hard-abort design is gone).
     pub ok:      bool,
     /// Wall-clock duration of execution.
     pub took:    std::time::Duration,
