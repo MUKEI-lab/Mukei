@@ -4,6 +4,8 @@
 //! The migration order check is one of the few places where a silent
 //! pass means corrupted user data on every subsequent boot.
 
+#![cfg(feature = "rusqlite")]
+
 use mukei_core::error::MukeiError;
 use mukei_core::storage::migrations::{MigrationRecord, Migrator};
 use proptest::prelude::*;
@@ -55,7 +57,10 @@ proptest! {
         let availv = avail(&(1..=max).collect::<Vec<_>>());
         let err = Migrator::verify_order(&availv, &applied)
             .expect_err("gap should always conflict");
-        prop_assert!(matches!(err, MukeiError::MigrationOrderConflict { .. }));
+        prop_assert!(
+            matches!(err, MukeiError::MigrationOrderConflict { .. }),
+            "gap should yield MigrationOrderConflict, got {err:?}",
+        );
     }
 
     /// Property #3 — an applied id that exceeds max(available) is a
@@ -67,6 +72,9 @@ proptest! {
         applied.push(record(max_avail + overshoot));
         let err = Migrator::verify_order(&availv, &applied)
             .expect_err("applied beyond available should always conflict");
-        prop_assert!(matches!(err, MukeiError::MigrationOrderConflict { .. }));
+        prop_assert!(
+            matches!(err, MukeiError::MigrationOrderConflict { .. }),
+            "overshoot should yield MigrationOrderConflict, got {err:?}",
+        );
     }
 }

@@ -22,7 +22,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::diagnostics::crash_logger::hex_helper;
-use crate::error::{MukeiError, Result};
+use crate::error::Result;
 
 use super::pool::{DatabasePool, DbError, PooledConnectionExt};
 
@@ -168,8 +168,7 @@ impl AuditLogWriter {
             )?;
             Ok::<_, DbError>(())
         })
-        .await
-        .map_err(MukeiError::from)?;
+        .await?;
 
         // Advance the chain. Failure to write makes us NOT advance —
         // re-trying after a transient error preserves continuity.
@@ -301,7 +300,6 @@ impl AuditLogReader {
             })
         })
         .await
-        .map_err(MukeiError::from)
     }
 }
 

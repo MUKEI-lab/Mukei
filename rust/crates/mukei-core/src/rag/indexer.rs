@@ -391,8 +391,7 @@ pub async fn reconcile_chunked(
             .map_err(crate::storage::pool::DbError::from)
         })
         .await?;
-    let approx_total_batches =
-        ((total_rows as usize + RECONCILE_BATCH_SIZE - 1) / RECONCILE_BATCH_SIZE).max(1) as u64;
+    let approx_total_batches = (total_rows as usize).div_ceil(RECONCILE_BATCH_SIZE).max(1) as u64;
 
     let vec_keys: std::collections::BTreeSet<u64> = store.chunk_ids().into_iter().collect();
     let mut report = ReconciliationReport {

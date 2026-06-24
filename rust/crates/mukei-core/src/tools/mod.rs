@@ -65,8 +65,8 @@ impl ToolRegistry {
         };
         registry.register(web_search::WebSearchTool::default());
         registry.register(file_tool::FileTool::default());
-        registry.register(hardware::HardwareTool::default());
-        registry.register(math::MathTool::default());
+        registry.register(hardware::HardwareTool);
+        registry.register(math::MathTool);
         registry
     }
 
@@ -88,8 +88,8 @@ impl ToolRegistry {
         };
         registry.register(web_search::WebSearchTool::with_keys(brave_key, tavily_key));
         registry.register(file_tool::FileTool::default());
-        registry.register(hardware::HardwareTool::default());
-        registry.register(math::MathTool::default());
+        registry.register(hardware::HardwareTool);
+        registry.register(math::MathTool);
         registry
     }
 

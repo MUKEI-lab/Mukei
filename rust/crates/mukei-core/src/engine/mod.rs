@@ -1,15 +1,14 @@
 //! `mukei_core::engine` — TRD §3 / PRD §9.
 //!
 //! Modules:
-//!   - [`tokenizer`]    — token counter (heuristic + real BPE).
-//!   - [`llama_wrapper`] — `LlamaEngine`, `EngineConfig`,
-//!                         `InferenceBackend`, `MockInferenceBackend`,
-//!                         `StopReason`, full-file SHA verification,
-//!                         GBNF-aware tool-call detection.
-//!   - [`gpu_strategy`]  — Mali / Adreno / Sugarloaf detection with
-//!                         thermal-aware fallback.
-//!   - [`streaming`]     — 50 ms-batched token drain from raw mpsc.
-//!   - [`markdown`]      — pre-typed AST serializer for QML.
+//! - [`tokenizer`] — token counter (heuristic + real BPE).
+//! - [`llama_wrapper`] — `LlamaEngine`, `EngineConfig`,
+//!   `InferenceBackend`, `MockInferenceBackend`, `StopReason`, full-file
+//!   SHA verification, GBNF-aware tool-call detection.
+//! - [`gpu_strategy`] — Mali / Adreno / Sugarloaf detection with
+//!   thermal-aware fallback.
+//! - [`streaming`] — 50 ms-batched token drain from raw mpsc.
+//! - [`markdown`] — pre-typed AST serializer for QML.
 
 pub mod gpu_strategy;
 pub mod llama_wrapper;

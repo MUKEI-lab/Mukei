@@ -496,7 +496,8 @@ mod tests {
         s.set_header(header("mock:v1", 2));
         s.add(1, vec![1.0, 0.0], "d".into());
         s.add(2, vec![0.0, 1.0], "d".into());
-        s.add(3, vec![0.7071, 0.7071], "d".into());
+        let frac = std::f32::consts::FRAC_1_SQRT_2;
+        s.add(3, vec![frac, frac], "d".into());
         let r = s.search(&[1.0, 0.0], 2);
         assert_eq!(r[0].0, 1);
     }

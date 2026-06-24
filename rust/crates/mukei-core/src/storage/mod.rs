@@ -17,11 +17,10 @@
 //!   `feature = "android_keystore"`.
 //!
 //! Contains:
-//!   - `pool`     — `r2d2`-backed `!Send` SQLite pool.
-//!                 All async paths MUST `spawn_blocking` (TRD §2.4
-//!                 "Golden Rule").
-//!   - `migrations` — strictly versioned, append-only SQL migrations.
-//!   - `saf`      — SAF URI grant registry (TRD §5.4).
+//! - `pool` — `r2d2`-backed `!Send` SQLite pool. All async paths MUST
+//!   `spawn_blocking` (TRD §2.4 "Golden Rule").
+//! - `migrations` — strictly versioned, append-only SQL migrations.
+//! - `saf` — SAF URI grant registry (TRD §5.4).
 //!
 //! This module is gated on the `rusqlite` feature so it can be unit-tested
 //! even on hosts where SQLite is not desirable.

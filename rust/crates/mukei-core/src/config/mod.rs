@@ -301,6 +301,24 @@ pub fn write_default(path: &Path) -> io::Result<()> {
     fs::write(path, toml_text)
 }
 
+// ---------------------------------------------------------------------
+// Test-only helper — split out so `load_and_validate` keeps its strict
+// `&Path` signature. Defined BEFORE the test module so clippy's
+// `items_after_test_module` lint stays happy.
+// ---------------------------------------------------------------------
+#[cfg(test)]
+impl MukeiConfig {
+    fn load_and_validate_from_str(s: &str) -> Result<Self> {
+        Self::validate_toml_keys(s.as_bytes())?;
+        let cfg: MukeiConfig = toml::from_str(s).map_err(|e| MukeiError::ConfigInvalid {
+            field: "root".into(),
+            reason: e.to_string(),
+        })?;
+        Self::logical_validate(&cfg)?;
+        Ok(cfg)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,22 +393,5 @@ first_run_completed    = false
         let cfg_text = VALID_TOML.replace("n_ctx             = 4096", "n_ctx             = 64");
         let err = MukeiConfig::load_and_validate_from_str(&cfg_text).unwrap_err();
         assert!(matches!(err, MukeiError::ConfigInvalid { .. }));
-    }
-}
-
-// ---------------------------------------------------------------------
-// Test-only helper — split out so `load_and_validate` keeps its strict
-// `&Path` signature.
-// ---------------------------------------------------------------------
-#[cfg(test)]
-impl MukeiConfig {
-    fn load_and_validate_from_str(s: &str) -> Result<Self> {
-        Self::validate_toml_keys(s.as_bytes())?;
-        let cfg: MukeiConfig = toml::from_str(s).map_err(|e| MukeiError::ConfigInvalid {
-            field: "root".into(),
-            reason: e.to_string(),
-        })?;
-        Self::logical_validate(&cfg)?;
-        Ok(cfg)
     }
 }

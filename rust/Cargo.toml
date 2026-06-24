@@ -56,7 +56,7 @@ r2d2        = "0.8"
 r2d2_sqlite = "0.24"
 
 # ----- HTTP & parsing (TRD §5.1) ---------------------------------------
-reqwest = { version = "0.12", features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 scraper = "0.19"
 url     = "2.5"
 

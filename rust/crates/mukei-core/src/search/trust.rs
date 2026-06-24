@@ -135,7 +135,7 @@ fn extract_host(raw_url: &str) -> Option<String> {
         return None;
     }
     let host_end = after_scheme
-        .find(|c: char| c == '/' || c == '?' || c == '#' || c == ':')
+        .find(['/', '?', '#', ':'])
         .unwrap_or(after_scheme.len());
     let host = &after_scheme[..host_end];
     if host.is_empty() {

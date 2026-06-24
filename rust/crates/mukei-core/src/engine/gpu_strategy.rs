@@ -149,7 +149,7 @@ fn detect_gpu_kind() -> GpuKind {
                 return GpuKind::Mali;
             }
         }
-        return GpuKind::Unknown;
+        GpuKind::Unknown
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]

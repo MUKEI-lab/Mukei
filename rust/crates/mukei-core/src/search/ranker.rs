@@ -145,9 +145,11 @@ impl SearchResultRanker {
             let now = chrono::Utc::now();
             let age = now.signed_duration_since(dt.with_timezone(&chrono::Utc));
             let days = age.num_days();
-            return if days < 0 {
-                1.0
-            } else if days <= 30 {
+            return if days <= 30 {
+                // Negative (future-dated) or within the last 30 days:
+                // treat both as "fresh". A future timestamp almost
+                // always means a misformatted feed and we'd rather not
+                // penalise the hit on that basis.
                 1.0
             } else if days <= 365 {
                 0.6

@@ -66,6 +66,12 @@ fn digest(text: &str) -> String {
     crate::diagnostics::crash_logger::hex_helper(&h.finalize())
 }
 
+impl Default for Chunker {
+    fn default() -> Self {
+        Self::new(Self::DEFAULT_WINDOW, Self::DEFAULT_OVERLAP)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,11 +96,5 @@ mod tests {
         let c = Chunker::default();
         assert!(c.split("").is_empty());
         assert!(c.split("   ").is_empty());
-    }
-}
-
-impl Default for Chunker {
-    fn default() -> Self {
-        Self::new(Self::DEFAULT_WINDOW, Self::DEFAULT_OVERLAP)
     }
 }
