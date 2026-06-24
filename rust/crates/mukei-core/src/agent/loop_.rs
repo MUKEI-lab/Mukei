@@ -96,13 +96,27 @@ impl AgentLoop {
 
             let context_text = self.context.build_for(&history).await?;
 
-            // LLM turn — bridge crate injects the inference backend.
-            let (assistant_text, used_tokens) =
-                crate::engine::llama_wrapper::run_inference(
+            // Architect review GH #46 + GH #47: wrap the inference call
+            // in a `tokio::select!` over the cancel token AND the
+            // watchdog's remaining wall-clock budget. A hung inference
+            // can no longer outlive the agent-loop deadline even if
+            // QML never delivers a cancel.
+            let remaining = self.watchdog.remaining_wall_clock();
+            let (assistant_text, used_tokens) = tokio::select! {
+                biased;
+                _ = cancel_token.cancelled() => {
+                    tracing::debug!("agent loop: user cancelled mid-inference");
+                    return Ok(());
+                }
+                _ = tokio::time::sleep(remaining), if !remaining.is_zero() => {
+                    return Err(MukeiError::WatchdogExceeded { kind: "seconds" });
+                }
+                res = crate::engine::llama_wrapper::run_inference(
                     &context_text,
                     cancel_token.clone(),
                     token_sender.clone(),
-                ).await?;
+                ) => res?,
+            };
 
             tokens_so_far = tokens_so_far.saturating_add(used_tokens);
 

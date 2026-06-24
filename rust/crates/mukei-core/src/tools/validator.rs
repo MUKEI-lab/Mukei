@@ -234,6 +234,35 @@ mod tests {
     }
 
     #[test]
+    fn read_file_rejects_every_non_saf_scheme() {
+        // Architect review GH #38 (TRD §13.3): read_file MUST only
+        // accept saf:// URIs. Any other scheme — file://, http://,
+        // raw absolute, raw relative, even an empty string — is
+        // rejected before dispatch.
+        for bad in [
+            "",
+            "/etc/passwd",
+            "./relative.txt",
+            "file:///etc/passwd",
+            "http://attacker.example/x",
+            "https://attacker.example/x",
+            "content://com.android.providers.media.documents/document/image%3A12345",
+            "SAF://uppercase",
+            "saf:/missing-second-slash",
+        ] {
+            let raw = vec![RawToolCall {
+                name: "read_file".to_string(),
+                arguments: json!({"path": bad}),
+            }];
+            let (ok, err) = validate(raw);
+            assert!(
+                ok.is_empty() && !err.is_empty(),
+                "read_file accepted non-saf path `{bad}` — SAF enforcement broken",
+            );
+        }
+    }
+
+    #[test]
     fn accepts_valid_calls() {
         let raw = vec![
             RawToolCall { name: "web_search".to_string(), arguments: json!({"query": "rust ownership"}) },

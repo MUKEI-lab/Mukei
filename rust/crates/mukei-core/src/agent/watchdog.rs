@@ -68,6 +68,16 @@ impl Watchdog {
         let mut g = self.start.lock().expect("watchdog start mutex poisoned");
         *g = Instant::now();
     }
+
+    /// Architect review GH #46: remaining wall-clock budget. Returns
+    /// `Duration::ZERO` if the budget is already exhausted. Used by
+    /// `run_inference` to bound a single inference call by the same
+    /// deadline the agent loop enforces — a hung inference call no
+    /// longer relies on the QML-side CancellationToken alone.
+    pub fn remaining_wall_clock(&self) -> Duration {
+        let start = *self.start.lock().expect("watchdog start mutex poisoned");
+        self.max_wall.saturating_sub(start.elapsed())
+    }
 }
 
 /// Convenience: cloneable handle carried across awaits (REQ-CON-03).
@@ -89,6 +99,11 @@ impl WatchdogHandle {
     /// top of every turn (Issue #6).
     pub fn rearm(&self) {
         self.inner.rearm();
+    }
+
+    /// Architect review GH #46: see [`Watchdog::remaining_wall_clock`].
+    pub fn remaining_wall_clock(&self) -> std::time::Duration {
+        self.inner.remaining_wall_clock()
     }
 }
 
@@ -151,5 +166,20 @@ mod tests {
         let h2 = h.clone();
         assert!(h.check(0, 0).is_ok());
         assert!(h2.check(0, 0).is_ok());
+    }
+
+    #[test]
+    fn remaining_wall_clock_shrinks_with_uptime() {
+        // Architect review GH #46 regression: the wall-clock budget
+        // exposed by `remaining_wall_clock` MUST track the budget the
+        // `check` path enforces.
+        let w = Watchdog::new(100, 1_000_000, Duration::from_millis(50));
+        let before = w.remaining_wall_clock();
+        std::thread::sleep(Duration::from_millis(10));
+        let after = w.remaining_wall_clock();
+        assert!(after < before, "remaining must shrink: {before:?} -> {after:?}");
+        // After the full budget elapses, remaining saturates at 0.
+        std::thread::sleep(Duration::from_millis(80));
+        assert_eq!(w.remaining_wall_clock(), Duration::ZERO);
     }
 }

@@ -34,6 +34,11 @@ pub struct MukeiConfig {
     pub saf:              SafCfg,
     pub agent:            AgentCfg,
     pub defaults:         DefaultsCfg,
+    /// Architect review GH #34: per-engine search timeouts + cache
+    /// behaviour are now config-driven. Optional with `#[serde(default)]`
+    /// so v0.7.5 configs that pre-date this section still load.
+    #[serde(default)]
+    pub search:           SearchCfg,
     /// List of known third-party API-key slots whose values are
     /// Keystore-wrapped ciphertext (REQ-SEC-20 / §12.4).
     #[serde(default)]
@@ -109,6 +114,46 @@ pub struct DefaultsCfg {
     pub prompt_card_auto_send: bool,
     pub thermal_autopause: bool,
     pub first_run_completed: bool,
+}
+
+/// Architect review GH #34: search-stack tunables. Fully-defaulted so
+/// pre-existing configs still load without amendment.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct SearchCfg {
+    /// Brave per-call timeout in seconds. Default 3 (migration §13).
+    /// PRD bumped from "hardcoded constant" to "configurable" so
+    /// network conditions in poor connectivity zones (4G in rural
+    /// India / Southeast Asia) can be tuned without a rebuild.
+    #[serde(default = "SearchCfg::default_brave_timeout_secs")]
+    pub brave_timeout_secs: u64,
+    /// Tavily per-call timeout in seconds. Default 5.
+    #[serde(default = "SearchCfg::default_tavily_timeout_secs")]
+    pub tavily_timeout_secs: u64,
+    /// Maximum number of engines invoked in parallel for one task.
+    /// Default 2.
+    #[serde(default = "SearchCfg::default_max_parallel_engines")]
+    pub max_parallel_engines: usize,
+    /// Whether the search cache layer is enabled.
+    #[serde(default = "SearchCfg::default_enable_cache")]
+    pub enable_cache: bool,
+}
+
+impl SearchCfg {
+    pub fn default_brave_timeout_secs() -> u64 { 3 }
+    pub fn default_tavily_timeout_secs() -> u64 { 5 }
+    pub fn default_max_parallel_engines() -> usize { 2 }
+    pub fn default_enable_cache() -> bool { true }
+}
+
+impl Default for SearchCfg {
+    fn default() -> Self {
+        Self {
+            brave_timeout_secs: Self::default_brave_timeout_secs(),
+            tavily_timeout_secs: Self::default_tavily_timeout_secs(),
+            max_parallel_engines: Self::default_max_parallel_engines(),
+            enable_cache: Self::default_enable_cache(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

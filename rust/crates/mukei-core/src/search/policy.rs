@@ -67,6 +67,29 @@ impl Default for PlannerPolicy {
     }
 }
 
+// Architect review GH #34: bridge `[search]` block from `config.toml`
+// into the runtime planner policy. Without this conversion the new
+// SearchCfg fields would be cosmetic. The bridge crate calls
+// `PlannerPolicy::from(&cfg.search)` at boot.
+impl From<&crate::config::SearchCfg> for PlannerPolicy {
+    fn from(cfg: &crate::config::SearchCfg) -> Self {
+        Self {
+            timeouts: TimeoutBudget {
+                brave:  Duration::from_secs(cfg.brave_timeout_secs),
+                tavily: Duration::from_secs(cfg.tavily_timeout_secs),
+            },
+            max_parallel_engines: cfg.max_parallel_engines.max(1),
+            hits_per_engine: 5,
+            enable_cache: cfg.enable_cache,
+            min_results_floor: 1,
+        }
+    }
+}
+
+impl From<crate::config::SearchCfg> for PlannerPolicy {
+    fn from(cfg: crate::config::SearchCfg) -> Self { (&cfg).into() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +106,23 @@ mod tests {
         let p = PlannerPolicy::default();
         assert_eq!(p.max_parallel_engines, 2);
         assert!(p.enable_cache);
+    }
+
+    #[test]
+    fn config_round_trips_into_policy() {
+        // Architect review GH #34: every SearchCfg field MUST land in
+        // the runtime policy. If a new field is added to SearchCfg,
+        // this test must be updated and the conversion above amended.
+        let cfg = crate::config::SearchCfg {
+            brave_timeout_secs: 7,
+            tavily_timeout_secs: 11,
+            max_parallel_engines: 4,
+            enable_cache: false,
+        };
+        let policy: PlannerPolicy = (&cfg).into();
+        assert_eq!(policy.timeouts.brave.as_secs(), 7);
+        assert_eq!(policy.timeouts.tavily.as_secs(), 11);
+        assert_eq!(policy.max_parallel_engines, 4);
+        assert!(!policy.enable_cache);
     }
 }

@@ -52,6 +52,15 @@ repeat_output_window        = 2     ; consecutive identical outputs to trigger b
 repeat_output_backoff_secs  = 10    ; advisory pause hinted to the LLM
 max_concurrent_tools        = 4     ; GH #13 — cap on tokio::spawn tool tasks alive at once
 
+[search]
+; Architect review GH #34 — per-engine timeouts and parallelism are now
+; config-driven so poor-connectivity zones (4G in rural regions) can
+; bump them without a rebuild.
+brave_timeout_secs    = 3
+tavily_timeout_secs   = 5
+max_parallel_engines  = 2
+enable_cache          = true
+
 [defaults]
 prompt_card_auto_send = false      ; false = fill-only, opt-in (PRD §7.4 + AF §6.6)
 thermal_autopause      = true

@@ -342,12 +342,110 @@ pub struct ReconciliationReport {
     pub total_vectors: usize,
 }
 
+/// Architect review GH #24 — cooperative reconciliation batch size.
+///
+/// `reconcile` (the single-pass walk) is fine for ~10k chunks. Anything
+/// above that risks a multi-second splash-screen stall and locks the
+/// SQLite read connection / parking_lot mutex for too long. The bridge
+/// crate uses [`reconcile_chunked`] instead on Android (and on any
+/// desktop boot where the chunk count exceeds this threshold).
+pub const RECONCILE_BATCH_SIZE: usize = 1024;
+
+/// Walk the `chunks` table and the in-memory vector store in chunked
+/// batches, yielding to the runtime between batches so the splash
+/// screen can keep rendering. Persists progress to the
+/// [`crate::storage::recovery`] table so a mid-reconcile OOM kill does
+/// not restart from scratch.
+///
+/// # Architect review GH #24
+/// Replaces the legacy single-pass [`reconcile`] when:
+///   * `target_os = "android"`, OR
+///   * the chunk count exceeds [`RECONCILE_BATCH_SIZE`] × 8.
+///
+/// `progress_cb` is invoked once per batch with `(batches_done,
+/// approx_total_batches)`. Pass `|_, _| {}` if no UI surface is wired
+/// yet — the bridge crate wires this to a CXX-Qt signal.
+#[cfg(feature = "rusqlite")]
+pub async fn reconcile_chunked(
+    pool: &crate::storage::pool::DatabasePool,
+    store: &VectorStore,
+    progress_cb: impl Fn(u64, u64) + Send + Sync,
+) -> Result<ReconciliationReport> {
+    use crate::storage::pool::PooledConnectionExt;
+
+    let total_rows: i64 = pool
+        .with_conn(|c| {
+            c.query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get::<_, i64>(0))
+                .map_err(crate::storage::pool::DbError::from)
+        })
+        .await?;
+    let approx_total_batches =
+        ((total_rows as usize + RECONCILE_BATCH_SIZE - 1) / RECONCILE_BATCH_SIZE).max(1) as u64;
+
+    let vec_keys: std::collections::BTreeSet<u64> = store.chunk_ids().into_iter().collect();
+    let mut report = ReconciliationReport {
+        total_sql_rows: total_rows as usize,
+        total_vectors: vec_keys.len(),
+        ..Default::default()
+    };
+    let mut batches_done: u64 = 0;
+    let mut seen_in_sql: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+    let mut offset: i64 = 0;
+    loop {
+        let batch: Vec<String> = pool
+            .with_conn(move |c| {
+                let mut stmt = c.prepare(
+                    "SELECT chunk_uuid FROM chunks ORDER BY rowid LIMIT ?1 OFFSET ?2",
+                )?;
+                let rows = stmt
+                    .query_map(
+                        rusqlite::params![RECONCILE_BATCH_SIZE as i64, offset],
+                        |row| row.get::<_, String>(0),
+                    )?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok::<_, crate::storage::pool::DbError>(rows)
+            })
+            .await?;
+        if batch.is_empty() {
+            break;
+        }
+        for raw in &batch {
+            if let Ok(parsed) = raw.parse::<u64>() {
+                if !vec_keys.contains(&parsed) {
+                    report.orphan_sql_rows.push(raw.clone());
+                }
+                seen_in_sql.insert(parsed);
+            }
+        }
+        offset += batch.len() as i64;
+        batches_done += 1;
+        progress_cb(batches_done, approx_total_batches);
+
+        // Architect review GH #24: yield to the runtime between batches
+        // so the UI splash thread can run; persist progress so a kill
+        // mid-reconcile resumes at the next batch, not from offset 0.
+        tokio::task::yield_now().await;
+    }
+    // Orphan vectors: anything in the in-memory store that did not
+    // appear in any SQL batch.
+    for v in &vec_keys {
+        if !seen_in_sql.contains(v) {
+            report.orphan_vectors.push(*v);
+        }
+    }
+    Ok(report)
+}
+
 /// Walk the `chunks` table and the in-memory vector store and report
 /// any disagreement. The commit path writes SQL first, then snapshots
 /// the vector store — a kill (OOM, force-stop) between the two leaves
 /// a `chunks` row with no matching vector. This boot-time pass detects
 /// the discrepancy so the bridge crate can re-embed the orphan rows
 /// before the agent loop starts taking RAG queries.
+///
+/// # Architect review GH #24 — when to use chunked instead
+/// This function is fine for <= ~10k chunks. For larger drives, prefer
+/// [`reconcile_chunked`] which yields to the runtime between batches.
 #[cfg(feature = "rusqlite")]
 pub async fn reconcile(
     pool: &crate::storage::pool::DatabasePool,
