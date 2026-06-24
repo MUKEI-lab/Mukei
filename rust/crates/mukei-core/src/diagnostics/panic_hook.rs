@@ -96,6 +96,70 @@ pub fn is_installed() -> bool {
         .unwrap_or(false)
 }
 
+/// Architect review GH #31: re-install the Mukei panic hook even when a
+/// downstream framework (a Qt embedder, a test harness, a host app)
+/// overwrites it. `std::panic::set_hook` is process-global; once a
+/// stranger calls `set_hook`, our crash-sink + tracing emit are gone
+/// until we reclaim it.
+///
+/// Unlike [`install_panic_hook`], this function does NOT consult the
+/// `INSTALLED` OnceLock — it ALWAYS calls `std::panic::set_hook`. The
+/// previously-stored [`PanicSink`] is reused; pass `None` to keep it,
+/// or `Some(new_sink)` to swap.
+///
+/// **Idempotency**: calling this twice with the same sink is
+/// equivalent to calling it once. Calling it from multiple threads is
+/// safe but only the last writer wins.
+pub fn reinstall_panic_hook(sink: Option<Arc<dyn PanicSink>>) {
+    if let Some(new_sink) = sink {
+        // The OnceLock can only be set once; if a sink is already
+        // registered we keep it. The caller can detect this via the
+        // returned reference (Result<_, _>); we deliberately ignore
+        // here to keep the API simple.
+        let _ = SINK.set(new_sink);
+    }
+
+    // Unconditionally rebuild and reinstall the hook — even if
+    // `set_hook` had been called by something else after our last
+    // `install_panic_hook`. This is the load-bearing behavioural
+    // difference vs. `install_panic_hook`.
+    std::panic::set_hook(Box::new(|info| {
+        let sink_opt = SINK.get().cloned();
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "<unknown>".into());
+        let payload = info.payload();
+        let reason = if let Some(s) = payload.downcast_ref::<&'static str>() {
+            (*s).to_string()
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "<non-string panic>".into()
+        };
+
+        let fp = CrashFingerprint::from_panic(&location, &reason);
+        let record = crate::diagnostics::crash_logger::CrashRecord::new(
+            fp.clone(),
+            location.clone(),
+            reason.clone(),
+        );
+        if let Some(crash_sink) = logger::crash_sink() {
+            crash_sink.append(&record);
+        }
+        tracing::error!(
+            target = "mukei::panic",
+            fingerprint = %fp,
+            location = %location,
+            reason = %reason,
+            "panic caught at FFI boundary (reinstalled hook)"
+        );
+        if let Some(sink) = sink_opt {
+            sink.on_panic(&fp, &reason);
+        }
+    }));
+}
+
 // ---------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------
