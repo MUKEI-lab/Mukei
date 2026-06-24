@@ -31,10 +31,7 @@
 // correctness regression. Force `candle` ON for release-hardened
 // builds; tests / sandbox builds opt out by simply not enabling
 // `release-hardening`.
-#[cfg(all(
-    feature = "release-hardening",
-    not(feature = "candle"),
-))]
+#[cfg(all(feature = "release-hardening", not(feature = "candle"),))]
 compile_error!(
     "mukei-core compiled with `release-hardening` but WITHOUT `candle`. \
      This would silently ship the MockEmbedder — RAG retrieval would \
@@ -278,7 +275,11 @@ impl CandleMiniLmEmbedder {
             tokenizers::TruncationDirection::Right,
         );
 
-        let token_ids = encoding.get_ids().iter().map(|&id| id as i64).collect::<Vec<_>>();
+        let token_ids = encoding
+            .get_ids()
+            .iter()
+            .map(|&id| id as i64)
+            .collect::<Vec<_>>();
         let attention_mask = encoding
             .get_attention_mask()
             .iter()

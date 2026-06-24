@@ -56,7 +56,9 @@ impl OutputRepeatTracker {
     /// Forget the ring for a single `(tool, fingerprint)` pair (e.g.
     /// after a permanent / abuse block clears the rest of the turn).
     pub fn forget(&self, tool: &str, fp: &str) {
-        self.history.lock().remove(&(tool.to_string(), fp.to_string()));
+        self.history
+            .lock()
+            .remove(&(tool.to_string(), fp.to_string()));
     }
 
     /// Drop every tracked pair. Called at the start of each new run().

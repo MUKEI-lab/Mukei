@@ -102,8 +102,8 @@ fn read_text_file(grant: SafGrant) -> Result<String> {
         )));
     }
 
-    let bytes = fs::read(&canonical_path)
-        .map_err(|e| MukeiError::FileReadFailed(format!("read: {e}")))?;
+    let bytes =
+        fs::read(&canonical_path).map_err(|e| MukeiError::FileReadFailed(format!("read: {e}")))?;
     sniff_utf8(&bytes)?;
     let mut text = String::from_utf8(bytes).map_err(|_| MukeiError::BinaryFile)?;
     if text.chars().count() > MAX_TEXT_CHARS {

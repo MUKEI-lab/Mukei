@@ -101,10 +101,13 @@ impl<'a> IndexingTransaction<'a> {
     /// Embed a chunk and append it to both the in-memory vector store
     /// AND the SQL staging queue. The chunk is only durable after
     /// [`Self::commit`] returns `Ok(())`.
-    pub async fn embed_and_stage(&mut self, chunk: StagedChunk, text_for_embed: &str) -> Result<()> {
+    pub async fn embed_and_stage(
+        &mut self,
+        chunk: StagedChunk,
+        text_for_embed: &str,
+    ) -> Result<()> {
         let emb = self.embedder.embed(text_for_embed).await?;
-        self.store
-            .add(chunk.chunk_id, emb.0, chunk.sha256.clone());
+        self.store.add(chunk.chunk_id, emb.0, chunk.sha256.clone());
         self.pending.push(chunk);
         Ok(())
     }
@@ -231,9 +234,16 @@ pub enum IndexProgress {
     /// Indexing started for `file_id`.
     Started { file_id: String },
     /// Embedded a chunk; `chunk_id` is the freshly-staged id.
-    Chunk { file_id: String, chunk_id: u64, ordinal: u32 },
+    Chunk {
+        file_id: String,
+        chunk_id: u64,
+        ordinal: u32,
+    },
     /// Indexing committed successfully.
-    Committed { file_id: String, total_chunks: usize },
+    Committed {
+        file_id: String,
+        total_chunks: usize,
+    },
     /// Indexing rolled back (SAF revoke, OOM, cancellation).
     RolledBack { file_id: String, reason: String },
 }
@@ -375,8 +385,10 @@ pub async fn reconcile_chunked(
 
     let total_rows: i64 = pool
         .with_conn(|c| {
-            c.query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get::<_, i64>(0))
-                .map_err(crate::storage::pool::DbError::from)
+            c.query_row("SELECT COUNT(*) FROM chunks", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map_err(crate::storage::pool::DbError::from)
         })
         .await?;
     let approx_total_batches =
@@ -394,9 +406,8 @@ pub async fn reconcile_chunked(
     loop {
         let batch: Vec<String> = pool
             .with_conn(move |c| {
-                let mut stmt = c.prepare(
-                    "SELECT chunk_uuid FROM chunks ORDER BY rowid LIMIT ?1 OFFSET ?2",
-                )?;
+                let mut stmt =
+                    c.prepare("SELECT chunk_uuid FROM chunks ORDER BY rowid LIMIT ?1 OFFSET ?2")?;
                 let rows = stmt
                     .query_map(
                         rusqlite::params![RECONCILE_BATCH_SIZE as i64, offset],

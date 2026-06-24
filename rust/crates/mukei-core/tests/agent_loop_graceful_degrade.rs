@@ -26,8 +26,8 @@ use tokio_util::sync::CancellationToken;
 use mukei_core::agent::context::{ContextBackend, ContextBudgetManager, TokenCount};
 use mukei_core::agent::loop_::AgentLoop;
 use mukei_core::agent::tools::{
-    render_repeat_output_envelope, render_tool_error_envelope, FailureKind,
-    FailureTracker, ToolExecutionPolicy, ToolExecutor,
+    render_repeat_output_envelope, render_tool_error_envelope, FailureKind, FailureTracker,
+    ToolExecutionPolicy, ToolExecutor,
 };
 use mukei_core::agent::watchdog::{Watchdog, WatchdogHandle};
 use mukei_core::error::MukeiError;
@@ -93,12 +93,7 @@ async fn run_completes_without_tool_calls() {
     // treat it as a final answer and return Ok(()) on the first
     // iteration.
     let result = agent
-        .run(
-            "hello world".to_string(),
-            BranchId::default(),
-            cancel,
-            tx,
-        )
+        .run("hello world".to_string(), BranchId::default(), cancel, tx)
         .await;
 
     assert!(
@@ -134,7 +129,7 @@ async fn cancellation_is_observed() {
     let (tx, _rx) = mpsc::channel::<String>(256);
     let cancel = CancellationToken::new();
     cancel.cancel(); // pre-cancel — first watchdog check returns Ok, then
-                    // the early-return check observes the cancellation.
+                     // the early-return check observes the cancellation.
 
     let result = agent
         .run("hello".to_string(), BranchId::default(), cancel, tx)
@@ -153,10 +148,7 @@ async fn failure_tracker_blocks_at_configured_threshold() {
     // Five consecutive hits do NOT block; the sixth does.
     let tracker = FailureTracker::new();
     assert_eq!(tracker.threshold(), 5);
-    let fp = FailureTracker::fingerprint(
-        "web_search",
-        &serde_json::json!({"query": "test"}),
-    );
+    let fp = FailureTracker::fingerprint("web_search", &serde_json::json!({"query": "test"}));
     for attempt in 1..=5 {
         assert!(
             !tracker.record_failure("web_search", &fp),
@@ -173,10 +165,7 @@ async fn failure_tracker_blocks_at_configured_threshold() {
 async fn failure_tracker_threshold_is_configurable() {
     // Tighter threshold (e.g. for chaos / red-team runs).
     let tracker = FailureTracker::with_threshold(2);
-    let fp = FailureTracker::fingerprint(
-        "math_eval",
-        &serde_json::json!({"expression": "1+1"}),
-    );
+    let fp = FailureTracker::fingerprint("math_eval", &serde_json::json!({"expression": "1+1"}));
     assert!(!tracker.record_failure("math_eval", &fp));
     assert!(!tracker.record_failure("math_eval", &fp));
     assert!(tracker.record_failure("math_eval", &fp));
@@ -184,14 +173,8 @@ async fn failure_tracker_threshold_is_configurable() {
 
 #[tokio::test]
 async fn fingerprint_is_argument_order_independent() {
-    let a = FailureTracker::fingerprint(
-        "math_eval",
-        &serde_json::json!({"a": 1, "b": 2}),
-    );
-    let b = FailureTracker::fingerprint(
-        "math_eval",
-        &serde_json::json!({"b": 2, "a": 1}),
-    );
+    let a = FailureTracker::fingerprint("math_eval", &serde_json::json!({"a": 1, "b": 2}));
+    let b = FailureTracker::fingerprint("math_eval", &serde_json::json!({"b": 2, "a": 1}));
     assert_eq!(a, b);
 }
 
@@ -275,7 +258,9 @@ async fn tool_execution_policy_defaults_match_audit_recommendation() {
 async fn abuse_kind_is_new_audit_class() {
     // Confirm the audit's requested `Abuse` variant exists and is wired
     // through MukeiError::ToolAbuseBlocked.
-    let err = MukeiError::ToolAbuseBlocked { tool_name: "web_search".into() };
+    let err = MukeiError::ToolAbuseBlocked {
+        tool_name: "web_search".into(),
+    };
     assert_eq!(FailureKind::classify(&err), FailureKind::Abuse);
     assert!(FailureKind::Abuse.is_instant_block());
     assert!(!FailureKind::Abuse.counts_toward_threshold());

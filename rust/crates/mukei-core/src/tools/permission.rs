@@ -104,7 +104,9 @@ impl PermissionMatrix {
     /// Build an empty matrix — used by tests that want to register one
     /// tool at a time.
     pub fn empty() -> Self {
-        Self { rows: BTreeMap::new() }
+        Self {
+            rows: BTreeMap::new(),
+        }
     }
 
     /// Add / replace one row.
@@ -122,11 +124,7 @@ impl PermissionMatrix {
 
     /// True iff every required capability for `tool` appears in the
     /// `granted` set. Unknown tools return `false`.
-    pub fn is_allowed(
-        &self,
-        tool: &str,
-        granted: &std::collections::BTreeSet<Capability>,
-    ) -> bool {
+    pub fn is_allowed(&self, tool: &str, granted: &std::collections::BTreeSet<Capability>) -> bool {
         let Some(perms) = self.permissions_for(tool) else {
             return false;
         };
@@ -145,22 +143,13 @@ impl Default for PermissionMatrix {
     /// [`crate::tools::ALLOWED_TOOLS`].
     fn default() -> Self {
         let mut m = Self::empty();
-        m.register(
-            "web_search",
-            ToolPermissions::of(&[Capability::Internet]),
-        );
-        m.register(
-            "read_file",
-            ToolPermissions::of(&[Capability::DiskRead]),
-        );
+        m.register("web_search", ToolPermissions::of(&[Capability::Internet]));
+        m.register("read_file", ToolPermissions::of(&[Capability::DiskRead]));
         m.register(
             "get_hardware_info",
             ToolPermissions::of(&[Capability::DeviceState]),
         );
-        m.register(
-            "math_eval",
-            ToolPermissions::of(&[Capability::SandboxEval]),
-        );
+        m.register("math_eval", ToolPermissions::of(&[Capability::SandboxEval]));
         m
     }
 }

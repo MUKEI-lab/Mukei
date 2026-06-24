@@ -151,8 +151,14 @@ mod tests {
     #[test]
     fn trusted_domain_passes() {
         let c = TrustClassifier::new();
-        assert_eq!(c.classify("https://www.reuters.com/article"), SourceTrust::Trusted);
-        assert_eq!(c.classify("https://arxiv.org/abs/2401.00001"), SourceTrust::Trusted);
+        assert_eq!(
+            c.classify("https://www.reuters.com/article"),
+            SourceTrust::Trusted
+        );
+        assert_eq!(
+            c.classify("https://arxiv.org/abs/2401.00001"),
+            SourceTrust::Trusted
+        );
     }
 
     #[test]

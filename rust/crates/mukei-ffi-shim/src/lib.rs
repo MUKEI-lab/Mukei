@@ -67,9 +67,7 @@ pub extern "C" fn mukei_release_callback_guard(guard_ptr: *const Inner) {
 /// Read the current generation counter. Used by the C side when it wants
 /// to bind a callback against the current guard state.
 #[no_mangle]
-pub extern "C" fn mukei_callback_guard_current_generation(
-    guard_ptr: *const Inner,
-) -> u64 {
+pub extern "C" fn mukei_callback_guard_current_generation(guard_ptr: *const Inner) -> u64 {
     if guard_ptr.is_null() {
         return 0;
     }
@@ -83,9 +81,7 @@ pub extern "C" fn mukei_callback_guard_current_generation(
 /// number, or 0 on a NULL guard. Equivalent to "logically cancel every
 /// in-flight callback bound against the previous generation".
 #[no_mangle]
-pub extern "C" fn mukei_callback_guard_bump_generation(
-    guard_ptr: *const Inner,
-) -> u64 {
+pub extern "C" fn mukei_callback_guard_bump_generation(guard_ptr: *const Inner) -> u64 {
     if guard_ptr.is_null() {
         return 0;
     }
@@ -96,10 +92,7 @@ pub extern "C" fn mukei_callback_guard_bump_generation(
 
 /// True iff `generation` matches the guard's current generation.
 #[no_mangle]
-pub extern "C" fn mukei_callback_guard_matches(
-    guard_ptr: *const Inner,
-    generation: u64,
-) -> bool {
+pub extern "C" fn mukei_callback_guard_matches(guard_ptr: *const Inner, generation: u64) -> bool {
     if guard_ptr.is_null() {
         return false;
     }
@@ -166,11 +159,10 @@ pub extern "C" fn mukei_send_message(
         // Single dispatch — `callback_with_guard!` enforces:
         //   1. generation match,
         //   2. `catch_unwind` so a panic does NOT cross the FFI boundary.
-        let result: Result<(), GuardError> =
-            callback_with_guard!(guard_ptr_local, generation, {
-                callback(context_ptr_local, generation, payload.as_ptr());
-                Ok::<(), GuardError>(())
-            });
+        let result: Result<(), GuardError> = callback_with_guard!(guard_ptr_local, generation, {
+            callback(context_ptr_local, generation, payload.as_ptr());
+            Ok::<(), GuardError>(())
+        });
 
         if let Err(err) = result {
             tracing::warn!(?err, "ffi-shim callback dropped (guard expired or panic)");

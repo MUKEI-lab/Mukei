@@ -23,6 +23,6 @@ pub use llama_wrapper::{
     InferenceOutcome, LlamaEngine, MockInferenceBackend, ModelPinnedHash, StopReason,
 };
 pub use streaming::{Drainer, TokenStreamConfig};
-pub use tokenizer::{CharCountTokenizer, TokenCount};
 #[cfg(feature = "candle")]
 pub use tokenizer::BpeTokenizer;
+pub use tokenizer::{CharCountTokenizer, TokenCount};

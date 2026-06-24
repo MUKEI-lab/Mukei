@@ -19,7 +19,10 @@ pub fn serialise(nodes: &[MarkdownNode]) -> String {
     match serde_json::to_string(nodes) {
         Ok(json) => json,
         Err(err) => {
-            tracing::error!(?err, "markdown AST serialisation failed — returning empty AST");
+            tracing::error!(
+                ?err,
+                "markdown AST serialisation failed — returning empty AST"
+            );
             String::from("[]")
         }
     }

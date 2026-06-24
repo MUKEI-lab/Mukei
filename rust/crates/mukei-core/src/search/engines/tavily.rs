@@ -18,6 +18,7 @@ use crate::search::engines::{SearchEngine, SearchEngineKind, SearchRequest};
 use crate::search::SearchHit;
 
 /// Tavily Search engine.
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
 pub struct TavilyEngine {
     api_key: String,
     base_url: String,

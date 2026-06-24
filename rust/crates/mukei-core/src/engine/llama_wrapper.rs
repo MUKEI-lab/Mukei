@@ -164,7 +164,9 @@ impl LlamaEngine {
     pub fn fingerprint_header(path: &Path) -> Result<String> {
         let mut f = std::fs::File::open(path).map_err(|e| MukeiError::Io(e.to_string()))?;
         let mut buf = [0u8; SHA_STREAM_CHUNK];
-        let n = f.read(&mut buf).map_err(|e| MukeiError::Io(e.to_string()))?;
+        let n = f
+            .read(&mut buf)
+            .map_err(|e| MukeiError::Io(e.to_string()))?;
         let mut h = Sha256::new();
         h.update(&buf[..n]);
         Ok(crate::diagnostics::crash_logger::hex_helper(&h.finalize()))
@@ -177,7 +179,9 @@ impl LlamaEngine {
         let mut h = Sha256::new();
         let mut buf = vec![0u8; SHA_STREAM_CHUNK];
         loop {
-            let n = f.read(&mut buf).map_err(|e| MukeiError::Io(e.to_string()))?;
+            let n = f
+                .read(&mut buf)
+                .map_err(|e| MukeiError::Io(e.to_string()))?;
             if n == 0 {
                 break;
             }
@@ -396,7 +400,9 @@ pub async fn run_inference(
     token_sender: mpsc::Sender<String>,
 ) -> Result<(String, u64)> {
     let backend = MockInferenceBackend::default();
-    let outcome = backend.run(context_text, cancel_token, token_sender).await?;
+    let outcome = backend
+        .run(context_text, cancel_token, token_sender)
+        .await?;
     Ok((outcome.assistant_text, outcome.used_tokens))
 }
 
@@ -421,7 +427,9 @@ mod tests {
 
     #[test]
     fn contains_tool_call_recognises_gbnf_envelope() {
-        assert!(has_tool_call("[{\"name\": \"web_search\", \"arguments\": {}}]"));
+        assert!(has_tool_call(
+            "[{\"name\": \"web_search\", \"arguments\": {}}]"
+        ));
         assert!(has_tool_call("  \n[{\"name\":\"x\",\"arguments\":{}}"));
         assert!(has_tool_call("[ {\"name\": \"x\", \"arguments\": {}} ]"));
     }
@@ -434,7 +442,9 @@ mod tests {
         assert!(!has_tool_call("[1, 2, 3]"));
         assert!(!has_tool_call("[\"hello\", \"world\"]"));
         assert!(!has_tool_call("[]"));
-        assert!(!has_tool_call("[{\"role\": \"user\", \"content\": \"hi\"}]"));
+        assert!(!has_tool_call(
+            "[{\"role\": \"user\", \"content\": \"hi\"}]"
+        ));
     }
 
     // ---- Full-file SHA-256 ----
@@ -506,7 +516,10 @@ mod tests {
         let (tx, _rx) = mpsc::channel::<String>(64);
         let tok = CancellationToken::new();
         tok.cancel();
-        let outcome = backend.run("hello world hello world hello world", tok, tx).await.unwrap();
+        let outcome = backend
+            .run("hello world hello world hello world", tok, tx)
+            .await
+            .unwrap();
         assert_eq!(outcome.stop_reason, StopReason::UserStopped);
     }
 

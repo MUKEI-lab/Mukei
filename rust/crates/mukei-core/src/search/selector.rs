@@ -74,8 +74,14 @@ mod tests {
     #[test]
     fn no_kind_returns_empty() {
         for kind in [
-            TaskKind::Fact, TaskKind::Research, TaskKind::Compare, TaskKind::News,
-            TaskKind::Academic, TaskKind::Shopping, TaskKind::Local, TaskKind::MultiStep,
+            TaskKind::Fact,
+            TaskKind::Research,
+            TaskKind::Compare,
+            TaskKind::News,
+            TaskKind::Academic,
+            TaskKind::Shopping,
+            TaskKind::Local,
+            TaskKind::MultiStep,
         ] {
             assert!(!SearchSelector::select(kind).is_empty());
         }

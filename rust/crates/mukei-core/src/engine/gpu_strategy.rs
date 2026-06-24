@@ -129,7 +129,10 @@ fn detect_gpu_kind() -> GpuKind {
     {
         if let Ok(text) = fs::read_to_string("/proc/cpuinfo") {
             let lower = text.to_lowercase();
-            if lower.contains("qualcomm") || lower.contains("snapdragon") || lower.contains("adreno") {
+            if lower.contains("qualcomm")
+                || lower.contains("snapdragon")
+                || lower.contains("adreno")
+            {
                 return GpuKind::Adreno;
             }
             if lower.contains("mali") || lower.contains("exynos") || lower.contains("mediatek") {

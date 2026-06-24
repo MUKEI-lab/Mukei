@@ -36,23 +36,33 @@ pub use tokio;
 
 // ----- Public surface modules: missing_docs is ENFORCED ------------------
 pub mod error;
-pub mod guard;
 pub mod ffi;
+pub mod guard;
 
 // ----- Crate-internal scaffolding: missing_docs allow-listed for now ----
 // Each of these has a top-level `# Invariants` block; the per-item doc
 // pass is tracked in the engineering backlog.
-#[allow(missing_docs)] pub mod types;
+#[allow(missing_docs)]
+pub mod agent;
+#[allow(missing_docs)]
+pub mod config;
+#[allow(missing_docs)]
+pub mod diagnostics;
+#[allow(missing_docs)]
+pub mod engine;
+#[allow(missing_docs)]
+pub mod rag;
 #[cfg(feature = "tokio")]
-#[allow(missing_docs)] pub mod runtime;
-#[allow(missing_docs)] pub mod diagnostics;
-#[allow(missing_docs)] pub mod agent;
-#[allow(missing_docs)] pub mod engine;
-#[allow(missing_docs)] pub mod rag;
-#[allow(missing_docs)] pub mod tools;
-#[allow(missing_docs)] pub mod search;
-#[allow(missing_docs)] pub mod storage;
-#[allow(missing_docs)] pub mod config;
+#[allow(missing_docs)]
+pub mod runtime;
+#[allow(missing_docs)]
+pub mod search;
+#[allow(missing_docs)]
+pub mod storage;
+#[allow(missing_docs)]
+pub mod tools;
+#[allow(missing_docs)]
+pub mod types;
 
 // Re-exports for ergonomic use from `mukei-bridge`.
 pub use crate::error::{ErrorClass, MukeiError, Result};
@@ -63,10 +73,12 @@ pub use crate::error::{ErrorClass, MukeiError, Result};
 pub mod prelude {
     //! Common imports for the core crates.
     pub use crate::error::{MukeiError, Result};
-    pub use crate::{callback_with_guard, guard::{CallbackGuard, GuardError}};
     pub use crate::types::{
-        ChatMessage, ConversationId, MessageId, Role, ToolCall, ToolCallId,
-        ToolResult,
+        ChatMessage, ConversationId, MessageId, Role, ToolCall, ToolCallId, ToolResult,
+    };
+    pub use crate::{
+        callback_with_guard,
+        guard::{CallbackGuard, GuardError},
     };
 }
 

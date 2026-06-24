@@ -15,15 +15,14 @@ pub mod embedder;
 pub mod indexer;
 pub mod vector_store;
 
-pub use embedder::{Embedder, Embedding, MockEmbedder};
 #[cfg(feature = "candle")]
 pub use embedder::{CandleConfig, CandleMiniLmEmbedder, Pooling};
+pub use embedder::{Embedder, Embedding, MockEmbedder};
 
 pub use indexer::{
     handle_revoke, BackgroundIndexer, FileSaw, IndexProgress, IndexingTransaction, StagedChunk,
 };
 
 pub use vector_store::{
-    RebuildVerdict, StoreHeader, VectorStore, VectorStoreError, ATOMIC_SUFFIX,
-    STORE_FORMAT_VERSION,
+    RebuildVerdict, StoreHeader, VectorStore, VectorStoreError, ATOMIC_SUFFIX, STORE_FORMAT_VERSION,
 };

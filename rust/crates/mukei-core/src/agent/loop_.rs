@@ -44,7 +44,7 @@ pub const DEFAULT_MAX_ITERATIONS: usize = 8;
 /// [`tokio::task::spawn`] — it never blocks.
 pub struct AgentLoop {
     pub(crate) context: ContextBudgetManager,
-    pub(crate) tools:   ToolExecutor,
+    pub(crate) tools: ToolExecutor,
     pub(crate) watchdog: WatchdogHandle,
 }
 
@@ -54,7 +54,11 @@ impl AgentLoop {
         tools: ToolExecutor,
         watchdog: WatchdogHandle,
     ) -> Arc<Self> {
-        Arc::new(Self { context, tools, watchdog })
+        Arc::new(Self {
+            context,
+            tools,
+            watchdog,
+        })
     }
 
     /// Run the loop until either the LLM returns a final answer, the
@@ -75,8 +79,8 @@ impl AgentLoop {
         // were designed with per-turn reset in mind but were never
         // wired up. We wire them here, at THE turn boundary, so the
         // contract has exactly one enforcement point.
-        self.watchdog.rearm();                       // #6
-        self.tools.reset_for_new_turn();             // #4 + #5
+        self.watchdog.rearm(); // #6
+        self.tools.reset_for_new_turn(); // #4 + #5
         crate::tools::hardware::HardwareTool::begin_turn(); // #7
         tracing::debug!("agent loop: per-turn subsystems rearmed");
 
@@ -193,8 +197,7 @@ impl AgentLoop {
 
                 // Partial validation: execute the ACCEPTED calls and
                 // turn each rejection into a per-call tool_error envelope.
-                let (validated, validation_errors) =
-                    crate::tools::validator::validate(raw_calls);
+                let (validated, validation_errors) = crate::tools::validator::validate(raw_calls);
                 for verr in &validation_errors {
                     let rejection_err = MukeiError::ToolArgsRejected {
                         tool_name: "validator".to_string(),
@@ -236,8 +239,10 @@ impl AgentLoop {
                     iteration += 1;
                     continue;
                 }
-                let (tool_outcomes, blocked) =
-                    self.tools.execute_parallel(validated, cancel_token.clone()).await?;
+                let (tool_outcomes, blocked) = self
+                    .tools
+                    .execute_parallel(validated, cancel_token.clone())
+                    .await?;
 
                 // Each ToolOutcome carries the typed result (success OR a
                 // structured `<external_data source="tool_error">` envelope

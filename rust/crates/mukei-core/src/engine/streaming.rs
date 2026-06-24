@@ -38,9 +38,16 @@ pub struct Drainer {
 }
 
 impl Drainer {
-    pub fn new(cfg: TokenStreamConfig) -> Self { Self { cfg } }
+    pub fn new(cfg: TokenStreamConfig) -> Self {
+        Self { cfg }
+    }
 
-    pub async fn run(self, mut src: mpsc::Receiver<String>, dst: mpsc::Sender<String>, cancel: CancellationToken) {
+    pub async fn run(
+        self,
+        mut src: mpsc::Receiver<String>,
+        dst: mpsc::Sender<String>,
+        cancel: CancellationToken,
+    ) {
         let mut buf = String::new();
         let mut tick = tokio::time::interval(self.cfg.flush_window);
         loop {
@@ -61,7 +68,9 @@ impl Drainer {
     }
 
     async fn flush(&self, buf: &mut String, dst: &mpsc::Sender<String>) {
-        if buf.is_empty() { return; }
+        if buf.is_empty() {
+            return;
+        }
         let _ = dst.send(std::mem::take(buf)).await;
     }
 }
@@ -92,7 +101,9 @@ mod tests {
 
         // At least one chunk should have arrived.
         let mut got = String::new();
-        while let Ok(s) = dst_rx.try_recv() { got.push_str(&s); }
+        while let Ok(s) = dst_rx.try_recv() {
+            got.push_str(&s);
+        }
         assert!(got.starts_with("hello "));
 
         // Let the drainer finish.

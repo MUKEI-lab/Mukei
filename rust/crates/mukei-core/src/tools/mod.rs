@@ -40,12 +40,7 @@ pub mod web_search;
 // (`5`) defined by [`crate::agent::tools::ToolExecutionPolicy`]. It was
 // deleted in Issue #18 to remove the grep-trap. Use
 // `ToolExecutionPolicy::max_failures_per_tool` instead.
-pub const ALLOWED_TOOLS: &[&str] = &[
-    "web_search",
-    "read_file",
-    "get_hardware_info",
-    "math_eval",
-];
+pub const ALLOWED_TOOLS: &[&str] = &["web_search", "read_file", "get_hardware_info", "math_eval"];
 
 #[async_trait]
 pub trait Tool: Send + Sync {
@@ -102,8 +97,7 @@ impl ToolRegistry {
     where
         T: Tool + 'static,
     {
-        self.inner
-            .insert(tool.name().to_string(), Arc::new(tool));
+        self.inner.insert(tool.name().to_string(), Arc::new(tool));
     }
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
@@ -130,11 +124,14 @@ mod tests {
     #[test]
     fn registry_contains_all_tools() {
         let names = ToolRegistry::new().names();
-        assert_eq!(names, vec![
-            "get_hardware_info".to_string(),
-            "math_eval".to_string(),
-            "read_file".to_string(),
-            "web_search".to_string(),
-        ]);
+        assert_eq!(
+            names,
+            vec![
+                "get_hardware_info".to_string(),
+                "math_eval".to_string(),
+                "read_file".to_string(),
+                "web_search".to_string(),
+            ]
+        );
     }
 }

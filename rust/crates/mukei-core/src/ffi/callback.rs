@@ -30,9 +30,9 @@ pub struct FfiStateChange {
     /// Boundary the state change crossed.
     pub boundary: FfiBoundaryId,
     /// Previous state name (stable JSON tag).
-    pub old:      String,
+    pub old: String,
     /// New state name (stable JSON tag).
-    pub new:      String,
+    pub new: String,
 }
 
 /// Registration record — QML registers each `unsafe extern "RustQt"`
@@ -42,11 +42,11 @@ pub struct FfiStateChange {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FfiCallbackRegistration {
     /// Boundary id assigned to this registration.
-    pub boundary:     FfiBoundaryId,
+    pub boundary: FfiBoundaryId,
     /// Name of the QML signal this slot listens to.
-    pub signal_name:  String,
+    pub signal_name: String,
     /// Identifier of the QML actor that owns the slot.
-    pub qml_actor:    String,
+    pub qml_actor: String,
     /// true if `Qt::QueuedConnection` is mandated (TRD REQ-ARCH-03).
-    pub queued_only:  bool,
+    pub queued_only: bool,
 }

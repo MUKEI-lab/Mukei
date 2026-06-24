@@ -17,11 +17,11 @@ use crate::error::{MukeiError, Result};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SafTokenRow {
     pub token_id: String,
-    pub source:   String,
-    pub target:   String,
-    pub mime:     String,
-    pub revoked:  bool,
-    pub created:  chrono::DateTime<chrono::Utc>,
+    pub source: String,
+    pub target: String,
+    pub mime: String,
+    pub revoked: bool,
+    pub created: chrono::DateTime<chrono::Utc>,
 }
 
 /// In-memory mirror of the persistent SAF grant table. The bridge
@@ -34,7 +34,9 @@ pub struct SafRegistry {
 
 #[cfg(feature = "rusqlite")]
 impl SafRegistry {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// `SafRegistry::load_from_db` — populate from the `saf_tokens` rows
     /// surfaced via `DatabasePool::with_conn`. Caller passes the raw
@@ -63,10 +65,7 @@ impl SafRegistry {
     /// Read every non-revoked row from the `saf_tokens` table and seed
     /// the in-memory map. Called by the bridge's `initialize()` once
     /// the SQLCipher pool is open.
-    pub async fn hydrate_from_pool(
-        &self,
-        pool: &super::pool::DatabasePool,
-    ) -> Result<usize> {
+    pub async fn hydrate_from_pool(&self, pool: &super::pool::DatabasePool) -> Result<usize> {
         use super::pool::PooledConnectionExt;
         let rows: Vec<SafTokenRow> = pool
             .with_conn(|c| {
@@ -162,7 +161,9 @@ impl SafRegistry {
     pub fn resolve(&self, token: &str) -> Result<String> {
         let map = self.tokens.lock();
         let row = map.get(token).ok_or(MukeiError::SafRequired)?;
-        if row.revoked { return Err(MukeiError::SafRevoked); }
+        if row.revoked {
+            return Err(MukeiError::SafRevoked);
+        }
         Ok(row.target.clone())
     }
 
@@ -190,8 +191,12 @@ impl SafRegistry {
 
 #[cfg(not(feature = "rusqlite"))]
 impl SafRegistry {
-    pub fn new() -> Self { Self::default() }
-    pub fn count(&self) -> usize { 0 }
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn count(&self) -> usize {
+        0
+    }
 }
 
 #[cfg(test)]
@@ -205,11 +210,14 @@ mod tests {
         reg.upsert(SafTokenRow {
             token_id: "tok-1".into(),
             source: "android-saf".into(),
-            target: "content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMukei".into(),
+            target:
+                "content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMukei"
+                    .into(),
             mime: "inode/directory".into(),
             revoked: false,
             created: chrono::Utc::now(),
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(
             reg.resolve("tok-1").unwrap(),
             "content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMukei"
@@ -227,7 +235,8 @@ mod tests {
             mime: "*/*".into(),
             revoked: false,
             created: chrono::Utc::now(),
-        }).unwrap();
+        })
+        .unwrap();
         reg.revoke("tok-2").unwrap();
         let err = reg.resolve("tok-2").unwrap_err();
         assert!(matches!(err, MukeiError::SafRevoked));

@@ -92,7 +92,12 @@ impl SearchCache {
 
     /// Look up a fresh entry. Returns `None` when expired or absent;
     /// expired entries are evicted as a side effect.
-    pub fn get(&self, task: TaskKind, engine: SearchEngineKind, query: &str) -> Option<Vec<SearchHit>> {
+    pub fn get(
+        &self,
+        task: TaskKind,
+        engine: SearchEngineKind,
+        query: &str,
+    ) -> Option<Vec<SearchHit>> {
         let key = Self::key(task, engine, query);
         let mut g = self.inner.lock();
         if let Some(entry) = g.get(&key) {

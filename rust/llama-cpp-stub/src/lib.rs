@@ -17,10 +17,7 @@
 //! Tests and sandbox builds opt in to the stub explicitly by passing
 //! `--features llama-cpp-rs/stub-acknowledged` (or the workspace alias
 //! pre-baked in `cargo test` invocations in CI).
-#[cfg(all(
-    feature = "release-hardening",
-    not(feature = "stub-acknowledged"),
-))]
+#[cfg(all(feature = "release-hardening", not(feature = "stub-acknowledged"),))]
 compile_error!(
     "llama-cpp-stub is being linked into a release-hardening build. \
      Repoint `llama-cpp-rs` in the workspace `[workspace.dependencies]` \
@@ -45,7 +42,10 @@ pub enum LlamaError {
 impl fmt::Display for LlamaError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LlamaError::StubOnly => write!(f, "stub: feature `llama_cpp` requires a real llama.cpp build"),
+            LlamaError::StubOnly => write!(
+                f,
+                "stub: feature `llama_cpp` requires a real llama.cpp build"
+            ),
         }
     }
 }
@@ -65,11 +65,19 @@ pub struct GbnfGrammar;
 pub struct SamplingParams;
 
 impl LlamaModel {
-    pub fn load(_path: &str, _params: LlamaParams) -> Result<Self, LlamaError> { Err(LlamaError::StubOnly) }
-    pub fn create_context(&self) -> Result<LlamaContext, LlamaError> { Err(LlamaError::StubOnly) }
+    pub fn load(_path: &str, _params: LlamaParams) -> Result<Self, LlamaError> {
+        Err(LlamaError::StubOnly)
+    }
+    pub fn create_context(&self) -> Result<LlamaContext, LlamaError> {
+        Err(LlamaError::StubOnly)
+    }
 }
 
 impl GbnfGrammar {
-    pub fn from_file(_path: &str) -> Result<Self, LlamaError> { Err(LlamaError::StubOnly) }
-    pub fn from_string(_s: &str) -> Result<Self, LlamaError> { Err(LlamaError::StubOnly) }
+    pub fn from_file(_path: &str) -> Result<Self, LlamaError> {
+        Err(LlamaError::StubOnly)
+    }
+    pub fn from_string(_s: &str) -> Result<Self, LlamaError> {
+        Err(LlamaError::StubOnly)
+    }
 }

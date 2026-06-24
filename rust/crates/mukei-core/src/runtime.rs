@@ -78,7 +78,9 @@ pub fn tool_slots() -> Arc<Semaphore> {
 /// `MAX_BLOCKING_THREADS` invariant. Prefer over `tokio::task::spawn_blocking`
 /// directly from inside `tools/*` so the cap cannot be accidentally
 /// bypassed.
-pub fn spawn_blocking_tool<F, T>(f: F) -> tokio::task::JoinHandle<std::result::Result<T, crate::error::MukeiError>>
+pub fn spawn_blocking_tool<F, T>(
+    f: F,
+) -> tokio::task::JoinHandle<std::result::Result<T, crate::error::MukeiError>>
 where
     F: FnOnce() -> std::result::Result<T, crate::error::MukeiError> + Send + 'static,
     T: Send + 'static,
@@ -90,9 +92,11 @@ where
         // work never *starves* the inference worker.
         let _permit = match slots.acquire_owned().await {
             Ok(p) => p,
-            Err(_) => return Err(crate::error::MukeiError::Internal(
-                "tool semaphore closed".into(),
-            )),
+            Err(_) => {
+                return Err(crate::error::MukeiError::Internal(
+                    "tool semaphore closed".into(),
+                ))
+            }
         };
         tokio::task::spawn_blocking(f)
             .await

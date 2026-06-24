@@ -201,10 +201,17 @@ pub enum AuditChainStatus {
     /// Chain verified clean. `rows_checked` is the total number of
     /// rows scanned; `tip` is the last `entry_hash` (or `None` for an
     /// empty log).
-    Ok { rows_checked: u64, tip: Option<String> },
+    Ok {
+        rows_checked: u64,
+        tip: Option<String>,
+    },
     /// Tampering detected at the given rowid. `expected` is the hash
     /// we recomputed; `found` is the value persisted in the database.
-    Tampered { row_id: i64, expected: String, found: String },
+    Tampered {
+        row_id: i64,
+        expected: String,
+        found: String,
+    },
 }
 
 /// Reader-only handle over `tool_audit_log`. Distinct from

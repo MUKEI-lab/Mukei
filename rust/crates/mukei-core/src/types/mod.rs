@@ -162,9 +162,9 @@ impl ChatMessage {
 /// typed `TypedToolCall` after stripping unknown fields.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolCall {
-    pub id:        ToolCallId,
-    pub call_id:   String,         // raw LLM-emitted id
-    pub name:      String,
+    pub id: ToolCallId,
+    pub call_id: String, // raw LLM-emitted id
+    pub name: String,
     pub arguments: serde_json::Value,
     /// When the validator rejected the call, this points to the marker
     /// the agent loop appends back into the LLM context (§2.3).
@@ -176,11 +176,11 @@ pub struct ToolCall {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolResult {
     pub call_id: ToolCallId,
-    pub name:    String,
+    pub name: String,
     /// Body serialised as string (markdown / JSON / plaintext depending
     /// on the tool). Wrapped in prompt-injection sentinels before
     /// insertion into LLM context.
-    pub output:  String,
+    pub output: String,
     /// True if the tool returned successfully. False routes the call
     /// through the graceful-degrade path: the executor classifies the
     /// failure via [`crate::agent::tools::FailureKind`], counts it
@@ -189,11 +189,11 @@ pub struct ToolResult {
     /// envelope, and lets the LLM produce a recovery answer. The agent
     /// loop is NEVER hard-aborted on `ok == false` (Issue #10 / #20 —
     /// the old hard-abort design is gone).
-    pub ok:      bool,
+    pub ok: bool,
     /// Wall-clock duration of execution.
-    pub took:    std::time::Duration,
+    pub took: std::time::Duration,
     /// Trust label — used by XML sandboxing (§12.2).
-    pub trust:   String, // "computed" | "untrusted" | "trusted"
+    pub trust: String, // "computed" | "untrusted" | "trusted"
 }
 
 // ---------------------------------------------------------------------
@@ -202,24 +202,53 @@ pub struct ToolResult {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MarkdownNode {
-    Paragraph { children: Vec<InlineNode> },
-    Heading   { level: u8, children: Vec<InlineNode> },
-    CodeFence { language: String, content: String },
-    BulletList { items: Vec<Vec<InlineNode>> },
-    OrderedList { items: Vec<Vec<InlineNode>> },
-    Quote     { children: Vec<InlineNode> },
+    Paragraph {
+        children: Vec<InlineNode>,
+    },
+    Heading {
+        level: u8,
+        children: Vec<InlineNode>,
+    },
+    CodeFence {
+        language: String,
+        content: String,
+    },
+    BulletList {
+        items: Vec<Vec<InlineNode>>,
+    },
+    OrderedList {
+        items: Vec<Vec<InlineNode>>,
+    },
+    Quote {
+        children: Vec<InlineNode>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InlineNode {
-    Text      { value: String },
-    Bold      { children: Vec<InlineNode> },
-    Italic    { children: Vec<InlineNode> },
-    Code      { value: String },
-    Link      { text: String, href: String },
+    Text {
+        value: String,
+    },
+    Bold {
+        children: Vec<InlineNode>,
+    },
+    Italic {
+        children: Vec<InlineNode>,
+    },
+    Code {
+        value: String,
+    },
+    Link {
+        text: String,
+        href: String,
+    },
     /// Used for `<external_data>` sentinel blocks (TRD §12.2).
-    Sentinel  { rule: String, body: String, trust: String },
+    Sentinel {
+        rule: String,
+        body: String,
+        trust: String,
+    },
 }
 
 #[cfg(test)]
@@ -236,9 +265,13 @@ mod tests {
     fn markdown_node_roundtrips() {
         let n = MarkdownNode::Paragraph {
             children: vec![
-                InlineNode::Text { value: "hello ".into() },
+                InlineNode::Text {
+                    value: "hello ".into(),
+                },
                 InlineNode::Bold {
-                    children: vec![InlineNode::Text { value: "world".into() }],
+                    children: vec![InlineNode::Text {
+                        value: "world".into(),
+                    }],
                 },
             ],
         };

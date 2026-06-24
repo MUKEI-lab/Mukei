@@ -10,11 +10,11 @@
 //!    emits the appropriate `error_occurred` CXX-Qt signal.
 //!
 //! # Multi-thread safety
+#[cfg(test)]
+use std::sync::Mutex;
 /// Panics can fire from any tokio worker. The hook is `Send + Sync` and
 /// uses a `Mutex` over a thread-safe sink.
 use std::sync::{Arc, OnceLock};
-#[cfg(test)]
-use std::sync::Mutex;
 
 static INSTALLED: OnceLock<()> = OnceLock::new();
 
@@ -90,10 +90,7 @@ pub fn install_panic_hook(sink: Arc<dyn PanicSink>) {
 
 /// Returns true if a panic hook has been installed. Used by tests.
 pub fn is_installed() -> bool {
-    INSTALLED
-        .get()
-        .map(|_| true)
-        .unwrap_or(false)
+    INSTALLED.get().map(|_| true).unwrap_or(false)
 }
 
 /// Architect review GH #31: re-install the Mukei panic hook even when a
@@ -173,12 +170,11 @@ mod tests {
     }
     impl PanicSink for CapturingSink {
         fn on_panic(&self, fingerprint: &CrashFingerprint, reason: &str) {
-            self.hits.lock().unwrap().push((fingerprint.clone(), reason.into()));
+            self.hits
+                .lock()
+                .unwrap()
+                .push((fingerprint.clone(), reason.into()));
         }
-    }
-
-    fn installed() -> Option<()> {
-        None // intentionally unhelpful in nested module context
     }
 
     #[test]

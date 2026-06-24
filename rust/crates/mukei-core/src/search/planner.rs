@@ -194,8 +194,6 @@ impl SearchPlanner {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;

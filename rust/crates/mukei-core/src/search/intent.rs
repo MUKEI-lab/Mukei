@@ -70,12 +70,9 @@ impl IntentAnalyzer {
         // — false positives just trigger an extra split pass that
         // collapses on a single-task result.
         let separators = [
-            " and ",
-            " aur ",   // Hinglish
-            " also ",  // common in chat
-            " plus ",
-            ";",
-            "?",
+            " and ", " aur ",  // Hinglish
+            " also ", // common in chat
+            " plus ", ";", "?",
         ];
         let mut hits = 0;
         for sep in separators {
@@ -158,22 +155,42 @@ impl TaskClassifier {
     pub fn classify(query: &str) -> TaskKind {
         let lower = query.to_lowercase();
 
-        if Self::matches_any(&lower, &[
-            "latest", "today", "news", "breaking", "this week", "recent",
-        ]) {
+        if Self::matches_any(
+            &lower,
+            &["latest", "today", "news", "breaking", "this week", "recent"],
+        ) {
             return TaskKind::News;
         }
 
-        if Self::matches_any(&lower, &[
-            "compare", "vs", "versus", "difference between", "side by side", " or ",
-        ]) {
+        if Self::matches_any(
+            &lower,
+            &[
+                "compare",
+                "vs",
+                "versus",
+                "difference between",
+                "side by side",
+                " or ",
+            ],
+        ) {
             return TaskKind::Compare;
         }
 
-        if Self::matches_any(&lower, &[
-            "best ", "explain", "how does", "architecture", "overview",
-            "deep dive", "guide to", "what are", "tutorial", "models",
-        ]) {
+        if Self::matches_any(
+            &lower,
+            &[
+                "best ",
+                "explain",
+                "how does",
+                "architecture",
+                "overview",
+                "deep dive",
+                "guide to",
+                "what are",
+                "tutorial",
+                "models",
+            ],
+        ) {
             return TaskKind::Research;
         }
 
@@ -181,7 +198,10 @@ impl TaskClassifier {
             return TaskKind::Academic;
         }
 
-        if Self::matches_any(&lower, &["price of", "buy ", "cheapest", "deal on", "review of"]) {
+        if Self::matches_any(
+            &lower,
+            &["price of", "buy ", "cheapest", "deal on", "review of"],
+        ) {
             return TaskKind::Shopping;
         }
 
@@ -214,8 +234,14 @@ mod tests {
 
     #[test]
     fn classifier_routes_factual_questions_to_fact() {
-        assert_eq!(TaskClassifier::classify("Who is the CEO of Meta?"), TaskKind::Fact);
-        assert_eq!(TaskClassifier::classify("Capital of India"), TaskKind::Research);
+        assert_eq!(
+            TaskClassifier::classify("Who is the CEO of Meta?"),
+            TaskKind::Fact
+        );
+        assert_eq!(
+            TaskClassifier::classify("Capital of India"),
+            TaskKind::Research
+        );
     }
 
     #[test]

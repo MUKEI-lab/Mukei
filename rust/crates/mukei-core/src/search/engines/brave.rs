@@ -18,6 +18,7 @@ use crate::search::SearchHit;
 
 /// Brave Search engine. Construct with [`Self::new`] and pass the API
 /// key as an opaque string (the executor never logs it).
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
 pub struct BraveEngine {
     api_key: String,
     base_url: String,
@@ -79,10 +80,7 @@ async fn execute_brave(engine: &BraveEngine, request: &SearchRequest) -> Result<
         .build()
         .map_err(|e| MukeiError::HttpClientFailed(e.to_string()))?;
 
-    let mut params = vec![
-        ("q", request.query.as_str()),
-        ("count", "5"),
-    ];
+    let mut params = vec![("q", request.query.as_str()), ("count", "5")];
     let count_str = request.count.to_string();
     params[1] = ("count", count_str.as_str());
     let max_age_str;

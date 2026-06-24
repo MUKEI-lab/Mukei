@@ -47,7 +47,7 @@ pub enum GuardError {
         /// The generation snapshot captured when the callback was bound.
         expected: u64,
         /// The guard's live generation at the time of dispatch.
-        current:  u64,
+        current: u64,
     },
 }
 
@@ -149,7 +149,9 @@ impl Inner {
 
     /// Allocate a fresh `Arc<Inner>` with `generation = 1`.
     pub fn new() -> Arc<Self> {
-        Arc::new(Self { generation: AtomicU64::new(1) })
+        Arc::new(Self {
+            generation: AtomicU64::new(1),
+        })
     }
 
     /// Increment generation by one (monotonic rebind path).
@@ -188,7 +190,9 @@ impl Inner {
     }
 
     /// Deprecated alias for [`Self::tombstone`].
-    #[deprecated(note = "Use `tombstone()` (permanent) or `bump()` (rebind) explicitly. Architect review GH #9.")]
+    #[deprecated(
+        note = "Use `tombstone()` (permanent) or `bump()` (rebind) explicitly. Architect review GH #9."
+    )]
     pub fn invalidate(&self) {
         self.tombstone();
     }
@@ -199,15 +203,15 @@ impl Inner {
 /// instead of an FFI crash.
 ///
 /// # Arguments
-/// - `$guard_ptr`  — expression evaluating to `*const Inner` (or
-///                   `std::ptr::null()` if the guard is `invalid()`).
-/// - `$snapshot`   — the generation number when the callback was bound.
-/// - `$callback`   — block to invoke; must return `Result<T, GuardError>`.
+/// - `$guard_ptr` — expression evaluating to `*const Inner` (or
+///   `std::ptr::null()` if the guard is `invalid()`).
+/// - `$snapshot` — the generation number when the callback was bound.
+/// - `$callback` — block to invoke; must return `Result<T, GuardError>`.
 ///
 /// # Returns
-/// - `Ok(T)`                                  if generation matched AND callback returned `Ok`.
-/// - `Err(GuardError::Released)`              if the guard is NULL **or** a panic was caught.
-/// - `Err(GuardError::GenerationMismatch)`    if the guard is live but stale.
+/// - `Ok(T)` if generation matched and callback returned `Ok`.
+/// - `Err(GuardError::Released)` if the guard is NULL or a panic was caught.
+/// - `Err(GuardError::GenerationMismatch)` if the guard is live but stale.
 ///
 /// # Panic policy
 /// A panic inside `$callback` is caught via `std::panic::catch_unwind` and
@@ -247,15 +251,13 @@ macro_rules! callback_with_guard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use std::sync::atomic::Ordering;
+    use std::sync::Arc;
 
     #[test]
     fn invalid_guard_rejects() {
-        let err = callback_with_guard!(std::ptr::null(), 1u64, {
-            Ok::<_, GuardError>(42)
-        })
-        .unwrap_err();
+        let err =
+            callback_with_guard!(std::ptr::null(), 1u64, { Ok::<_, GuardError>(42) }).unwrap_err();
         assert_eq!(err, GuardError::Released);
     }
 
@@ -265,9 +267,8 @@ mod tests {
         let ptr = Arc::into_raw(Arc::clone(&inner));
 
         let snap = inner.generation.load(Ordering::Acquire);
-        let result: Result<i32, GuardError> = callback_with_guard!(ptr, snap, {
-            Ok::<_, GuardError>(7)
-        });
+        let result: Result<i32, GuardError> =
+            callback_with_guard!(ptr, snap, { Ok::<_, GuardError>(7) });
         assert_eq!(result.unwrap(), 7);
 
         // Clean up.
@@ -282,10 +283,7 @@ mod tests {
         let stale_snap = inner.generation.load(Ordering::Acquire);
         inner.tombstone();
 
-        let err = callback_with_guard!(ptr, stale_snap, {
-            Ok::<_, GuardError>(0)
-        })
-        .unwrap_err();
+        let err = callback_with_guard!(ptr, stale_snap, { Ok::<_, GuardError>(0) }).unwrap_err();
         assert!(matches!(err, GuardError::GenerationMismatch { .. }));
 
         unsafe { CallbackGuard::release(ptr) };
@@ -301,20 +299,18 @@ mod tests {
         let old_snap = inner.generation.load(Ordering::Acquire);
         let new_snap = inner.bump();
         assert_ne!(old_snap, new_snap);
-        assert_ne!(new_snap, Inner::TOMBSTONE, "bump must not slam to tombstone");
+        assert_ne!(
+            new_snap,
+            Inner::TOMBSTONE,
+            "bump must not slam to tombstone"
+        );
 
         // Old snapshot now mismatches.
-        let err = callback_with_guard!(ptr, old_snap, {
-            Ok::<_, GuardError>(0)
-        })
-        .unwrap_err();
+        let err = callback_with_guard!(ptr, old_snap, { Ok::<_, GuardError>(0) }).unwrap_err();
         assert!(matches!(err, GuardError::GenerationMismatch { .. }));
 
         // New snapshot still works.
-        let ok = callback_with_guard!(ptr, new_snap, {
-            Ok::<_, GuardError>(99)
-        })
-        .unwrap();
+        let ok = callback_with_guard!(ptr, new_snap, { Ok::<_, GuardError>(99) }).unwrap();
         assert_eq!(ok, 99);
 
         unsafe { CallbackGuard::release(ptr) };

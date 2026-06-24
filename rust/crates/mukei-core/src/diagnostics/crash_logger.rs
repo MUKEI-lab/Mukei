@@ -74,7 +74,9 @@ pub(crate) fn refuse_scoped_storage_violation(p: &Path) -> Result<(), io::Error>
 pub struct CrashFingerprint(String);
 
 impl CrashFingerprint {
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 
     /// Compute a SHA-256 over (file:line|reason) — stable across builds
     /// if and only if the *panic location & message* are identical.
@@ -136,7 +138,9 @@ impl CrashSink {
         })
     }
 
-    pub fn dir(&self) -> &Path { &self.dir }
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
 
     fn file_for(&self, fp: &CrashFingerprint) -> PathBuf {
         self.dir.join(format!("{fp}.json"))
@@ -172,9 +176,17 @@ impl CrashSink {
         for entry in fs::read_dir(&self.dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("json") { continue; }
-            let bytes = match fs::read(&path) { Ok(b) => b, Err(_) => continue };
-            let rec: CrashRecord = match serde_json::from_slice(&bytes) { Ok(r) => r, Err(_) => continue };
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let bytes = match fs::read(&path) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            let rec: CrashRecord = match serde_json::from_slice(&bytes) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
             if newest.as_ref().map(|(ts, _)| rec.ts > *ts).unwrap_or(true) {
                 newest = Some((rec.ts, rec));
             }

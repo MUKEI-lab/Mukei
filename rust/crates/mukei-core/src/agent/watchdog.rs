@@ -30,8 +30,8 @@ pub struct Watchdog {
     /// short lock, releases it before evaluating elapsed.
     start: std::sync::Mutex<Instant>,
     max_iterations: usize,
-    max_tokens:     u64,
-    max_wall:       Duration,
+    max_tokens: u64,
+    max_wall: Duration,
 }
 
 impl Watchdog {
@@ -88,7 +88,9 @@ pub struct WatchdogHandle {
 
 impl WatchdogHandle {
     pub fn new(w: Watchdog) -> Self {
-        Self { inner: std::sync::Arc::new(w) }
+        Self {
+            inner: std::sync::Arc::new(w),
+        }
     }
 
     pub fn check(&self, iteration: usize, tokens: u64) -> Result<()> {
@@ -177,7 +179,10 @@ mod tests {
         let before = w.remaining_wall_clock();
         std::thread::sleep(Duration::from_millis(10));
         let after = w.remaining_wall_clock();
-        assert!(after < before, "remaining must shrink: {before:?} -> {after:?}");
+        assert!(
+            after < before,
+            "remaining must shrink: {before:?} -> {after:?}"
+        );
         // After the full budget elapses, remaining saturates at 0.
         std::thread::sleep(Duration::from_millis(80));
         assert_eq!(w.remaining_wall_clock(), Duration::ZERO);

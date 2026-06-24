@@ -28,10 +28,7 @@
 // per query on a phone holding 100k+ chunks. Force `usearch_hnsw` ON
 // for release-hardened builds. Tests / sandbox builds opt out by
 // simply not enabling `release-hardening`.
-#[cfg(all(
-    feature = "release-hardening",
-    not(feature = "usearch_hnsw"),
-))]
+#[cfg(all(feature = "release-hardening", not(feature = "usearch_hnsw"),))]
 compile_error!(
     "mukei-core compiled with `release-hardening` but WITHOUT \
      `usearch_hnsw`. The fallback flat-scan vector store is O(n) per \
@@ -218,7 +215,11 @@ impl VectorStore {
         match self.needs_rebuild(expected) {
             RebuildVerdict::Compatible => Ok(()),
             verdict => {
-                tracing::warn!(?verdict, ?expected, "vector store header mismatch — forcing reindex");
+                tracing::warn!(
+                    ?verdict,
+                    ?expected,
+                    "vector store header mismatch — forcing reindex"
+                );
                 Err(MukeiError::ModelCorrupted)
             }
         }
@@ -426,7 +427,8 @@ impl VectorStore {
             expansion_search: 32,
             multi: false,
         };
-        usearch::Index::new(&options).map_err(|e| MukeiError::Internal(format!("usearch init: {e}")))
+        usearch::Index::new(&options)
+            .map_err(|e| MukeiError::Internal(format!("usearch init: {e}")))
     }
 }
 

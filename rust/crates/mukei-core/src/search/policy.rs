@@ -75,7 +75,7 @@ impl From<&crate::config::SearchCfg> for PlannerPolicy {
     fn from(cfg: &crate::config::SearchCfg) -> Self {
         Self {
             timeouts: TimeoutBudget {
-                brave:  Duration::from_secs(cfg.brave_timeout_secs),
+                brave: Duration::from_secs(cfg.brave_timeout_secs),
                 tavily: Duration::from_secs(cfg.tavily_timeout_secs),
             },
             max_parallel_engines: cfg.max_parallel_engines.max(1),
@@ -87,7 +87,9 @@ impl From<&crate::config::SearchCfg> for PlannerPolicy {
 }
 
 impl From<crate::config::SearchCfg> for PlannerPolicy {
-    fn from(cfg: crate::config::SearchCfg) -> Self { (&cfg).into() }
+    fn from(cfg: crate::config::SearchCfg) -> Self {
+        (&cfg).into()
+    }
 }
 
 #[cfg(test)]

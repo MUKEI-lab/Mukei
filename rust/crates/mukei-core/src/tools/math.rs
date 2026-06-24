@@ -14,9 +14,8 @@ use crate::tools::Tool;
 const MAX_EXPRESSION_BYTES: usize = 1024;
 const TIMEOUT: Duration = Duration::from_secs(8);
 const ALLOWED_IDENTIFIERS: &[&str] = &[
-    "pi", "e", "abs", "sqrt", "cbrt", "exp", "ln", "log", "log10", "sin", "cos", "tan",
-    "asin", "acos", "atan", "sinh", "cosh", "tanh", "floor", "ceil", "round", "signum",
-    "min", "max",
+    "pi", "e", "abs", "sqrt", "cbrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin",
+    "acos", "atan", "sinh", "cosh", "tanh", "floor", "ceil", "round", "signum", "min", "max",
 ];
 
 #[derive(Default)]
@@ -46,7 +45,8 @@ impl Tool for MathTool {
         validate_expression(&expression)?;
 
         let expression_for_eval = expression.clone();
-        let mut join = crate::runtime::spawn_blocking_tool(move || evaluate_expression(&expression_for_eval));
+        let mut join =
+            crate::runtime::spawn_blocking_tool(move || evaluate_expression(&expression_for_eval));
         // Issue #16: `tokio::time::timeout` ONLY stops the caller from
         // waiting; the underlying blocking task keeps running and
         // continues to hold one of the only `TOOL_BLOCKING_SLOTS`
@@ -88,7 +88,10 @@ fn validate_expression(expression: &str) -> Result<()> {
     }
     for ch in expression.chars() {
         let ok = ch.is_ascii_alphanumeric()
-            || matches!(ch, '+' | '-' | '*' | '/' | '%' | '^' | '(' | ')' | '.' | ',' | ' ' | '\t' | '\n' | '_');
+            || matches!(
+                ch,
+                '+' | '-' | '*' | '/' | '%' | '^' | '(' | ')' | '.' | ',' | ' ' | '\t' | '\n' | '_'
+            );
         if !ok {
             return Err(MukeiError::SandboxViolation);
         }
@@ -137,7 +140,10 @@ mod tests {
     #[tokio::test]
     async fn basic_expression_evaluates() {
         let tool = MathTool;
-        let output = tool.run(serde_json::json!({"expression": "2 + 2 * 3"})).await.unwrap();
+        let output = tool
+            .run(serde_json::json!({"expression": "2 + 2 * 3"}))
+            .await
+            .unwrap();
         assert!(output.contains("Result: 8"));
     }
 

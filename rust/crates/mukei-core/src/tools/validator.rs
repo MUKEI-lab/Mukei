@@ -22,16 +22,25 @@ pub struct TypedToolCall {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValidationError {
-    MismatchedArgs { tool: String, observed: Value },
+    MismatchedArgs {
+        tool: String,
+        observed: Value,
+    },
     UnknownTool(String),
-    MissingRequiredField { tool: String, field: String },
+    MissingRequiredField {
+        tool: String,
+        field: String,
+    },
     WrongFieldType {
         tool: String,
         field: String,
         expected: &'static str,
         actual: String,
     },
-    ConstraintViolation { tool: String, detail: String },
+    ConstraintViolation {
+        tool: String,
+        detail: String,
+    },
 }
 
 const ALLOWED_FIELDS_PER_TOOL: &[(&str, &[&str])] = &[
@@ -85,12 +94,15 @@ fn validate_one(call: RawToolCall) -> std::result::Result<TypedToolCall, Validat
         None => return Err(ValidationError::UnknownTool(call.name)),
     };
 
-    let obj = call.arguments.as_object().ok_or_else(|| ValidationError::WrongFieldType {
-        tool: call.name.clone(),
-        field: "arguments".to_string(),
-        expected: "object",
-        actual: call.arguments.to_string(),
-    })?;
+    let obj = call
+        .arguments
+        .as_object()
+        .ok_or_else(|| ValidationError::WrongFieldType {
+            tool: call.name.clone(),
+            field: "arguments".to_string(),
+            expected: "object",
+            actual: call.arguments.to_string(),
+        })?;
 
     let extras = obj
         .keys()
@@ -168,7 +180,11 @@ fn validate_one(call: RawToolCall) -> std::result::Result<TypedToolCall, Validat
     }
 }
 
-fn get_required_string<'a>(tool: &str, value: &'a Value, field: &str) -> std::result::Result<&'a str, ValidationError> {
+fn get_required_string<'a>(
+    tool: &str,
+    value: &'a Value,
+    field: &str,
+) -> std::result::Result<&'a str, ValidationError> {
     match value.get(field) {
         Some(v) => v.as_str().ok_or_else(|| ValidationError::WrongFieldType {
             tool: tool.to_string(),
@@ -191,16 +207,29 @@ pub fn format_for_llm(errors: &[ValidationError]) -> String {
                 out.push_str(&format!("- Unknown tool '{tool}'. Allowed: web_search, read_file, get_hardware_info, math_eval.\n"));
             }
             ValidationError::MismatchedArgs { tool, observed } => {
-                out.push_str(&format!("- Tool '{tool}' had unexpected argument fields: {observed}.\n"));
+                out.push_str(&format!(
+                    "- Tool '{tool}' had unexpected argument fields: {observed}.\n"
+                ));
             }
             ValidationError::MissingRequiredField { tool, field } => {
-                out.push_str(&format!("- Tool '{tool}' is missing required field '{field}'.\n"));
+                out.push_str(&format!(
+                    "- Tool '{tool}' is missing required field '{field}'.\n"
+                ));
             }
-            ValidationError::WrongFieldType { tool, field, expected, actual } => {
-                out.push_str(&format!("- Tool '{tool}' field '{field}' must be {expected}; got {actual}.\n"));
+            ValidationError::WrongFieldType {
+                tool,
+                field,
+                expected,
+                actual,
+            } => {
+                out.push_str(&format!(
+                    "- Tool '{tool}' field '{field}' must be {expected}; got {actual}.\n"
+                ));
             }
             ValidationError::ConstraintViolation { tool, detail } => {
-                out.push_str(&format!("- Tool '{tool}' violated a semantic constraint: {detail}.\n"));
+                out.push_str(&format!(
+                    "- Tool '{tool}' violated a semantic constraint: {detail}.\n"
+                ));
             }
         }
     }
@@ -230,7 +259,10 @@ mod tests {
             arguments: json!({"path": "/sdcard/file.txt"}),
         }];
         let (_, err) = validate(raw);
-        assert!(matches!(err[0], ValidationError::ConstraintViolation { .. }));
+        assert!(matches!(
+            err[0],
+            ValidationError::ConstraintViolation { .. }
+        ));
     }
 
     #[test]
@@ -265,10 +297,22 @@ mod tests {
     #[test]
     fn accepts_valid_calls() {
         let raw = vec![
-            RawToolCall { name: "web_search".to_string(), arguments: json!({"query": "rust ownership"}) },
-            RawToolCall { name: "read_file".to_string(), arguments: json!({"path": "saf://deadbeef"}) },
-            RawToolCall { name: "get_hardware_info".to_string(), arguments: json!({}) },
-            RawToolCall { name: "math_eval".to_string(), arguments: json!({"expression": "2+2"}) },
+            RawToolCall {
+                name: "web_search".to_string(),
+                arguments: json!({"query": "rust ownership"}),
+            },
+            RawToolCall {
+                name: "read_file".to_string(),
+                arguments: json!({"path": "saf://deadbeef"}),
+            },
+            RawToolCall {
+                name: "get_hardware_info".to_string(),
+                arguments: json!({}),
+            },
+            RawToolCall {
+                name: "math_eval".to_string(),
+                arguments: json!({"expression": "2+2"}),
+            },
         ];
         let (ok, err) = validate(raw);
         assert!(err.is_empty());

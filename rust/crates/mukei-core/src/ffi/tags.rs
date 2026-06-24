@@ -29,7 +29,7 @@ pub const TAG_WINDOW: usize = 64;
 /// The thinking-block opening tag. Defined as `OPEN_OPEN ++ "think" ++ OPEN_CLOSE`
 /// so we never embed the literal sequence inside raw Rust strings,
 /// keeping the Rust tokeniser happy.
-const OPEN_OPEN:  &str = "<";
+const OPEN_OPEN: &str = "<";
 const OPEN_CLOSE: &str = ">";
 const CLOSE_OPEN: &str = "</";
 
@@ -39,10 +39,14 @@ const CLOSE_OPEN: &str = "</";
 /// The literal opening tag (`<think>`) the LLM emits to enter a
 /// chain-of-thought block. Built at runtime so the literal bytes never
 /// appear in source.
-pub fn open_tag()  -> String { format!("{OPEN_OPEN}think{OPEN_CLOSE}") }
+pub fn open_tag() -> String {
+    format!("{OPEN_OPEN}think{OPEN_CLOSE}")
+}
 /// The literal closing tag (`</think>`) the LLM emits to exit a
 /// chain-of-thought block.
-pub fn close_tag() -> String { format!("{CLOSE_OPEN}think{OPEN_CLOSE}") }
+pub fn close_tag() -> String {
+    format!("{CLOSE_OPEN}think{OPEN_CLOSE}")
+}
 
 /// Stream detector.
 #[derive(Debug, Clone, Default)]
@@ -53,7 +57,9 @@ pub struct TagsStreaming {
 
 impl TagsStreaming {
     /// Construct an empty detector with `opened = false` and an empty window.
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Truncate `buf` to a valid char-boundary just *before* `at`.
     fn truncate_safe(buf: &mut String, at: usize) {
@@ -82,7 +88,7 @@ impl TagsStreaming {
             self.window.drain(..drop);
         }
 
-        let open  = open_tag();
+        let open = open_tag();
         let close = close_tag();
 
         // A single push may contain BOTH an open and a close (e.g. the
@@ -120,14 +126,18 @@ impl TagsStreaming {
                 events |= TagEvents::OPENED;
                 progressed = true;
             }
-            if !progressed { break; }
+            if !progressed {
+                break;
+            }
         }
 
         events
     }
 
     /// `true` if the detector last saw an open tag without a matching close.
-    pub fn is_open(&self) -> bool { self.opened }
+    pub fn is_open(&self) -> bool {
+        self.opened
+    }
 
     /// Reset to the empty/closed state. Used at the start of every turn.
     pub fn reset(&mut self) {
@@ -143,7 +153,7 @@ pub struct TagEvents(u8);
 
 impl TagEvents {
     /// No state transition.
-    pub const NONE:   TagEvents = TagEvents(0);
+    pub const NONE: TagEvents = TagEvents(0);
     /// The opening tag appeared during this push.
     pub const OPENED: TagEvents = TagEvents(1 << 0);
     /// The closing tag appeared during this push.
@@ -154,19 +164,27 @@ impl TagEvents {
         (self.0 & other.0) == other.0
     }
     /// `true` iff no transition was emitted by the last push.
-    pub fn is_empty(self) -> bool { self.0 == 0 }
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
 }
 
 impl std::ops::BitOrAssign for TagEvents {
-    fn bitor_assign(&mut self, rhs: Self) { self.0 |= rhs.0; }
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn open() -> String { open_tag() }
-    fn close() -> String { close_tag() }
+    fn open() -> String {
+        open_tag()
+    }
+    fn close() -> String {
+        close_tag()
+    }
 
     #[test]
     fn opens_on_seeing_open_tag() {
@@ -197,7 +215,12 @@ mod tests {
         // to the close tag's end, preserving the tail in the window
         // for subsequent state transitions.
         let mut d = TagsStreaming::new();
-        let combined = format!("{}thinking aloud{} now a new open: {}", open(), close(), open());
+        let combined = format!(
+            "{}thinking aloud{} now a new open: {}",
+            open(),
+            close(),
+            open()
+        );
         let ev = d.push(&combined);
         // The same chunk should report ALL of: opened, closed, opened.
         assert!(ev.contains(TagEvents::OPENED));

@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Chunk {
-    pub index:  u32,
-    pub text:   String,
+    pub index: u32,
+    pub text: String,
     /// SHA-256 over `text` — used by usearch payload to dedup.
     pub digest: String,
 }
@@ -20,7 +20,7 @@ pub struct Chunker {
 }
 
 impl Chunker {
-    pub const DEFAULT_WINDOW:  usize = 256;
+    pub const DEFAULT_WINDOW: usize = 256;
     pub const DEFAULT_OVERLAP: usize = 32;
 
     pub fn new(window: usize, overlap: usize) -> Self {
@@ -32,7 +32,9 @@ impl Chunker {
     /// Tokens are approximated as space-separated words.
     pub fn split(&self, text: &str) -> Vec<Chunk> {
         let tokens: Vec<&str> = text.split_whitespace().collect();
-        if tokens.is_empty() { return Vec::new(); }
+        if tokens.is_empty() {
+            return Vec::new();
+        }
 
         let stride = self.window - self.overlap;
         let mut out = Vec::new();
@@ -42,8 +44,14 @@ impl Chunker {
             let end = (start + self.window).min(tokens.len());
             let body = tokens[start..end].join(" ");
             let digest = digest(&body);
-            out.push(Chunk { index: idx, text: body, digest });
-            if end == tokens.len() { break; }
+            out.push(Chunk {
+                index: idx,
+                text: body,
+                digest,
+            });
+            if end == tokens.len() {
+                break;
+            }
             start += stride;
             idx += 1;
         }
@@ -65,7 +73,10 @@ mod tests {
     #[test]
     fn splits_with_overlap() {
         let c = Chunker::new(4, 1);
-        let toks = (0..8).map(|i| format!("w{i}")).collect::<Vec<_>>().join(" ");
+        let toks = (0..8)
+            .map(|i| format!("w{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
         let chunks = c.split(&toks);
         // windows: [0..4], [3..7], [6..8] -> 3 chunks
         assert_eq!(chunks.len(), 3);

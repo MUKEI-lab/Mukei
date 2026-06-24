@@ -121,7 +121,10 @@ impl SearchResultRanker {
         if body_tokens.is_empty() {
             return 0.0;
         }
-        let overlap = q.iter().filter(|t| body_tokens.contains(&t.as_str())).count() as f32;
+        let overlap = q
+            .iter()
+            .filter(|t| body_tokens.contains(&t.as_str()))
+            .count() as f32;
         overlap / q.len() as f32
     }
 
@@ -232,8 +235,16 @@ mod tests {
         let ranker = SearchResultRanker::default();
         let q = "machine learning";
         let hits = vec![
-            hit("ML overview", "https://random-blog.example/ml", "machine learning is..."),
-            hit("ML overview", "https://reuters.com/ml", "machine learning is..."),
+            hit(
+                "ML overview",
+                "https://random-blog.example/ml",
+                "machine learning is...",
+            ),
+            hit(
+                "ML overview",
+                "https://reuters.com/ml",
+                "machine learning is...",
+            ),
         ];
         let ranked = ranker.rank(q, hits);
         assert_eq!(ranked.len(), 2);

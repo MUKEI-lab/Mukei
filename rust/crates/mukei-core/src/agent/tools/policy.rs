@@ -247,15 +247,29 @@ mod tests {
 
     #[test]
     fn failure_kind_classification_matrix() {
-        assert_eq!(FailureKind::classify(&MukeiError::Cancelled), FailureKind::Cancelled);
-        assert_eq!(FailureKind::classify(&MukeiError::ToolTimeout(None)), FailureKind::Timeout);
-        assert_eq!(FailureKind::classify(&MukeiError::SandboxViolation), FailureKind::Permanent);
         assert_eq!(
-            FailureKind::classify(&MukeiError::ToolPermanentlyDisabled { tool_name: "x".into() }),
+            FailureKind::classify(&MukeiError::Cancelled),
+            FailureKind::Cancelled
+        );
+        assert_eq!(
+            FailureKind::classify(&MukeiError::ToolTimeout(None)),
+            FailureKind::Timeout
+        );
+        assert_eq!(
+            FailureKind::classify(&MukeiError::SandboxViolation),
             FailureKind::Permanent
         );
         assert_eq!(
-            FailureKind::classify(&MukeiError::ToolArgumentInvalid { field: "q", reason: "empty".into() }),
+            FailureKind::classify(&MukeiError::ToolPermanentlyDisabled {
+                tool_name: "x".into()
+            }),
+            FailureKind::Permanent
+        );
+        assert_eq!(
+            FailureKind::classify(&MukeiError::ToolArgumentInvalid {
+                field: "q",
+                reason: "empty".into()
+            }),
             FailureKind::Validation
         );
         assert_eq!(
@@ -263,7 +277,9 @@ mod tests {
             FailureKind::Transient
         );
         assert_eq!(
-            FailureKind::classify(&MukeiError::ToolAbuseBlocked { tool_name: "x".into() }),
+            FailureKind::classify(&MukeiError::ToolAbuseBlocked {
+                tool_name: "x".into()
+            }),
             FailureKind::Abuse
         );
     }

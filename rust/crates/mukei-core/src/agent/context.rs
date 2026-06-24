@@ -66,10 +66,16 @@ impl ContextBudgetManager {
         tokenizer: Arc<dyn TokenCount>,
         max_tokens: u32,
     ) -> Self {
-        Self { backend, tokenizer, max_tokens }
+        Self {
+            backend,
+            tokenizer,
+            max_tokens,
+        }
     }
 
-    pub fn max_tokens(&self) -> u32 { self.max_tokens }
+    pub fn max_tokens(&self) -> u32 {
+        self.max_tokens
+    }
 
     /// Build the trimmed context string. Truncates oldest history first
     /// when the budget is exhausted.
@@ -86,12 +92,13 @@ impl ContextBudgetManager {
     /// also counted against `max_tokens`.
     pub async fn build_for(&self, history: &[ChatMessage]) -> Result<String> {
         let recent = self.backend.load_history().await?;
-        let mut combined: Vec<ChatMessage> = recent
-            .into_iter()
-            .chain(history.iter().cloned())
-            .collect();
+        let mut combined: Vec<ChatMessage> =
+            recent.into_iter().chain(history.iter().cloned()).collect();
 
-        let rag_query = combined.last().map(|m| m.content.clone()).unwrap_or_default();
+        let rag_query = combined
+            .last()
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
         let raw_rag = if !rag_query.is_empty() {
             self.backend.rag_lookup(&rag_query, 4).await?
         } else {
@@ -138,9 +145,7 @@ impl ContextBudgetManager {
 
         // ---- Trim from the front until rag_tokens + running_total fits
         let budget = self.max_tokens as usize;
-        while !combined.is_empty()
-            && rag_tokens.saturating_add(running_total) > budget
-        {
+        while !combined.is_empty() && rag_tokens.saturating_add(running_total) > budget {
             // Pop the oldest entry's tally before dropping it.
             let head_n = per_msg_tokens.pop_front().unwrap_or(0);
             running_total = running_total.saturating_sub(head_n);
@@ -198,23 +203,26 @@ mod tests {
     struct StaticBackend;
     #[async_trait::async_trait]
     impl ContextBackend for StaticBackend {
-        async fn load_history(&self) -> Result<Vec<ChatMessage>> { Ok(Vec::new()) }
-        async fn rag_lookup(&self, _q: &str, _k: usize) -> Result<Vec<String>> { Ok(Vec::new()) }
+        async fn load_history(&self) -> Result<Vec<ChatMessage>> {
+            Ok(Vec::new())
+        }
+        async fn rag_lookup(&self, _q: &str, _k: usize) -> Result<Vec<String>> {
+            Ok(Vec::new())
+        }
     }
 
     struct FixLenTokens(usize);
     #[async_trait::async_trait]
     impl TokenCount for FixLenTokens {
-        async fn count(&self, s: &str) -> usize { s.len() / 4 + self.0 }
+        async fn count(&self, s: &str) -> usize {
+            s.len() / 4 + self.0
+        }
     }
 
     #[tokio::test]
     async fn empty_history_returns_empty_anchor() {
-        let mgr = ContextBudgetManager::new(
-            Arc::new(StaticBackend),
-            Arc::new(FixLenTokens(0)),
-            4096,
-        );
+        let mgr =
+            ContextBudgetManager::new(Arc::new(StaticBackend), Arc::new(FixLenTokens(0)), 4096);
         let input = vec![ChatMessage {
             id: MessageId::default(),
             role: Role::User,
@@ -241,7 +249,9 @@ mod tests {
         struct HugeRagBackend(String);
         #[async_trait::async_trait]
         impl ContextBackend for HugeRagBackend {
-            async fn load_history(&self) -> Result<Vec<ChatMessage>> { Ok(Vec::new()) }
+            async fn load_history(&self) -> Result<Vec<ChatMessage>> {
+                Ok(Vec::new())
+            }
             async fn rag_lookup(&self, _q: &str, _k: usize) -> Result<Vec<String>> {
                 Ok(vec![self.0.clone()])
             }
@@ -271,8 +281,14 @@ mod tests {
             "snippet not capped: saw {marks} marker chars, expected <= {max_marks}",
         );
         // And the cap actually fires (i.e. truncation happened, not a no-op).
-        assert!(marks > 0, "RAG block was empty — truncation may have wiped it");
-        assert!(marks < 50_000, "truncation did not happen: saw {marks} marker chars");
+        assert!(
+            marks > 0,
+            "RAG block was empty — truncation may have wiped it"
+        );
+        assert!(
+            marks < 50_000,
+            "truncation did not happen: saw {marks} marker chars"
+        );
     }
 
     #[tokio::test]
@@ -306,16 +322,25 @@ mod tests {
             token_count: None,
         };
 
-        let mgr = ContextBudgetManager::new(
-            Arc::new(StaticBackend),
-            Arc::new(FixLenTokens(0)),
-            4096,
-        );
+        let mgr =
+            ContextBudgetManager::new(Arc::new(StaticBackend), Arc::new(FixLenTokens(0)), 4096);
         let rendered = mgr.build_for(std::slice::from_ref(&msg)).await.unwrap();
 
-        assert!(rendered.contains("[Tool]: <external_data"), "outer tag must round-trip literally, got:\n{rendered}");
-        assert!(!rendered.contains("&lt;external_data"), "outer tag must not be re-escaped, got:\n{rendered}");
-        assert!(rendered.contains("&lt;script&gt;"), "inner escapes from first turn must stay at depth 1, got:\n{rendered}");
-        assert!(!rendered.contains("&amp;lt;"), "inner escapes must NOT be doubled to &amp;lt;, got:\n{rendered}");
+        assert!(
+            rendered.contains("[Tool]: <external_data"),
+            "outer tag must round-trip literally, got:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("&lt;external_data"),
+            "outer tag must not be re-escaped, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("&lt;script&gt;"),
+            "inner escapes from first turn must stay at depth 1, got:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("&amp;lt;"),
+            "inner escapes must NOT be doubled to &amp;lt;, got:\n{rendered}"
+        );
     }
 }

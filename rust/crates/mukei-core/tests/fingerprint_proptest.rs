@@ -1,4 +1,4 @@
-//! Architect review GH #43 \u2014 property-based fuzz of
+//! Architect review GH #43 — property-based fuzz of
 //! `FailureTracker::fingerprint`.
 //!
 //! Three invariants:
@@ -6,8 +6,8 @@
 //! 1. **Key-order invariance.** Any two JSON objects with the same
 //!    `(key, value)` pairs but different key orderings hash to the
 //!    same fingerprint. The agent loop relies on this to defeat the
-//!    \"shuffle keys to dodge abuse blocker\" attack vector flagged in
-//!    PRD \u00a78.2.
+//!    "shuffle keys to dodge abuse blocker" attack vector flagged in
+//!    PRD §8.2.
 //!
 //! 2. **Stability.** Calling `fingerprint` twice on byte-identical
 //!    inputs returns byte-identical outputs.
@@ -20,8 +20,8 @@ use mukei_core::agent::tools::FailureTracker;
 use proptest::prelude::*;
 use serde_json::{Map, Value};
 
-/// Generate a small JSON object with stringly-typed keys and
-/// scalar values. Sufficient to exercise key-order invariance.
+/// Generate a small JSON object with stringly-typed keys and scalar
+/// values. Sufficient to exercise key-order invariance.
 fn arb_json_object() -> impl Strategy<Value = Value> {
     proptest::collection::vec(
         (
@@ -44,39 +44,43 @@ fn arb_json_object() -> impl Strategy<Value = Value> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 4096, .. ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig {
+        cases: 4096,
+        .. ProptestConfig::default()
+    })]
 
-    /// Property #1 \u2014 key-order invariance. Shuffling the keys of an
-    /// object must NOT change the fingerprint.
+    /// Property #1 — key-order invariance. Shuffling the keys of an
+    /// object must not change the fingerprint.
     #[test]
     fn fingerprint_is_key_order_invariant(obj in arb_json_object()) {
         let Value::Object(map) = obj.clone() else { unreachable!() };
-        // Build a reversed-order map.
         let mut reversed = Map::new();
         let mut pairs: Vec<_> = map.into_iter().collect();
         pairs.reverse();
-        for (k, v) in pairs { reversed.insert(k, v); }
+        for (k, v) in pairs {
+            reversed.insert(k, v);
+        }
         let reversed_obj = Value::Object(reversed);
 
-        let fp_a = FailureTracker::fingerprint(\"web_search\", &obj);
-        let fp_b = FailureTracker::fingerprint(\"web_search\", &reversed_obj);
+        let fp_a = FailureTracker::fingerprint("web_search", &obj);
+        let fp_b = FailureTracker::fingerprint("web_search", &reversed_obj);
         prop_assert_eq!(fp_a, fp_b);
     }
 
-    /// Property #2 \u2014 stability. Identical inputs hash identically.
+    /// Property #2 — stability. Identical inputs hash identically.
     #[test]
     fn fingerprint_is_stable(obj in arb_json_object()) {
-        let fp1 = FailureTracker::fingerprint(\"web_search\", &obj);
-        let fp2 = FailureTracker::fingerprint(\"web_search\", &obj);
+        let fp1 = FailureTracker::fingerprint("web_search", &obj);
+        let fp2 = FailureTracker::fingerprint("web_search", &obj);
         prop_assert_eq!(fp1, fp2);
     }
 
-    /// Property #3 \u2014 tool-name binding. Two calls with the same args
-    /// but different tool names hash differently.
+    /// Property #3 — tool-name binding. Same args but different tool
+    /// names must hash differently.
     #[test]
     fn fingerprint_binds_to_tool_name(obj in arb_json_object()) {
-        let fp_a = FailureTracker::fingerprint(\"web_search\", &obj);
-        let fp_b = FailureTracker::fingerprint(\"read_file\", &obj);
+        let fp_a = FailureTracker::fingerprint("web_search", &obj);
+        let fp_b = FailureTracker::fingerprint("read_file", &obj);
         prop_assert_ne!(fp_a, fp_b);
     }
 }

@@ -81,7 +81,7 @@ pub enum MukeiError {
         /// The next version the boot path tried to apply.
         expected: u32,
         /// The full applied set as found on disk.
-        applied:  Vec<u32>,
+        applied: Vec<u32>,
     },
 
     // ------------------------------------------------------------------
@@ -94,7 +94,7 @@ pub enum MukeiError {
     #[error("config.toml field '{field}' has invalid value: {reason}")]
     ConfigInvalid {
         /// Dotted field path (e.g. `watchdog.max_iterations`).
-        field:  String,
+        field: String,
         /// Human-readable reason; surfaced to QML for the error dialog.
         reason: String,
     },
@@ -150,7 +150,7 @@ pub enum MukeiError {
         /// Tool name.
         tool_name: String,
         /// Validator's human-readable rejection reason; re-fed to the LLM.
-        reason:     String,
+        reason: String,
     },
     /// The same tool failed twice with the same argument fingerprint
     /// (REQ-AGT-04). The agent loop downgrades to graceful degrade.
@@ -257,63 +257,63 @@ impl MukeiError {
     /// Stable, ASCII-only error code used by the QML side.
     pub fn error_code(&self) -> &'static str {
         match self {
-            Self::FFIPanic                       => "ERR_FFI_PANIC",
-            Self::CallbackGuardExpired           => "ERR_CALLBACK_GUARD_EXPIRED",
-            Self::BlockingJoinFailed(_)          => "ERR_BLOCKING_JOIN",
+            Self::FFIPanic => "ERR_FFI_PANIC",
+            Self::CallbackGuardExpired => "ERR_CALLBACK_GUARD_EXPIRED",
+            Self::BlockingJoinFailed(_) => "ERR_BLOCKING_JOIN",
 
-            Self::OOM                            => "ERR_OOM",
-            Self::MemoryPreflightRejected(_)     => "ERR_MEM_PREFLIGHT",
-            Self::ThermalThrottle                => "ERR_THERMAL",
+            Self::OOM => "ERR_OOM",
+            Self::MemoryPreflightRejected(_) => "ERR_MEM_PREFLIGHT",
+            Self::ThermalThrottle => "ERR_THERMAL",
 
-            Self::ModelLoadFailed(_)             => "ERR_MODEL_LOAD",
-            Self::ModelCorrupted                 => "ERR_MODEL_CORRUPTED",
-            Self::ContextCreationFailed(_)       => "ERR_CONTEXT_CREATE",
-            Self::ContextOverflow(_)             => "ERR_CONTEXT_OVERFLOW",
-            Self::GrammarLoadFailed(_)           => "ERR_GRAMMAR_LOAD",
+            Self::ModelLoadFailed(_) => "ERR_MODEL_LOAD",
+            Self::ModelCorrupted => "ERR_MODEL_CORRUPTED",
+            Self::ContextCreationFailed(_) => "ERR_CONTEXT_CREATE",
+            Self::ContextOverflow(_) => "ERR_CONTEXT_OVERFLOW",
+            Self::GrammarLoadFailed(_) => "ERR_GRAMMAR_LOAD",
 
-            Self::DatabaseInitFailed(_)          => "ERR_DB_INIT",
-            Self::DatabaseCorruption             => "ERR_DB_CORRUPTION",
-            Self::MigrationFailed(_, _)          => "ERR_MIGRATION",
-            Self::MigrationOrderConflict { .. }  => "ERR_MIGRATION_ORDER",
+            Self::DatabaseInitFailed(_) => "ERR_DB_INIT",
+            Self::DatabaseCorruption => "ERR_DB_CORRUPTION",
+            Self::MigrationFailed(_, _) => "ERR_MIGRATION",
+            Self::MigrationOrderConflict { .. } => "ERR_MIGRATION_ORDER",
 
-            Self::ConfigMissingField(_)          => "ERR_CONFIG_MISSING",
-            Self::ConfigInvalid { .. }           => "ERR_CONFIG_INVALID",
-            Self::ConfigUnknownField(_)          => "ERR_CONFIG_UNKNOWN",
-            Self::SafeStorageUnavailable(_)      => "ERR_SAFE_STORAGE",
+            Self::ConfigMissingField(_) => "ERR_CONFIG_MISSING",
+            Self::ConfigInvalid { .. } => "ERR_CONFIG_INVALID",
+            Self::ConfigUnknownField(_) => "ERR_CONFIG_UNKNOWN",
+            Self::SafeStorageUnavailable(_) => "ERR_SAFE_STORAGE",
 
-            Self::WrappedKeyMalformed(_)         => "ERR_WRAPPED_KEY",
-            Self::UnwrapFailed                   => "ERR_UNWRAP_FAILED",
-            Self::SecretLeaked(_)                => "ERR_SECRET_LEAKED",
+            Self::WrappedKeyMalformed(_) => "ERR_WRAPPED_KEY",
+            Self::UnwrapFailed => "ERR_UNWRAP_FAILED",
+            Self::SecretLeaked(_) => "ERR_SECRET_LEAKED",
 
-            Self::ToolLoopDetected(_)            => "ERR_TOOL_LOOP",
-            Self::ToolTimeout(_)                 => "ERR_TOOL_TIMEOUT",
-            Self::UnknownTool { .. }             => "ERR_TOOL_UNKNOWN",
-            Self::ToolArgsRejected { .. }        => "ERR_TOOL_ARGS",
-            Self::ToolAbuseBlocked { .. }        => "ERR_TOOL_ABUSE",
+            Self::ToolLoopDetected(_) => "ERR_TOOL_LOOP",
+            Self::ToolTimeout(_) => "ERR_TOOL_TIMEOUT",
+            Self::UnknownTool { .. } => "ERR_TOOL_UNKNOWN",
+            Self::ToolArgsRejected { .. } => "ERR_TOOL_ARGS",
+            Self::ToolAbuseBlocked { .. } => "ERR_TOOL_ABUSE",
             Self::ToolPermanentlyDisabled { .. } => "ERR_TOOL_DISABLED",
-            Self::ToolParseFailed(_)             => "ERR_TOOL_PARSE",
-            Self::ToolArgumentInvalid { .. }     => "ERR_TOOL_ARGUMENT",
-            Self::ToolExecutionFailed(_)         => "ERR_TOOL_EXEC",
-            Self::WebSearchFailed(_)             => "ERR_WEB_SEARCH",
-            Self::HttpClientFailed(_)            => "ERR_HTTP_CLIENT",
-            Self::FileReadFailed(_)              => "ERR_FILE_READ",
-            Self::BinaryFile                     => "ERR_BINARY_FILE",
-            Self::SandboxViolation               => "ERR_SANDBOX",
+            Self::ToolParseFailed(_) => "ERR_TOOL_PARSE",
+            Self::ToolArgumentInvalid { .. } => "ERR_TOOL_ARGUMENT",
+            Self::ToolExecutionFailed(_) => "ERR_TOOL_EXEC",
+            Self::WebSearchFailed(_) => "ERR_WEB_SEARCH",
+            Self::HttpClientFailed(_) => "ERR_HTTP_CLIENT",
+            Self::FileReadFailed(_) => "ERR_FILE_READ",
+            Self::BinaryFile => "ERR_BINARY_FILE",
+            Self::SandboxViolation => "ERR_SANDBOX",
 
-            Self::PermissionDenied               => "ERR_PERMISSION_DENIED",
-            Self::SafRevoked                     => "ERR_SAF_REVOKED",
-            Self::SafRequired                    => "ERR_SAF_REQUIRED",
+            Self::PermissionDenied => "ERR_PERMISSION_DENIED",
+            Self::SafRevoked => "ERR_SAF_REVOKED",
+            Self::SafRequired => "ERR_SAF_REQUIRED",
 
-            Self::NetworkError(_)                => "ERR_NETWORK",
-            Self::Io(_)                          => "ERR_IO",
-            Self::DownloadHashMismatch           => "ERR_DOWNLOAD_HASH",
+            Self::NetworkError(_) => "ERR_NETWORK",
+            Self::Io(_) => "ERR_IO",
+            Self::DownloadHashMismatch => "ERR_DOWNLOAD_HASH",
 
-            Self::PromptLeakage                  => "ERR_PROMPT_LEAKAGE",
-            Self::WatchdogExceeded { .. }        => "ERR_WATCHDOG",
-            Self::CrashLoopDetected { .. }       => "ERR_CRASH_LOOP",
-            Self::Cancelled                      => "ERR_CANCELLED",
-            Self::Invariant(_)                    => "ERR_INVARIANT",
-            Self::Internal(_)                    => "ERR_INTERNAL",
+            Self::PromptLeakage => "ERR_PROMPT_LEAKAGE",
+            Self::WatchdogExceeded { .. } => "ERR_WATCHDOG",
+            Self::CrashLoopDetected { .. } => "ERR_CRASH_LOOP",
+            Self::Cancelled => "ERR_CANCELLED",
+            Self::Invariant(_) => "ERR_INVARIANT",
+            Self::Internal(_) => "ERR_INTERNAL",
         }
     }
 
@@ -327,17 +327,41 @@ impl MukeiError {
                 ErrorClass::Inference
             }
             Self::ContextOverflow(_) | Self::ContextCreationFailed(_) => ErrorClass::Inference,
-            Self::DatabaseCorruption | Self::DatabaseInitFailed(_) | Self::MigrationFailed(_, _) | Self::MigrationOrderConflict { .. } => ErrorClass::Storage,
-            Self::ConfigInvalid { .. } | Self::ConfigMissingField(_) | Self::ConfigUnknownField(_) => ErrorClass::Config,
-            Self::ToolLoopDetected(_) | Self::ToolTimeout(_) | Self::ToolAbuseBlocked { .. } | Self::ToolPermanentlyDisabled { .. } | Self::UnknownTool { .. } | Self::ToolArgsRejected { .. } | Self::ToolParseFailed(_) | Self::ToolArgumentInvalid { .. } | Self::ToolExecutionFailed(_) | Self::WebSearchFailed(_) | Self::HttpClientFailed(_) | Self::FileReadFailed(_) | Self::BinaryFile | Self::SandboxViolation => ErrorClass::Agent,
+            Self::DatabaseCorruption
+            | Self::DatabaseInitFailed(_)
+            | Self::MigrationFailed(_, _)
+            | Self::MigrationOrderConflict { .. } => ErrorClass::Storage,
+            Self::ConfigInvalid { .. }
+            | Self::ConfigMissingField(_)
+            | Self::ConfigUnknownField(_) => ErrorClass::Config,
+            Self::ToolLoopDetected(_)
+            | Self::ToolTimeout(_)
+            | Self::ToolAbuseBlocked { .. }
+            | Self::ToolPermanentlyDisabled { .. }
+            | Self::UnknownTool { .. }
+            | Self::ToolArgsRejected { .. }
+            | Self::ToolParseFailed(_)
+            | Self::ToolArgumentInvalid { .. }
+            | Self::ToolExecutionFailed(_)
+            | Self::WebSearchFailed(_)
+            | Self::HttpClientFailed(_)
+            | Self::FileReadFailed(_)
+            | Self::BinaryFile
+            | Self::SandboxViolation => ErrorClass::Agent,
             Self::SafRevoked | Self::SafRequired | Self::PermissionDenied => ErrorClass::Permission,
             Self::NetworkError(_) | Self::DownloadHashMismatch | Self::Io(_) => ErrorClass::Network,
-            Self::SecretLeaked(_) | Self::UnwrapFailed | Self::WrappedKeyMalformed(_) | Self::SafeStorageUnavailable(_) | Self::PromptLeakage => ErrorClass::Security,
+            Self::SecretLeaked(_)
+            | Self::UnwrapFailed
+            | Self::WrappedKeyMalformed(_)
+            | Self::SafeStorageUnavailable(_)
+            | Self::PromptLeakage => ErrorClass::Security,
             // Issue #19: the previous `_ => Unknown` wildcard let new error
             // variants silently land in Unknown. We list every remaining
             // variant explicitly so the compiler enforces classification
             // for any future variant via E0004 (non-exhaustive match).
-            Self::FFIPanic | Self::CallbackGuardExpired | Self::BlockingJoinFailed(_) => ErrorClass::Resource,
+            Self::FFIPanic | Self::CallbackGuardExpired | Self::BlockingJoinFailed(_) => {
+                ErrorClass::Resource
+            }
             Self::CrashLoopDetected { .. } => ErrorClass::Device,
             Self::Cancelled | Self::Invariant(_) | Self::Internal(_) => ErrorClass::Unknown,
         }
@@ -372,16 +396,16 @@ pub enum ErrorClass {
 impl std::fmt::Display for ErrorClass {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            Self::Resource   => "resource",
-            Self::Device     => "device",
-            Self::Inference  => "inference",
-            Self::Storage    => "storage",
-            Self::Config     => "config",
-            Self::Agent      => "agent",
+            Self::Resource => "resource",
+            Self::Device => "device",
+            Self::Inference => "inference",
+            Self::Storage => "storage",
+            Self::Config => "config",
+            Self::Agent => "agent",
             Self::Permission => "permission",
-            Self::Network    => "network",
-            Self::Security   => "security",
-            Self::Unknown    => "unknown",
+            Self::Network => "network",
+            Self::Security => "security",
+            Self::Unknown => "unknown",
         };
         f.write_str(s)
     }
@@ -407,7 +431,9 @@ impl MukeiError {
         // (or a panic-handler core dump) cannot recover the secret.
         use zeroize::Zeroize;
         let len = plaintext.len();
-        unsafe { plaintext.as_mut_vec().zeroize(); }
+        unsafe {
+            plaintext.as_mut_vec().zeroize();
+        }
         drop(plaintext);
         Self::SecretLeaked(len)
     }
@@ -428,7 +454,9 @@ mod tests {
             MukeiError::ThermalThrottle,
             MukeiError::ToolTimeout(None),
             MukeiError::PromptLeakage,
-            MukeiError::UnknownTool { tool_name: "x".into() },
+            MukeiError::UnknownTool {
+                tool_name: "x".into(),
+            },
             MukeiError::ConfigInvalid {
                 field: "models_dir".into(),
                 reason: "missing".into(),
@@ -450,16 +478,13 @@ mod tests {
         let rendered = format!("{err}");
         assert!(rendered.contains("plaintext secret"));
         assert!(!rendered.contains("sk-test-123")); // never render raw secret
-        // The error MUST carry only the redacted length, never the bytes.
+                                                    // The error MUST carry only the redacted length, never the bytes.
         assert!(matches!(err, MukeiError::SecretLeaked(n) if n == "sk-test-123".len()));
     }
 
     #[test]
     fn classification_is_consistent() {
-        assert_eq!(
-            MukeiError::OOM.classification(),
-            ErrorClass::Resource
-        );
+        assert_eq!(MukeiError::OOM.classification(), ErrorClass::Resource);
         assert_eq!(
             MukeiError::ToolLoopDetected(5).classification(),
             ErrorClass::Agent

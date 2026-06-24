@@ -84,12 +84,15 @@ fn build_payload() -> Result<String> {
 
     if let Ok(meminfo) = fs::read_to_string("/proc/meminfo") {
         if let Some(line) = meminfo.lines().find(|line| line.starts_with("MemTotal:")) {
-            map.insert("mem_total", line.replace("MemTotal:", "").trim().to_string());
+            map.insert(
+                "mem_total",
+                line.replace("MemTotal:", "").trim().to_string(),
+            );
         }
     }
 
-    let json = serde_json::to_string_pretty(&map)
-        .map_err(|e| MukeiError::Internal(e.to_string()))?;
+    let json =
+        serde_json::to_string_pretty(&map).map_err(|e| MukeiError::Internal(e.to_string()))?;
     Ok(format!(
         "<external_data source=\"get_hardware_info\" trust=\"local_device\">\n{}\n</external_data>",
         json

@@ -37,7 +37,10 @@
 /// (fast path) and an owned `String` otherwise.
 pub fn escape_untrusted(input: &str) -> std::borrow::Cow<'_, str> {
     // Fast path — almost every real-world snippet hits this branch.
-    if !input.bytes().any(|b| matches!(b, b'<' | b'>' | b'&' | b'"')) {
+    if !input
+        .bytes()
+        .any(|b| matches!(b, b'<' | b'>' | b'&' | b'"'))
+    {
         return std::borrow::Cow::Borrowed(input);
     }
     let mut out = String::with_capacity(input.len() + 16);

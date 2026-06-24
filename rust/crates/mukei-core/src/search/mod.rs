@@ -41,8 +41,6 @@
 //! - **Trust gating.** Sources classified as
 //!   [`trust::SourceTrust::Unsafe`] are dropped BEFORE ranking.
 
-#![allow(missing_docs)] // per-item docs are exhaustive within each sub-module
-
 pub mod cache;
 pub mod engines;
 pub mod intent;
@@ -90,7 +88,12 @@ pub struct SearchHit {
 
 impl SearchHit {
     /// Convenience constructor for tests and adapters.
-    pub fn new(title: impl Into<String>, url: impl Into<String>, snippet: impl Into<String>, engine: SearchEngineKind) -> Self {
+    pub fn new(
+        title: impl Into<String>,
+        url: impl Into<String>,
+        snippet: impl Into<String>,
+        engine: SearchEngineKind,
+    ) -> Self {
         Self {
             title: title.into(),
             url: url.into(),

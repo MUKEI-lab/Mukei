@@ -19,30 +19,30 @@ use crate::error::{MukeiError, Result};
 /// required field must be present.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MukeiConfig {
-    pub models_dir:       PathBuf,
-    pub vectors_dir:      PathBuf,
-    pub database_path:    PathBuf,
-    pub saf_tokens_db:    PathBuf,
-    pub crashes_dir:      PathBuf,
-    pub logs_dir:         PathBuf,
-    pub max_blocking:     BlockingPoolCfg,
-    pub gpu_layers:       i32,
-    pub n_ctx:            u32,
-    pub n_threads:        u32,
-    pub watchdog:         WatchdogCfg,
-    pub storage:          StorageCfg,
-    pub saf:              SafCfg,
-    pub agent:            AgentCfg,
-    pub defaults:         DefaultsCfg,
+    pub models_dir: PathBuf,
+    pub vectors_dir: PathBuf,
+    pub database_path: PathBuf,
+    pub saf_tokens_db: PathBuf,
+    pub crashes_dir: PathBuf,
+    pub logs_dir: PathBuf,
+    pub max_blocking: BlockingPoolCfg,
+    pub gpu_layers: i32,
+    pub n_ctx: u32,
+    pub n_threads: u32,
+    pub watchdog: WatchdogCfg,
+    pub storage: StorageCfg,
+    pub saf: SafCfg,
+    pub agent: AgentCfg,
+    pub defaults: DefaultsCfg,
     /// Architect review GH #34: per-engine search timeouts + cache
     /// behaviour are now config-driven. Optional with `#[serde(default)]`
     /// so v0.7.5 configs that pre-date this section still load.
     #[serde(default)]
-    pub search:           SearchCfg,
+    pub search: SearchCfg,
     /// List of known third-party API-key slots whose values are
     /// Keystore-wrapped ciphertext (REQ-SEC-20 / §12.4).
     #[serde(default)]
-    pub wrapped_secrets:  Vec<WrappedSecretRef>,
+    pub wrapped_secrets: Vec<WrappedSecretRef>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -102,11 +102,17 @@ impl AgentCfg {
     /// Default value for `repeat_output_window` when the field is omitted
     /// from `config.toml` (kept for forward compatibility with v0.7.4
     /// configs that pre-date the policy field).
-    pub fn default_repeat_output_window() -> u32 { 2 }
+    pub fn default_repeat_output_window() -> u32 {
+        2
+    }
     /// Default value for `repeat_output_backoff_secs`.
-    pub fn default_repeat_output_backoff_secs() -> u32 { 10 }
+    pub fn default_repeat_output_backoff_secs() -> u32 {
+        10
+    }
     /// Default value for `max_concurrent_tools` (architect review GH #13).
-    pub fn default_max_concurrent_tools() -> u32 { 4 }
+    pub fn default_max_concurrent_tools() -> u32 {
+        4
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -139,10 +145,18 @@ pub struct SearchCfg {
 }
 
 impl SearchCfg {
-    pub fn default_brave_timeout_secs() -> u64 { 3 }
-    pub fn default_tavily_timeout_secs() -> u64 { 5 }
-    pub fn default_max_parallel_engines() -> usize { 2 }
-    pub fn default_enable_cache() -> bool { true }
+    pub fn default_brave_timeout_secs() -> u64 {
+        3
+    }
+    pub fn default_tavily_timeout_secs() -> u64 {
+        5
+    }
+    pub fn default_max_parallel_engines() -> usize {
+        2
+    }
+    pub fn default_enable_cache() -> bool {
+        true
+    }
 }
 
 impl Default for SearchCfg {
@@ -158,8 +172,8 @@ impl Default for SearchCfg {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct WrappedSecretRef {
-    pub slot: String,        // e.g. "brave_api_key"
-    pub blob_path: PathBuf,  // e.g. ~/.mukei/secrets/brave_key.enc
+    pub slot: String,       // e.g. "brave_api_key"
+    pub blob_path: PathBuf, // e.g. ~/.mukei/secrets/brave_key.enc
     pub created: chrono::DateTime<chrono::Utc>,
 }
 
@@ -208,31 +222,37 @@ impl MukeiConfig {
             ))
         })?;
         Self::validate_toml_keys(&bytes)?;
-        let cfg: MukeiConfig = toml::from_str(std::str::from_utf8(&bytes).map_err(|e| MukeiError::ConfigInvalid {
-            field: "root".into(),
-            reason: e.to_string(),
-        })?).map_err(|e| {
-            // tom-parse-error prints "field X" — surface that to the UI verbatim.
-            let msg = e.to_string();
-            MukeiError::ConfigInvalid {
-                field: msg.clone(),
-                reason: msg,
-            }
-        })?;
+        let cfg: MukeiConfig =
+            toml::from_str(
+                std::str::from_utf8(&bytes).map_err(|e| MukeiError::ConfigInvalid {
+                    field: "root".into(),
+                    reason: e.to_string(),
+                })?,
+            )
+            .map_err(|e| {
+                // tom-parse-error prints "field X" — surface that to the UI verbatim.
+                let msg = e.to_string();
+                MukeiError::ConfigInvalid {
+                    field: msg.clone(),
+                    reason: msg,
+                }
+            })?;
         Self::logical_validate(&cfg)?;
         Ok(cfg)
     }
 
     fn validate_toml_keys(bytes: &[u8]) -> Result<()> {
-        let raw: raw::RawRoot = toml::from_str(std::str::from_utf8(bytes).map_err(|e| MukeiError::ConfigInvalid {
-            field: "root".into(),
-            reason: e.to_string(),
-        })?).map_err(|e| {
-            MukeiError::ConfigInvalid {
+        let raw: raw::RawRoot =
+            toml::from_str(
+                std::str::from_utf8(bytes).map_err(|e| MukeiError::ConfigInvalid {
+                    field: "root".into(),
+                    reason: e.to_string(),
+                })?,
+            )
+            .map_err(|e| MukeiError::ConfigInvalid {
                 field: "root".into(),
                 reason: e.to_string(),
-            }
-        })?;
+            })?;
         let known: BTreeSet<&'static str> = Self::known_keys().iter().copied().collect();
         for k in raw.fields.keys() {
             if !known.contains(k.as_str()) {
