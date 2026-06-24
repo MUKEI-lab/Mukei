@@ -38,7 +38,7 @@ pub mod recovery;
 pub mod saf;
 
 #[cfg(feature = "rusqlite")]
-pub use audit_log::{AuditEntry, AuditLogWriter};
+pub use audit_log::{AuditChainStatus, AuditEntry, AuditLogReader, AuditLogWriter};
 #[cfg(feature = "rusqlite")]
 pub use migrations::{MigrationRecord, Migrator, MIGRATIONS_DIR, MIGRATION_FILE_PREFIX};
 #[cfg(feature = "rusqlite")]

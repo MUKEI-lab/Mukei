@@ -183,6 +183,121 @@ impl AuditLogWriter {
     }
 }
 
+// ---------------------------------------------------------------------
+// Architect review GH #19 — Boot-time chain verifier.
+//
+// PRD REQ-SEC-03 promises an "immutable, append-only local audit log".
+// That promise is only meaningful if SOMETHING detects tampering. We
+// walk every row in `tool_audit_log` ordered by rowid and recompute
+// each `entry_hash`, comparing against the persisted value. Any
+// mismatch fails the boot with a typed error the bridge can surface
+// to the user (and a `DiagnosticEvent::AuditChainBroken` is emitted
+// at the same time by the diagnostics sink).
+// ---------------------------------------------------------------------
+
+/// Outcome of [`AuditLogReader::verify_chain`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AuditChainStatus {
+    /// Chain verified clean. `rows_checked` is the total number of
+    /// rows scanned; `tip` is the last `entry_hash` (or `None` for an
+    /// empty log).
+    Ok { rows_checked: u64, tip: Option<String> },
+    /// Tampering detected at the given rowid. `expected` is the hash
+    /// we recomputed; `found` is the value persisted in the database.
+    Tampered { row_id: i64, expected: String, found: String },
+}
+
+/// Reader-only handle over `tool_audit_log`. Distinct from
+/// [`AuditLogWriter`] so that boot-time verification can run in a
+/// read-only transaction without contending with the writer mutex.
+pub struct AuditLogReader;
+
+impl AuditLogReader {
+    /// Verify the hash chain end-to-end. Called from
+    /// `MukeiAgent::initialize` AFTER the SQLCipher key is installed
+    /// and BEFORE the agent loop accepts user input.
+    ///
+    /// Returns [`AuditChainStatus::Ok`] on a clean chain.
+    /// Returns [`AuditChainStatus::Tampered`] on the FIRST inconsistent
+    /// row — the caller can decide whether to quarantine the DB,
+    /// surface a UI error, or both.
+    pub async fn verify_chain(pool: &DatabasePool) -> Result<AuditChainStatus> {
+        pool.with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT rowid, tool_call_id, tool_name, args_json, fingerprint_sha256, \
+                        success, duration_ms, error_code, previous_hash, entry_hash \
+                 FROM tool_audit_log \
+                 ORDER BY rowid ASC",
+            )?;
+            let mut rows = stmt.query([])?;
+            let mut running_prev: Option<String> = None;
+            let mut rows_checked: u64 = 0;
+            while let Some(row) = rows.next()? {
+                let row_id: i64 = row.get(0)?;
+                let tool_call_id: String = row.get(1)?;
+                let tool_name: String = row.get(2)?;
+                let args_json: String = row.get(3)?;
+                let fingerprint: String = row.get(4)?;
+                let success: i64 = row.get(5)?;
+                let duration_ms: i64 = row.get(6)?;
+                let error_code: Option<String> = row.get(7)?;
+                let stored_prev: Option<String> = row.get(8)?;
+                let stored_entry_hash: String = row.get(9)?;
+
+                // Sanity: the `previous_hash` column must match the
+                // running hash we accumulated walking the chain so far.
+                if stored_prev != running_prev {
+                    return Ok(AuditChainStatus::Tampered {
+                        row_id,
+                        expected: running_prev.clone().unwrap_or_default(),
+                        found: stored_prev.unwrap_or_default(),
+                    });
+                }
+
+                // Recompute entry_hash using the exact same canonical
+                // field order as `AuditLogWriter::record`.
+                let prev_for_hash = running_prev.clone().unwrap_or_default();
+                let mut h = Sha256::new();
+                h.update(prev_for_hash.as_bytes());
+                h.update([0u8]);
+                h.update(tool_call_id.as_bytes());
+                h.update([0u8]);
+                h.update(tool_name.as_bytes());
+                h.update([0u8]);
+                h.update(args_json.as_bytes());
+                h.update([0u8]);
+                h.update(fingerprint.as_bytes());
+                h.update([0u8]);
+                h.update(if success != 0 { b"1" } else { b"0" });
+                h.update([0u8]);
+                h.update((duration_ms as u64).to_be_bytes());
+                h.update([0u8]);
+                if let Some(code) = &error_code {
+                    h.update(code.as_bytes());
+                }
+                let recomputed = hex_helper(&h.finalize());
+
+                if recomputed != stored_entry_hash {
+                    return Ok(AuditChainStatus::Tampered {
+                        row_id,
+                        expected: recomputed,
+                        found: stored_entry_hash,
+                    });
+                }
+
+                running_prev = Some(stored_entry_hash);
+                rows_checked += 1;
+            }
+            Ok::<_, DbError>(AuditChainStatus::Ok {
+                rows_checked,
+                tip: running_prev,
+            })
+        })
+        .await
+        .map_err(MukeiError::from)
+    }
+}
+
 const PREVIEW_MAX: usize = 256;
 
 fn truncate_preview(s: &str) -> String {

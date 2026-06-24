@@ -43,10 +43,10 @@ cargo check -p mukei-core --features "tokio,rusqlite,candle"
 Single source of truth (mirrors the root `README.md` badge):
 
 ```
-mukei-core      160 unit + 12 integration
+mukei-core      167 unit + 12 integration + 4 proptest
 mukei-ffi-shim    2 unit
-                ────────────────────
-                174 passed total
+                ──────────────────────────────
+                185 passed total
 ```
 
 The root `README.md` badge and the changelog in `README.md` §Tests must

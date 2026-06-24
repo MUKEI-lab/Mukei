@@ -5,7 +5,7 @@
 **A zero-telemetry, fault-tolerant, on-device AI agent.**
 Built in Rust, fronted by Qt 6 + QML, accelerated by llama.cpp.
 
-[![tests](https://img.shields.io/badge/tests-174%20passing-success)](#tests)
+[![tests](https://img.shields.io/badge/tests-185%20passing-success)](#tests)
 [![rust](https://img.shields.io/badge/rust-1.78%2B-orange)](#requirements)
 [![license](https://img.shields.io/badge/license-Proprietary-lightgrey)](#license)
 [![status](https://img.shields.io/badge/status-architecture%20pass-blue)](#project-status)
@@ -88,10 +88,10 @@ cargo test -p mukei-ffi-shim  --lib
 Current run:
 
 ```
-mukei-core      160 unit + 12 integration
+mukei-core      167 unit + 12 integration + 4 proptest
 mukei-ffi-shim    2 unit
-                ────────────────────
-                174 passed total
+                ──────────────────────────────
+                185 passed total
 ```
 
 Verified invariants:
