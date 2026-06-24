@@ -8,7 +8,7 @@
 | **Supersedes** | UXB v1.0 (2026-06-19, first draft) · UXB v2.0 (2026-06-19, Editorial Luxury Manifesto) |
 | **Status** | 🟢 Locked Design System Pass — v0.7.5 Convergence-Alignment Revision |
 | **Aesthetic** | Warm Luxury Editorial (70 % Minimalism · 20 % Editorial · 10 % Luxury Warm) |
-| **Companion docs** | [PRD v0.7.5](PRD_v0.7.5_architect_pass.md) · [TRD v0.7.5](TRD_v0.7.5_architect_pass.md) · [Application Flow v1.2](MUKEI-AF_v1.2_ApplicationFlow.md) · [Backend Schema v1.2](MUKEI-BS_v1.2_BackendSchema.md) |
+| **Companion docs** | [PRD v0.7.5](PRD.md) · [TRD v0.7.5](TRD.md) · [Application Flow v1.2](AF.md) · [Backend Schema v1.2](BS.md) |
 | **Audience** | Designers, Front-end (QML) engineers, A11y reviewers, Localization, QA, Product |
 | **Locked-palette hash** | `dolcevita:#D8CABD · espresso:#362417 · taupe:#92817A · copper:#B87333 · gold:#D4AF37 · terracotta:#C17F3E` |
 | **Notation** | Every screen/component cross-references PRD `REQ-*`, TRD `§X.Y`, and (where applicable) AF/BS sections. Every section ends with an **FMEA table** where failure modes are non-trivial. |

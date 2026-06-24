@@ -6,8 +6,8 @@
 | **Supersedes** | BS v1.0 (2026-06-19, first pass) · BS v1.1 (2026-06-19, v0.7.4 i18n schema) |
 | **Status** | 🟢 AI-Architect Pass — Cross-Locked against PRD v0.7.5 + TRD v0.7.5 + AF v1.2 + UXB v2.1 |
 | **Audience** | Database / Rust engineers, Security review, Forensic engineers |
-| **Companion docs** | [PRD v0.7.5](PRD_v0.7.5_architect_pass.md) · [TRD v0.7.5](TRD_v0.7.5_architect_pass.md) · [Application Flow v1.2](MUKEI-AF_v1.2_ApplicationFlow.md) · [UI/UX Brief v2.1](MUKEI-UXB_v2.1_UIUXBrief_EditorialLuxury.md) |
-| **Out of scope** | UI behaviour — see [UI/UX Brief v2.1](MUKEI-UXB_v2.1_UIUXBrief_EditorialLuxury.md) |
+| **Companion docs** | [PRD v0.7.5](PRD.md) · [TRD v0.7.5](TRD.md) · [Application Flow v1.2](AF.md) · [UI/UX Brief v2.1](UXB.md) |
+| **Out of scope** | UI behaviour — see [UI/UX Brief v2.1](UXB.md) |
 | **Notation** | Diagrams use ASCII. SQL is the current schema; **never** edit by hand — only via migrations (TRD §6). |
 
 > **Hard rule:** No schema change without a `V0xx__name.sql` migration in `migrations/` and an entry in `migrations_applied`. Direct edits are checked by a pre-commit test (TRD §11.1 `test_no_direct_schema_edit`).

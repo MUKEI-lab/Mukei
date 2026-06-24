@@ -9,7 +9,7 @@
 | **Architecture** | Qt 6 (QML UI) + CXX-Qt (Bridge) + Rust (Agent Core) + llama.cpp (Inference) |
 | **Methodology** | FMEA (Failure Modes), STRIDE (Security), Concurrency-First |
 | **Status** | 🟢 Approved for Deep Engineering |
-| **Companion docs** | [TRD v0.7.5](TRD_v0.7.5_architect_pass.md) · [Application Flow v1.2](MUKEI-AF_v1.2_ApplicationFlow.md) · [UI/UX Brief v2.1](MUKEI-UXB_v2.1_UIUXBrief_EditorialLuxury.md) · [Backend Schema v1.2](MUKEI-BS_v1.2_BackendSchema.md) |
+| **Companion docs** | [TRD v0.7.5](TRD.md) · [Application Flow v1.2](AF.md) · [UI/UX Brief v2.1](UXB.md) · [Backend Schema v1.2](BS.md) |
 
 > **v0.7.5 — Convergence & Contract-Alignment Pass.** No new product requirements are added in this revision. The v0.7.5 PRD is a **truth-synchronisation pass**: it adopts the canonical version graph (PRD ↔ TRD ↔ AF ↔ BS ↔ UXB all aligned on 0.7.5 / 1.2 / 1.2 / 2.1), realigns the first-run journey to the UXB canonical sequence, and freezes the screen contract so engineering samples cannot drift from the design brief. All v0.7.2 / v0.7.3 / v0.7.4 requirements remain in force; none are removed or weakened.
 

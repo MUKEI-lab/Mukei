@@ -316,15 +316,26 @@ impl ToolExecutor {
                     pre_count,
                     self.tracker.threshold(),
                 );
-                self.audit_outcome(
-                    &call,
-                    &fp,
-                    &envelope,
-                    false,
-                    std::time::Duration::from_millis(0),
-                    Some(synthetic_err.error_code().to_string()),
-                )
-                .await?;
+                // Architect review GH #3: audit failures MUST NOT abort
+                // the user's tool call. Log + continue. The graceful
+                // degrade contract owns this path.
+                if let Err(audit_err) = self
+                    .audit_outcome(
+                        &call,
+                        &fp,
+                        &envelope,
+                        false,
+                        std::time::Duration::from_millis(0),
+                        Some(synthetic_err.error_code().to_string()),
+                    )
+                    .await
+                {
+                    tracing::error!(
+                        ?audit_err,
+                        tool = %call.name,
+                        "audit-log write failed on abuse-block path — continuing",
+                    );
+                }
                 outcomes.push(ToolOutcome {
                     result: ToolResult {
                         call_id: call.id,
@@ -356,15 +367,25 @@ impl ToolExecutor {
                     pre_count,
                     self.tracker.threshold(),
                 );
-                self.audit_outcome(
-                    &call,
-                    &fp,
-                    &envelope,
-                    false,
-                    std::time::Duration::from_millis(0),
-                    Some(synthetic_err.error_code().to_string()),
-                )
-                .await?;
+                // Architect review GH #3: see note above — audit failures
+                // are diagnostic-only, never user-facing aborts.
+                if let Err(audit_err) = self
+                    .audit_outcome(
+                        &call,
+                        &fp,
+                        &envelope,
+                        false,
+                        std::time::Duration::from_millis(0),
+                        Some(synthetic_err.error_code().to_string()),
+                    )
+                    .await
+                {
+                    tracing::error!(
+                        ?audit_err,
+                        tool = %call.name,
+                        "audit-log write failed on unknown-tool path — continuing",
+                    );
+                }
                 outcomes.push(ToolOutcome {
                     result: ToolResult {
                         call_id: call.id,
@@ -436,8 +457,17 @@ impl ToolExecutor {
                     // A success resets the failure streak for this
                     // (tool, fingerprint).
                     self.tracker.clear_fingerprint(&call.name, &fp);
-                    self.audit_outcome(&call, &fp, &out, true, took, None)
-                        .await?;
+                    // Architect review GH #3: audit-write failures are
+                    // diagnostic-only — never abort a user's tool call.
+                    if let Err(audit_err) =
+                        self.audit_outcome(&call, &fp, &out, true, took, None).await
+                    {
+                        tracing::error!(
+                            ?audit_err,
+                            tool = %call.name,
+                            "audit-log write failed on success path — continuing",
+                        );
+                    }
 
                     outcomes.push(ToolOutcome {
                         result: ToolResult {
@@ -494,15 +524,25 @@ impl ToolExecutor {
                         attempt,
                         self.tracker.threshold(),
                     );
-                    self.audit_outcome(
-                        &call,
-                        &fp,
-                        &envelope,
-                        false,
-                        took,
-                        Some(err.error_code().to_string()),
-                    )
-                    .await?;
+                    // Architect review GH #3: audit-write failures are
+                    // diagnostic-only — never abort a user's tool call.
+                    if let Err(audit_err) = self
+                        .audit_outcome(
+                            &call,
+                            &fp,
+                            &envelope,
+                            false,
+                            took,
+                            Some(err.error_code().to_string()),
+                        )
+                        .await
+                    {
+                        tracing::error!(
+                            ?audit_err,
+                            tool = %call.name,
+                            "audit-log write failed on failure path — continuing",
+                        );
+                    }
 
                     outcomes.push(ToolOutcome {
                         result: ToolResult {

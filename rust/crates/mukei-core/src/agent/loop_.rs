@@ -120,7 +120,16 @@ impl AgentLoop {
                 //   3. Use the partial `validate()` helper so VALID calls
                 //      in a mixed-validity batch still execute; invalid
                 //      ones become structured envelopes.
-                let assistant_id = MessageId::default();
+                // Architect review GH #2 + GH #11: use the explicit
+                // `MessageId::new()` constructor (clearer than
+                // `Default::default()`) and assert the branch invariant
+                // before pushing.
+                let assistant_id = MessageId::new();
+                debug_assert_eq!(
+                    history.last().map(|m| m.branch),
+                    Some(branch),
+                    "branch invariant violated: parent message is on a different branch",
+                );
                 history.push(ChatMessage {
                     id: assistant_id,
                     role: Role::Assistant,
@@ -145,7 +154,12 @@ impl AgentLoop {
                             1,
                             ToolExecutionPolicy::DEFAULT_MAX_FAILURES,
                         );
-                        let parse_id = MessageId::default();
+                        let parse_id = MessageId::new();
+                        debug_assert_eq!(
+                            history.last().map(|m| m.branch),
+                            Some(branch),
+                            "branch invariant violated on parse-error envelope push",
+                        );
                         history.push(ChatMessage {
                             id: parse_id,
                             role: Role::Tool,
@@ -179,7 +193,12 @@ impl AgentLoop {
                         1,
                         ToolExecutionPolicy::DEFAULT_MAX_FAILURES,
                     );
-                    let rejection_id = MessageId::default();
+                    let rejection_id = MessageId::new();
+                    debug_assert_eq!(
+                        history.last().map(|m| m.branch),
+                        Some(branch),
+                        "branch invariant violated on validator-rejection envelope push",
+                    );
                     history.push(ChatMessage {
                         id: rejection_id,
                         role: Role::Tool,
@@ -212,7 +231,12 @@ impl AgentLoop {
                 // no-progress backoff notice. We append BOTH so the LLM
                 // sees the full picture on the next turn.
                 for outcome in tool_outcomes {
-                    let tool_id = MessageId::default();
+                    let tool_id = MessageId::new();
+                    debug_assert_eq!(
+                        history.last().map(|m| m.branch),
+                        Some(branch),
+                        "branch invariant violated on tool-outcome push",
+                    );
                     history.push(ChatMessage {
                         id: tool_id,
                         role: Role::Tool,
@@ -226,7 +250,12 @@ impl AgentLoop {
                     last_id = tool_id;
 
                     if let Some(notice) = outcome.repeat_output_notice {
-                        let notice_id = MessageId::default();
+                        let notice_id = MessageId::new();
+                        debug_assert_eq!(
+                            history.last().map(|m| m.branch),
+                            Some(branch),
+                            "branch invariant violated on repeat-output notice push",
+                        );
                         history.push(ChatMessage {
                             id: notice_id,
                             role: Role::Tool,
@@ -256,7 +285,12 @@ impl AgentLoop {
                         &blocked_tool,
                         block_err.error_code(),
                     );
-                    let supervisor_id = MessageId::default();
+                    let supervisor_id = MessageId::new();
+                    debug_assert_eq!(
+                        history.last().map(|m| m.branch),
+                        Some(branch),
+                        "branch invariant violated on supervisor-directive push",
+                    );
                     history.push(ChatMessage {
                         id: supervisor_id,
                         role: Role::Tool,
@@ -275,7 +309,12 @@ impl AgentLoop {
             } else {
                 // Final answer — push the assistant turn (parent-linked to
                 // the previous turn in the active branch) and bail.
-                let final_id = MessageId::default();
+                let final_id = MessageId::new();
+                debug_assert_eq!(
+                    history.last().map(|m| m.branch),
+                    Some(branch),
+                    "branch invariant violated on final-answer push",
+                );
                 history.push(ChatMessage {
                     id: final_id,
                     role: Role::Assistant,

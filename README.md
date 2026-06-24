@@ -5,7 +5,7 @@
 **A zero-telemetry, fault-tolerant, on-device AI agent.**
 Built in Rust, fronted by Qt 6 + QML, accelerated by llama.cpp.
 
-[![tests](https://img.shields.io/badge/tests-157%20passing-success)](#tests)
+[![tests](https://img.shields.io/badge/tests-174%20passing-success)](#tests)
 [![rust](https://img.shields.io/badge/rust-1.78%2B-orange)](#requirements)
 [![license](https://img.shields.io/badge/license-Proprietary-lightgrey)](#license)
 [![status](https://img.shields.io/badge/status-architecture%20pass-blue)](#project-status)

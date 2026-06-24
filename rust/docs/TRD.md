@@ -10,7 +10,7 @@
 | **Architecture** | Qt 6 (QML) + CXX-Qt (Bridge) + Rust (Agent Core) + llama.cpp (Inference) |
 | **Status** | 🟢 Approved for Deep Engineering |
 | **Purpose** | Implementation guide for engineers. Contains actual code structures, build configs, and technical specifications. |
-| **Companion docs** | [PRD v0.7.5](PRD_v0.7.5_architect_pass.md) · [Application Flow v1.2](MUKEI-AF_v1.2_ApplicationFlow.md) · [UI/UX Brief v2.1](MUKEI-UXB_v2.1_UIUXBrief_EditorialLuxury.md) · [Backend Schema v1.2](MUKEI-BS_v1.2_BackendSchema.md) |
+| **Companion docs** | [PRD v0.7.5](PRD.md) · [Application Flow v1.2](AF.md) · [UI/UX Brief v2.1](UXB.md) · [Backend Schema v1.2](BS.md) |
 
 > **v0.7.5 — Convergence & Contract-Alignment Pass Changelog.** This revision adds NO new low-level behaviour; it locks the screen contract, canonical first-run journey, and tool-pill-as-timeline-event interaction grammar (§7.0 NEW), and synchronises every cross-reference to the v0.7.5 graph. All v0.7.2 / v0.7.3 / v0.7.4 fixes remain in force; none are removed or weakened. The convergence patches are tracked in §7.0 and the v0.7.5 row of the Revision History (§39).
 >

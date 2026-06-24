@@ -5,6 +5,35 @@
 //! The stub exposes JUST enough API surface for `mukei-core` to compile
 //! when the `llama_cpp` feature flag is enabled in unit tests / sandbox
 //! builds.
+//!
+//! # Release-hardening tripwire (Architect review GH #4)
+//!
+//! Without the compile-time guard below, a release build that *also*
+//! enables `llama_cpp` would silently link this stub and ship a
+//! LLM-less agent. The guard is symmetric to the existing `cfg(ddg)`
+//! tripwire in `mukei-core::search`: it forces a real binding swap at
+//! release time.
+//!
+//! Tests and sandbox builds opt in to the stub explicitly by passing
+//! `--features llama-cpp-rs/stub-acknowledged` (or the workspace alias
+//! pre-baked in `cargo test` invocations in CI).
+#[cfg(all(
+    feature = "release-hardening",
+    not(feature = "stub-acknowledged"),
+))]
+compile_error!(
+    "llama-cpp-stub is being linked into a release-hardening build. \
+     Repoint `llama-cpp-rs` in the workspace `[workspace.dependencies]` \
+     table at the real llama-cpp-rs git rev (TRD §8.2), or, for \
+     intentionally stubbed unit-test builds, enable the \
+     `llama-cpp-rs/stub-acknowledged` feature."
+);
+
+// The stub also re-exports the `release-hardening` flag from the
+// workspace so the cfg above can resolve from this crate's own
+// `[features]` table. The actual feature is declared in Cargo.toml.
+#[cfg(any(feature = "release-hardening", feature = "stub-acknowledged"))]
+const _: () = ();
 
 use std::fmt;
 

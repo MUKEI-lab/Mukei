@@ -28,6 +28,7 @@
 //! releases the guard (`mukei_release_callback_guard`) on destruction
 //! so the dangling tail is provably impossible.
 
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -65,8 +66,33 @@ impl CallbackGuard {
     /// as long as the QObject it is paired with — else this is undefined
     /// behaviour. Used exclusively from `mukei-bridge` after handing out
     /// the typed handle from `unsafe extern "RustQt"` blocks.
+    ///
+    /// # Deprecation
+    /// Architect review GH #10: a `usize` of `0` is *both* a valid C
+    /// NULL and our `invalid()` sentinel — the type system can't tell
+    /// them apart. New code MUST use [`Self::from_non_null`] which
+    /// statically rejects a NULL pointer.
+    #[deprecated(note = "Use `from_non_null(NonNull<Inner>)`. Architect review GH #10.")]
     pub const unsafe fn from_ptr(ptr: usize) -> Self {
         Self(ptr as u64)
+    }
+
+    /// Type-safe constructor: accepts only a non-null pointer to the
+    /// heap-allocated [`Inner`], statically eliminating the `0`-versus-
+    /// sentinel ambiguity flagged in architect review GH #10.
+    ///
+    /// # Safety
+    /// `ptr` MUST be the address of a heap-allocated `Inner` produced
+    /// by `Arc::into_raw` and kept alive at least as long as the
+    /// QObject it is paired with. The bridge crate releases it via
+    /// [`Self::release`].
+    //
+    // NOTE: not `const fn` — raw-pointer-to-integer casts are
+    // disallowed at const-eval time on stable Rust. The function is
+    // still trivially inlineable.
+    #[inline]
+    pub unsafe fn from_non_null(ptr: NonNull<Inner>) -> Self {
+        Self(ptr.as_ptr() as u64)
     }
 
     /// Sentinel "invalid" guard. Calling its `try_call` always yields
@@ -115,17 +141,56 @@ pub struct Inner {
 }
 
 impl Inner {
+    /// Sentinel generation value that indicates a permanently-destroyed
+    /// callback target. Any in-flight callback whose snapshot is not
+    /// equal to this value will observe `GenerationMismatch` once the
+    /// guard is tombstoned.
+    pub const TOMBSTONE: u64 = u64::MAX;
+
     /// Allocate a fresh `Arc<Inner>` with `generation = 1`.
     pub fn new() -> Arc<Self> {
         Arc::new(Self { generation: AtomicU64::new(1) })
     }
 
-    /// Increment generation. Idempotent on a freed Arc (caller checks
-    /// first via the guard).
+    /// Increment generation by one (monotonic rebind path).
+    ///
+    /// Used when the same `Arc<Inner>` is being rebound to a fresh
+    /// QObject (e.g. Activity recreation reusing the slot). The next
+    /// callback snapshot must observe the bumped value, dropping any
+    /// callback bound under the previous generation.
+    ///
+    /// Architect review GH #9: this replaces the blanket `u64::MAX`
+    /// slam previously named `invalidate()`. The monotonic contract
+    /// documented in the module header is now actually true.
+    pub fn bump(&self) -> u64 {
+        // saturating_add semantics via fetch_add + clamp: once we hit
+        // TOMBSTONE — 1, the next bump is functionally indistinguishable
+        // from tombstone. In practice 2^64 - 1 rebinds is unreachable.
+        let prev = self.generation.fetch_add(1, Ordering::Release);
+        if prev == Self::TOMBSTONE - 1 {
+            // Saturate so the next load sees TOMBSTONE rather than
+            // wrapping back to 0 and accidentally matching a stale snap.
+            self.generation.store(Self::TOMBSTONE, Ordering::Release);
+            Self::TOMBSTONE
+        } else {
+            prev + 1
+        }
+    }
+
+    /// Permanently invalidate the callback target. Any in-flight
+    /// callback observes `GenerationMismatch` on its next attempt.
+    ///
+    /// **This is a one-way door.** Use `bump()` if you mean "rebind".
+    /// The legacy name `invalidate()` is retained as a deprecated alias
+    /// for compatibility with existing bridge call-sites.
+    pub fn tombstone(&self) {
+        self.generation.store(Self::TOMBSTONE, Ordering::Release);
+    }
+
+    /// Deprecated alias for [`Self::tombstone`].
+    #[deprecated(note = "Use `tombstone()` (permanent) or `bump()` (rebind) explicitly. Architect review GH #9.")]
     pub fn invalidate(&self) {
-        // u64::MAX means "this object has been destroyed". Any in-flight
-        // callback whose snapshot != u64::MAX gets `GenerationMismatch`.
-        self.generation.store(u64::MAX, Ordering::Release);
+        self.tombstone();
     }
 }
 
@@ -210,18 +275,47 @@ mod tests {
     }
 
     #[test]
-    fn invalidate_blocks_subsequent_calls() {
+    fn tombstone_blocks_subsequent_calls() {
         let inner = Inner::new();
         let ptr = Arc::into_raw(Arc::clone(&inner));
 
         let stale_snap = inner.generation.load(Ordering::Acquire);
-        inner.invalidate();
+        inner.tombstone();
 
         let err = callback_with_guard!(ptr, stale_snap, {
             Ok::<_, GuardError>(0)
         })
         .unwrap_err();
         assert!(matches!(err, GuardError::GenerationMismatch { .. }));
+
+        unsafe { CallbackGuard::release(ptr) };
+    }
+
+    #[test]
+    fn bump_blocks_only_the_previous_generation() {
+        // Architect review GH #9: rebind path. Old snapshot rejected,
+        // new snapshot accepted.
+        let inner = Inner::new();
+        let ptr = Arc::into_raw(Arc::clone(&inner));
+
+        let old_snap = inner.generation.load(Ordering::Acquire);
+        let new_snap = inner.bump();
+        assert_ne!(old_snap, new_snap);
+        assert_ne!(new_snap, Inner::TOMBSTONE, "bump must not slam to tombstone");
+
+        // Old snapshot now mismatches.
+        let err = callback_with_guard!(ptr, old_snap, {
+            Ok::<_, GuardError>(0)
+        })
+        .unwrap_err();
+        assert!(matches!(err, GuardError::GenerationMismatch { .. }));
+
+        // New snapshot still works.
+        let ok = callback_with_guard!(ptr, new_snap, {
+            Ok::<_, GuardError>(99)
+        })
+        .unwrap();
+        assert_eq!(ok, 99);
 
         unsafe { CallbackGuard::release(ptr) };
     }
@@ -243,5 +337,19 @@ mod tests {
     #[test]
     fn handle_is_u64_sized() {
         assert_eq!(std::mem::size_of::<CallbackGuard>(), 8);
+    }
+
+    #[test]
+    fn from_non_null_roundtrips() {
+        // Architect review GH #10 regression: NonNull-typed constructor
+        // can't be called with a NULL pointer at all (type-system
+        // enforced). Smoke test that the address survives.
+        let inner = Inner::new();
+        let raw = Arc::into_raw(Arc::clone(&inner));
+        let nn = std::ptr::NonNull::new(raw as *mut Inner).expect("Arc::into_raw is never NULL");
+        let g = unsafe { CallbackGuard::from_non_null(nn) };
+        assert!(g.is_valid());
+        assert_eq!(g.as_u64(), raw as u64);
+        unsafe { CallbackGuard::release(raw) };
     }
 }

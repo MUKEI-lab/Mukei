@@ -2,9 +2,11 @@
 
 Pure-Rust kernel for the Mukei on-device AI agent.
 
-This workspace implements [TRD v0.7.5](../TRD_v0.7.5_architect_pass.md), the
-[Backend Schema v1.2](../MUKEI-BS_v1.2_BackendSchema.md), and the
-[Application Flow v1.2](../MUKEI-AF_v1.2_ApplicationFlow.md).
+This workspace implements [TRD v0.7.5](docs/TRD.md), the
+[Backend Schema v1.2](docs/BS.md), and the
+[Application Flow v1.2](docs/AF.md).
+
+See also the [PRD v0.7.5](docs/PRD.md) and [UX Brief v2.1](docs/UXB.md).
 
 ## Crates
 
@@ -38,10 +40,18 @@ cargo check -p mukei-core --features "tokio,rusqlite,candle"
 
 ## Test coverage
 
+Single source of truth (mirrors the root `README.md` badge):
+
 ```
-mukei-core      67 tests passing
-mukei-ffi-shim   1 test  passing
+mukei-core      160 unit + 12 integration
+mukei-ffi-shim    2 unit
+                ────────────────────
+                174 passed total
 ```
+
+The root `README.md` badge and the changelog in `README.md` §Tests must
+stay aligned with this number. CI gates on the exact count in
+`.github/workflows/sandbox-check.yml`.
 
 Verified invariants include:
 - `MAX_BLOCKING_THREADS=6` on Android, `TOOL_BLOCKING_SLOTS=2` (TRD §2.2)

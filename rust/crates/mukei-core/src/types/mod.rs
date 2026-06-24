@@ -30,27 +30,80 @@ pub struct BranchId(pub Uuid);
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ToolCallId(pub Uuid);
 
+// ---------------------------------------------------------------------
+// Architect review GH #2 (tracker #1) — explicit constructors.
+//
+// `Default::default()` on each id type DOES return `Uuid::new_v4()`
+// today, so callers that use `::default()` are correct. But that
+// behaviour is non-obvious — `Default` *typically* means "the zero
+// value". The architect review flagged this as a maintenance trap:
+// a future refactor that swaps to `Default::derive` would silently
+// downgrade every id to `Uuid::nil()` and collapse the branch DAG.
+//
+// We add explicit `::new()` constructors with a load-bearing docstring
+// so the agent loop and every other call site can switch to a name
+// that says exactly what it does. The `Default` impls below remain
+// for backwards compatibility but now forward to `::new()` so the two
+// can never drift.
+// ---------------------------------------------------------------------
+
+impl ConversationId {
+    /// Mint a fresh random v4 conversation id.
+    #[inline]
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl MessageId {
+    /// Mint a fresh random v4 message id.
+    ///
+    /// **Prefer this over `Default::default()` at every call site.**
+    /// The branch DAG (BS §2 / V004) keys on this id as the parent
+    /// pointer; two messages sharing an id would corrupt the tree.
+    #[inline]
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl BranchId {
+    /// Mint a fresh random v4 branch id.
+    #[inline]
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl ToolCallId {
+    /// Mint a fresh random v4 tool-call id.
+    #[inline]
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
 impl Default for ConversationId {
     fn default() -> Self {
-        Self(Uuid::new_v4())
+        Self::new()
     }
 }
 
 impl Default for MessageId {
     fn default() -> Self {
-        Self(Uuid::new_v4())
+        Self::new()
     }
 }
 
 impl Default for BranchId {
     fn default() -> Self {
-        Self(Uuid::new_v4())
+        Self::new()
     }
 }
 
 impl Default for ToolCallId {
     fn default() -> Self {
-        Self(Uuid::new_v4())
+        Self::new()
     }
 }
 
@@ -89,7 +142,7 @@ pub struct ChatMessage {
 impl ChatMessage {
     pub fn user(branch: BranchId, content: impl Into<String>) -> Self {
         Self {
-            id: MessageId::default(),
+            id: MessageId::new(),
             role: Role::User,
             branch,
             is_active: true,

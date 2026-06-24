@@ -6,8 +6,8 @@
 | **Supersedes** | AF v1.0 (2026-06-19, first pass) · AF v1.1 (2026-06-19, v0.7.4 hardening) |
 | **Status** | 🟢 AI-Architect Pass — Cross-Locked against PRD v0.7.5 + TRD v0.7.5 + UXB v2.1 + BS v1.2 |
 | **Audience** | Mobile engineers (Rust + Kotlin + QML), QA, Security review, Product reviewers |
-| **Companion docs** | [PRD v0.7.5](PRD_v0.7.5_architect_pass.md) · [TRD v0.7.5](TRD_v0.7.5_architect_pass.md) · [UI/UX Brief v2.1](MUKEI-UXB_v2.1_UIUXBrief_EditorialLuxury.md) · [Backend Schema v1.2](MUKEI-BS_v1.2_BackendSchema.md) |
-| **Out of scope** | Visual styling — see [UI/UX Brief v2.1](MUKEI-UXB_v2.1_UIUXBrief_EditorialLuxury.md); data persistence details — see [Backend Schema v1.2](MUKEI-BS_v1.2_BackendSchema.md) |
+| **Companion docs** | [PRD v0.7.5](PRD.md) · [TRD v0.7.5](TRD.md) · [UI/UX Brief v2.1](UXB.md) · [Backend Schema v1.2](BS.md) |
+| **Out of scope** | Visual styling — see [UI/UX Brief v2.1](UXB.md); data persistence details — see [Backend Schema v1.2](BS.md) |
 | **Notation** | Every flow cites `§` (TRD section) and `REQ-*` (PRD requirement ids). State machines use ASCII boxes. |
 
 > **Reading rule:** Every flow MUST be read alongside its companion TRD § cross-reference. This document links to implementation, never duplicates it.
