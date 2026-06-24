@@ -30,8 +30,9 @@ yanked        = "deny"
 # every PR on deep optional trees.
 unmaintained  = "workspace"
 # Unsound crates remain forbidden anywhere in the graph.
+# cargo-deny removed the legacy `notice` severity key; notice advisories
+# are errors by default now and must be handled via `ignore` if accepted.
 unsound       = "all"
-notice        = "warn"
 
 # Granular allow-list for advisories we knowingly accept (must include
 # an issue link + an ETA for the swap). Empty by policy: any vendored
