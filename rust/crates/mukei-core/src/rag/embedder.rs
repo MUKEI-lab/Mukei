@@ -25,6 +25,23 @@
 //!   `sentence-transformers/all-MiniLM-L6-v2`). The bridge persists the
 //!   value in [`crate::rag::vector_store::StoreHeader`].
 
+// Architect review GH #15: release-hardening tripwire. Shipping a
+// production build that falls back to MockEmbedder would mean every
+// RAG retrieval produces meaningless cosines — a silent privacy /
+// correctness regression. Force `candle` ON for release-hardened
+// builds; tests / sandbox builds opt out by simply not enabling
+// `release-hardening`.
+#[cfg(all(
+    feature = "release-hardening",
+    not(feature = "candle"),
+))]
+compile_error!(
+    "mukei-core compiled with `release-hardening` but WITHOUT `candle`. \
+     This would silently ship the MockEmbedder — RAG retrieval would \
+     return meaningless cosines (PRD REQ-RAG-01). Enable the `candle` \
+     feature in release builds."
+);
+
 #[cfg(feature = "candle")]
 use std::path::{Path, PathBuf};
 

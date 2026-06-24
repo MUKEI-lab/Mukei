@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
+use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::tools::feedback::render_tool_error_envelope;
@@ -82,8 +83,17 @@ impl FailureTracker {
     }
 
     /// Record a failure for `tool_name`+`fingerprint`. Returns `true`
-    /// once the count exceeds the threshold (i.e. the abuse blocker
-    /// should activate).
+    /// once the count STRICTLY EXCEEDS the threshold (i.e. the abuse
+    /// blocker should activate).
+    ///
+    /// # Threshold semantics (architect review GH #14 — canonical)
+    /// With default threshold = 5:
+    ///   * Calls 1..=5 return `false` ("counted but tolerated").
+    ///   * Call 6 returns `true` ("block now").
+    ///
+    /// This matches the pre-dispatch check in
+    /// [`ToolExecutor::execute_parallel`] (`pre_count > threshold`).
+    /// See [`ToolExecutionPolicy`] for the full wire contract.
     pub fn record_failure(&self, tool_name: &str, fingerprint: &str) -> bool {
         let mut g = self.inner.lock();
         let per_tool: &mut HashMap<String, u32> = g.entry(tool_name.to_string()).or_default();
@@ -160,6 +170,10 @@ pub struct ToolExecutor {
     tracker: Arc<FailureTracker>,
     repeats: Arc<OutputRepeatTracker>,
     policy: ToolExecutionPolicy,
+    /// Architect review GH #13: concurrency cap. A 50-call LLM batch
+    /// no longer saturates the runtime; tasks queue at the semaphore
+    /// while the first `policy.max_concurrent_tools` execute.
+    spawn_gate: Arc<Semaphore>,
     #[cfg(feature = "rusqlite")]
     audit: Option<ToolAuditSink>,
 }
@@ -176,11 +190,13 @@ impl ToolExecutor {
         tracker: Arc<FailureTracker>,
         policy: ToolExecutionPolicy,
     ) -> Self {
+        let gate = Arc::new(Semaphore::new(policy.max_concurrent_tools.max(1)));
         Self {
             registry,
             tracker,
             repeats: Arc::new(OutputRepeatTracker::new()),
             policy,
+            spawn_gate: gate,
             #[cfg(feature = "rusqlite")]
             audit: None,
         }
@@ -195,9 +211,11 @@ impl ToolExecutor {
         pool: Arc<DatabasePool>,
         writer: Arc<AuditLogWriter>,
     ) -> Self {
+        let gate = Arc::new(Semaphore::new(policy.max_concurrent_tools.max(1)));
         Self {
             registry,
             tracker,
+            spawn_gate: gate,
             repeats: Arc::new(OutputRepeatTracker::new()),
             policy,
             audit: Some(ToolAuditSink::new(pool, writer)),
@@ -403,9 +421,19 @@ impl ToolExecutor {
             }
 
             // ----- Live dispatch path ----------------------------------
+            // Architect review GH #13: gate tokio::spawn by the policy's
+            // semaphore so a 50-call LLM batch can no longer saturate
+            // the runtime. The permit is held for the lifetime of the
+            // spawned future and released automatically on drop.
             let registry = self.registry.clone();
             let token = cancel_token.clone();
+            let gate = self.spawn_gate.clone();
             handles.push(tokio::spawn(async move {
+                // Acquire the gate BEFORE doing any work. `Semaphore`
+                // is owned by an Arc; the permit is owned by the task.
+                let _permit = gate.acquire_owned().await.map_err(|e| {
+                    MukeiError::BlockingJoinFailed(format!("tool spawn gate closed: {e}"))
+                })?;
                 let tool = registry
                     .get(&call.name)
                     .ok_or_else(|| MukeiError::UnknownTool {

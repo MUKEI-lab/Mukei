@@ -9,6 +9,11 @@ models_dir        = "/var/mukei/models"
 vectors_dir       = "/var/mukei/vectors"
 database_path     = "/var/mukei/db/mukei.db"
 saf_tokens_db     = "/var/mukei/db/saf_tokens.db"
+; Architect review GH #17 — `crashes_dir` MUST resolve to app-internal
+; scoped storage on Android (`Context.getFilesDir() + "/crashes/"`).
+; The bridge crate rewrites this default at boot when running on
+; `target_os = "android"`. On Linux/macOS desktop the value below is
+; XDG-style and works as-is.
 crashes_dir       = "/var/mukei/crashes"
 logs_dir          = "/var/mukei/logs"
 
@@ -45,6 +50,7 @@ recovered_history_window    = 12
 ; Repeat-output / no-progress detection (TRD §2.5, v0.7.5 audit P7).
 repeat_output_window        = 2     ; consecutive identical outputs to trigger backoff
 repeat_output_backoff_secs  = 10    ; advisory pause hinted to the LLM
+max_concurrent_tools        = 4     ; GH #13 — cap on tokio::spawn tool tasks alive at once
 
 [defaults]
 prompt_card_auto_send = false      ; false = fill-only, opt-in (PRD §7.4 + AF §6.6)

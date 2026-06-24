@@ -1,0 +1,97 @@
+name: supply-chain
+
+# Architect review GH #7: privacy-critical zero-telemetry product must
+# fail PRs on supply-chain regressions before they land. This workflow
+# is *separate* from sandbox-check.yml so a deny/audit failure does not
+# mask a real compile/test regression and vice-versa.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Re-run nightly so a fresh advisory caught after a clean PR
+    # still fires (the RustSec db updates continuously).
+    - cron: '17 4 * * *'
+
+jobs:
+  # ---------------------------------------------------------------------
+  # cargo-deny — advisories + licenses + bans + sources.
+  # Config lives in /deny.toml at the repo root.
+  # ---------------------------------------------------------------------
+  cargo-deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: rust/Cargo.toml
+          arguments: --all-features
+          command: check
+          # advisories must run with --deny=warnings so a `notice` does
+          # not silently degrade to a green PR.
+          command-arguments: "-D warnings"
+
+  # ---------------------------------------------------------------------
+  # cargo-audit — RustSec advisory DB. Redundant w/ cargo-deny advisories
+  # but kept as a belt-and-suspenders gate so a config typo in deny.toml
+  # cannot accidentally turn off the security check.
+  # ---------------------------------------------------------------------
+  cargo-audit:
+    name: cargo-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+      - name: Run cargo-audit
+        working-directory: rust
+        run: cargo audit --deny warnings
+
+  # ---------------------------------------------------------------------
+  # cargo-vet — first-party audit chains. We start with an empty
+  # baseline and grow the audited set over time.
+  # ---------------------------------------------------------------------
+  cargo-vet:
+    name: cargo-vet
+    runs-on: ubuntu-latest
+    continue-on-error: true   # GH #7 phase 1 — gate is advisory until
+                              # the supply/audits.toml baseline lands.
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-vet
+        run: cargo install --locked cargo-vet
+      - name: Run cargo-vet
+        working-directory: rust
+        run: cargo vet --locked || echo "vet baseline not yet committed; continuing"
+
+  # ---------------------------------------------------------------------
+  # SBOM — CycloneDX. Uploaded as a build artefact so a release can
+  # attach it to the GitHub Release page.
+  # ---------------------------------------------------------------------
+  sbom:
+    name: SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-cyclonedx
+        run: cargo install --locked cargo-cyclonedx
+      - name: Emit SBOM
+        working-directory: rust
+        run: |
+          cargo cyclonedx --format json --output-cdx
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mukei-sbom-cyclonedx
+          path: rust/*.cdx.json
+          retention-days: 90

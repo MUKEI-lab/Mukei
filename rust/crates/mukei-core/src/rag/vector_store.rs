@@ -23,6 +23,22 @@
 //!   row from the persistent file — used for "Forget this source" UX
 //!   (REQ-RAG-03).
 
+// Architect review GH #16: release-hardening tripwire. A production
+// build with the linear-scan backend would degrade RAG search to O(n)
+// per query on a phone holding 100k+ chunks. Force `usearch_hnsw` ON
+// for release-hardened builds. Tests / sandbox builds opt out by
+// simply not enabling `release-hardening`.
+#[cfg(all(
+    feature = "release-hardening",
+    not(feature = "usearch_hnsw"),
+))]
+compile_error!(
+    "mukei-core compiled with `release-hardening` but WITHOUT \
+     `usearch_hnsw`. The fallback flat-scan vector store is O(n) per \
+     query and unsuitable for production (PRD REQ-RAG-02). Enable the \
+     `usearch_hnsw` feature in release builds."
+);
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

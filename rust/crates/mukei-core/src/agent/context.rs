@@ -10,6 +10,32 @@ use crate::error::Result;
 use crate::tools::sentinel::escape_untrusted;
 use crate::types::{ChatMessage, Role};
 
+/// Architect review GH #12 (PRD REQ-CON-01): hard cap on the per-snippet
+/// byte length of an RAG retrieval BEFORE it is escaped, concatenated,
+/// and tokenised. A poisoned 50 MB document would otherwise balloon
+/// the budget loop before the token-count trim fires.
+///
+/// 4 KB is the documented design pick (PRD §7.1): comfortably above any
+/// reasonable single-paragraph snippet, comfortably below the worst
+/// pathological case. The value is fixed (not config-driven) on purpose
+/// — a config knob here would create a runtime trust gap a hostile
+/// prompt could try to widen.
+pub(crate) const RAG_SNIPPET_BYTE_CAP: usize = 4096;
+
+/// Truncate `s` at the last char boundary at or before `cap` bytes.
+/// Returns the original `&str` when no truncation is needed.
+#[inline]
+fn truncate_at_char_boundary(s: &str, cap: usize) -> &str {
+    if s.len() <= cap {
+        return s;
+    }
+    let mut end = cap;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Outcome of a single [`ContextBudgetManager::build_for`] call.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContextBudget {
@@ -66,11 +92,19 @@ impl ContextBudgetManager {
             .collect();
 
         let rag_query = combined.last().map(|m| m.content.clone()).unwrap_or_default();
-        let rag = if !rag_query.is_empty() {
+        let raw_rag = if !rag_query.is_empty() {
             self.backend.rag_lookup(&rag_query, 4).await?
         } else {
             Vec::new()
         };
+        // Architect review GH #12: every snippet is hard-capped to
+        // `RAG_SNIPPET_BYTE_CAP` bytes BEFORE we escape / concatenate /
+        // tokenise. A poisoned 50 MB document can no longer push the
+        // pipeline through hundreds of MB of intermediate work.
+        let rag: Vec<String> = raw_rag
+            .into_iter()
+            .map(|s| truncate_at_char_boundary(&s, RAG_SNIPPET_BYTE_CAP).to_string())
+            .collect();
         let rag_hit = !rag.is_empty();
 
         // ---- Per-message token tallies + running total ---------------
@@ -193,6 +227,64 @@ mod tests {
         }];
         let out = mgr.build_for(&input).await.unwrap();
         assert!(out.contains("[User]: hi"));
+    }
+
+    #[tokio::test]
+    async fn rag_snippets_are_byte_capped_before_escape() {
+        // Architect review GH #12 regression: a 50 KB snippet must be
+        // truncated to RAG_SNIPPET_BYTE_CAP (4 KB) at a char boundary.
+        // Use a unique marker char that cannot appear elsewhere in the
+        // rendered output (the user message, headers, etc.) so the
+        // counting assertion is exact.
+        const MARK: char = '§';
+        let marker_str = MARK.to_string().repeat(50_000); // > RAG_SNIPPET_BYTE_CAP
+        struct HugeRagBackend(String);
+        #[async_trait::async_trait]
+        impl ContextBackend for HugeRagBackend {
+            async fn load_history(&self) -> Result<Vec<ChatMessage>> { Ok(Vec::new()) }
+            async fn rag_lookup(&self, _q: &str, _k: usize) -> Result<Vec<String>> {
+                Ok(vec![self.0.clone()])
+            }
+        }
+        let mgr = ContextBudgetManager::new(
+            Arc::new(HugeRagBackend(marker_str)),
+            Arc::new(FixLenTokens(0)),
+            1_000_000, // budget large enough that no further trimming runs
+        );
+        let user_msg = vec![ChatMessage {
+            id: MessageId::default(),
+            role: Role::User,
+            branch: BranchId::default(),
+            is_active: true,
+            created_at: chrono::Utc::now(),
+            content: "trigger rag".into(),
+            parent: None,
+            token_count: None,
+        }];
+        let out = mgr.build_for(&user_msg).await.unwrap();
+        let marks = out.matches(MARK).count();
+        // '§' is 2 bytes in UTF-8, so the truncate-at-char-boundary will
+        // back up to RAG_SNIPPET_BYTE_CAP / 2 codepoints (= 2048).
+        let max_marks = RAG_SNIPPET_BYTE_CAP / MARK.len_utf8();
+        assert!(
+            marks <= max_marks,
+            "snippet not capped: saw {marks} marker chars, expected <= {max_marks}",
+        );
+        // And the cap actually fires (i.e. truncation happened, not a no-op).
+        assert!(marks > 0, "RAG block was empty — truncation may have wiped it");
+        assert!(marks < 50_000, "truncation did not happen: saw {marks} marker chars");
+    }
+
+    #[tokio::test]
+    async fn truncate_at_char_boundary_respects_utf8() {
+        // Architect review GH #12 regression: cap must NOT split a
+        // multi-byte UTF-8 codepoint. We choose a cap that lands
+        // inside the second 东 (3 bytes) and confirm we back up.
+        let s = "东京东京东京"; // 6 chars × 3 bytes = 18 bytes
+        let truncated = super::truncate_at_char_boundary(s, 4);
+        // Cap=4 should back up to 3 (one full 东).
+        assert_eq!(truncated, "东");
+        assert!(truncated.is_char_boundary(truncated.len()));
     }
 
     #[tokio::test]

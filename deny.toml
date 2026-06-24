@@ -1,0 +1,70 @@
+# Architect review GH #7: supply-chain gates (cargo-deny config).
+#
+# Run via `cargo deny check advisories sources licenses bans`.
+#
+# The matrix below intentionally errs on the strict side; loosen only
+# with explicit sign-off — this is a privacy-critical, zero-telemetry,
+# proprietary product and every dep is a supply-chain attack surface.
+
+[advisories]
+# Pull the latest RustSec advisory db on every run; fail on any
+# unmaintained/yanked crate that has not been explicitly allowed.
+db-urls       = ["https://github.com/rustsec/advisory-db"]
+yanked        = "deny"
+unmaintained  = "warn"
+unsound       = "deny"
+notice        = "warn"
+
+# Granular allow-list for advisories we knowingly accept (must include
+# an issue link + an ETA for the swap). Empty by policy: any vendored
+# crate that gains an advisory blocks the next release.
+ignore = []
+
+[licenses]
+# Mukei itself is Proprietary, so every dep license MUST be one we can
+# legally redistribute under that posture.
+unlicensed = "deny"
+allow      = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    "0BSD",
+    # The workspace itself is Proprietary; whitelist it explicitly.
+    "Proprietary",
+]
+confidence-threshold = 0.93
+exceptions = []
+
+[bans]
+# Block known-evil / unmaintained crates by name. Add aliases as we
+# discover them in the dependency tree.
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+# Deny list — extend cautiously.
+deny = [
+    # `openssl-sys` is the classic supply-chain attack surface. We
+    # standardise on rustls everywhere.
+    { name = "openssl-sys", reason = "TRD §11.5 — Mukei is rustls-only." },
+]
+
+# Skip duplicate-version warnings for these specific crates if a
+# transitive needs the older line. Add entries with a justification.
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git      = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# Whitelist for vendored git deps (intentionally empty in this repo —
+# our llama.cpp lives via the prebuilt submodule, not as a cargo dep).
+allow-git = []

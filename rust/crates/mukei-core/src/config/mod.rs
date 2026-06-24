@@ -84,6 +84,13 @@ pub struct AgentCfg {
     /// envelope handed back to the LLM.
     #[serde(default = "AgentCfg::default_repeat_output_backoff_secs")]
     pub repeat_output_backoff_secs: u32,
+    /// Architect review GH #13: cap on the number of `tokio::spawn` tool
+    /// tasks alive at once (PRD REQ-CON-02). Default 4. Defaulted on
+    /// missing field so v0.7.5 configs that pre-date this knob still
+    /// load — the strict-config validator only fires on UNKNOWN fields,
+    /// not missing-with-default fields.
+    #[serde(default = "AgentCfg::default_max_concurrent_tools")]
+    pub max_concurrent_tools: u32,
 }
 
 impl AgentCfg {
@@ -93,6 +100,8 @@ impl AgentCfg {
     pub fn default_repeat_output_window() -> u32 { 2 }
     /// Default value for `repeat_output_backoff_secs`.
     pub fn default_repeat_output_backoff_secs() -> u32 { 10 }
+    /// Default value for `max_concurrent_tools` (architect review GH #13).
+    pub fn default_max_concurrent_tools() -> u32 { 4 }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

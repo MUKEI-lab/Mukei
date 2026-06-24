@@ -138,6 +138,28 @@ impl FailureKind {
 ///
 /// Constructed once at boot from `config.toml::[agent]` and passed into
 /// [`super::ToolExecutor::with_policy`]. Tests construct it directly.
+///
+/// # Threshold semantics (architect review GH #14 — canonical)
+///
+/// `max_failures_per_tool` is the number of consecutive recorded
+/// failures **tolerated** before the abuse blocker activates. With the
+/// default value of 5:
+///
+/// * Failures 1..=5: counted, but the tool is NOT yet blocked. Each
+///   failure surfaces a `<external_data source="tool_error">` envelope
+///   with `attempt="N/5"`.
+/// * Failure 6 (i.e. one strictly greater than the threshold): the tool
+///   becomes abuse-blocked for the remainder of the turn.
+///
+/// **Wire contract** — every consumer of this struct MUST honour the
+/// same semantics:
+/// * `FailureTracker::record_failure` returns `true` when post-increment
+///   `count > threshold` (i.e. on the 6th hit at default 5).
+/// * `ToolExecutor` pre-dispatch check blocks when
+///   `pre_count > threshold` (same predicate, same comparator).
+///
+/// The legacy PRD §8.2 wording "fails twice consecutively" predates the
+/// v0.7.5 raise to 5 and is superseded by this docstring.
 #[derive(Debug, Clone)]
 pub struct ToolExecutionPolicy {
     /// Threshold after which the abuse blocker activates for a given
@@ -153,6 +175,11 @@ pub struct ToolExecutionPolicy {
     /// detector fires. The LLM is told "wait at least this long before
     /// retrying"; the executor itself does not sleep.
     pub repeat_output_backoff: Duration,
+    /// Architect review GH #13 (PRD REQ-CON-02): cap on the number of
+    /// `tokio::spawn` tool tasks alive at once. Without this cap, a
+    /// 50-call LLM batch saturates sockets / fds / the runtime queue,
+    /// defeating the `TOOL_BLOCKING_SLOTS=2` discipline (TRD §2.2).
+    pub max_concurrent_tools: usize,
 }
 
 impl ToolExecutionPolicy {
@@ -162,6 +189,10 @@ impl ToolExecutionPolicy {
     pub const DEFAULT_REPEAT_OUTPUT_WINDOW: usize = 2;
     /// Default backoff hint duration (10 seconds).
     pub const DEFAULT_REPEAT_OUTPUT_BACKOFF: Duration = Duration::from_secs(10);
+    /// Default concurrency cap. Aligned with `TOOL_BLOCKING_SLOTS=2`
+    /// from TRD §2.2 so a 50-call LLM batch can no longer saturate the
+    /// runtime. Configurable at boot via `config.toml::[agent]`.
+    pub const DEFAULT_MAX_CONCURRENT_TOOLS: usize = 4;
 }
 
 impl Default for ToolExecutionPolicy {
@@ -170,20 +201,25 @@ impl Default for ToolExecutionPolicy {
             max_failures_per_tool: Self::DEFAULT_MAX_FAILURES,
             repeat_output_window: Self::DEFAULT_REPEAT_OUTPUT_WINDOW,
             repeat_output_backoff: Self::DEFAULT_REPEAT_OUTPUT_BACKOFF,
+            max_concurrent_tools: Self::DEFAULT_MAX_CONCURRENT_TOOLS,
         }
     }
 }
 
-// Issue #13: bridge between the on-disk `[agent]` config section and
-// the runtime policy. Without this conversion the config schema would
-// be cosmetic — the agent would always use defaults. The bridge crate
-// calls `ToolExecutor::with_policy((&cfg.agent).into())` at boot.
+// Issue #13 (legacy): bridge between the on-disk `[agent]` config
+// section and the runtime policy. Without this conversion the config
+// schema would be cosmetic — the agent would always use defaults. The
+// bridge crate calls `ToolExecutor::with_policy((&cfg.agent).into())`
+// at boot.
 impl From<&crate::config::AgentCfg> for ToolExecutionPolicy {
     fn from(cfg: &crate::config::AgentCfg) -> Self {
         Self {
             max_failures_per_tool: cfg.max_failures_per_tool,
             repeat_output_window: cfg.repeat_output_window as usize,
             repeat_output_backoff: Duration::from_secs(cfg.repeat_output_backoff_secs as u64),
+            // GH #13: fall back to the default if the config did not
+            // surface a value. AgentCfg gains this field below.
+            max_concurrent_tools: cfg.max_concurrent_tools as usize,
         }
     }
 }
@@ -204,6 +240,9 @@ mod tests {
         assert_eq!(p.max_failures_per_tool, 5);
         assert_eq!(p.repeat_output_window, 2);
         assert_eq!(p.repeat_output_backoff.as_secs(), 10);
+        // GH #13: concurrency cap is wired and matches the documented
+        // default of 4 (aligned to TOOL_BLOCKING_SLOTS).
+        assert_eq!(p.max_concurrent_tools, 4);
     }
 
     #[test]
@@ -252,11 +291,13 @@ mod tests {
             recovered_history_window: 12,
             repeat_output_window: 4,
             repeat_output_backoff_secs: 30,
+            max_concurrent_tools: 6,
         };
         let policy: ToolExecutionPolicy = (&cfg).into();
         assert_eq!(policy.max_failures_per_tool, 7);
         assert_eq!(policy.repeat_output_window, 4);
         assert_eq!(policy.repeat_output_backoff.as_secs(), 30);
+        assert_eq!(policy.max_concurrent_tools, 6);
     }
 
     #[test]

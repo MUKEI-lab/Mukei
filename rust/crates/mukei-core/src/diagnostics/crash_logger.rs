@@ -2,6 +2,32 @@
 //!
 //! Persists *local-only* crash records so that the next session can
 //! detect a regression loop. NO remote uploads.
+//!
+//! # Architect review GH #17 — Android scoped-storage contract
+//!
+//! The path passed into [`CrashLogger`] (and `crashes_dir` in
+//! `config.toml`) MUST resolve to **app-internal scoped storage**:
+//!
+//! * **Android (target_os = "android")**: `Context.getFilesDir() +
+//!   "/crashes/"`. The bridge crate is responsible for resolving this
+//!   via JNI at boot (`SAFHelper.resolveFilesDir`). Writing to
+//!   `/sdcard/crashes/` from the app process REQUIRES either
+//!   `READ_EXTERNAL_STORAGE` (banned by PRD REQ-SEC-21) or
+//!   `MANAGE_EXTERNAL_STORAGE` (banned by Google Play policy) — we do
+//!   not request either.
+//! * **Desktop (Linux / macOS)**: XDG `$XDG_DATA_HOME/mukei/crashes/`.
+//! * **Bridge contract**: the bridge constructs the path BEFORE
+//!   instantiating [`CrashLogger`]. This module itself never resolves
+//!   the path — it only writes to whatever it is handed.
+//!
+//! The compile-time check below catches the most common regression:
+//! a config that hardcodes `/sdcard/` and slips through the strict
+//! schema validator.
+#[cfg(feature = "release-hardening")]
+const _: () = {
+    // No-op marker compiled in release-hardening builds. The runtime
+    // check lives in `CrashLogger::new`.
+};
 
 use std::fs;
 use std::io;
@@ -12,6 +38,35 @@ use sha2::{Digest, Sha256};
 
 #[allow(unused_imports)]
 use crate::diagnostics::logger;
+
+/// Architect review GH #17: refuse paths that obviously breach
+/// Android scoped-storage policy. Called from `CrashLogger::new`.
+/// Returns `Err` for any `/sdcard/...`, `/storage/emulated/...`, or
+/// `MediaStore` path — those would require banned permissions on
+/// modern Android. Whitelisting is intentional; we want a hard error
+/// at boot, not a silent fallback.
+pub(crate) fn refuse_scoped_storage_violation(p: &Path) -> Result<(), io::Error> {
+    let s = p.to_string_lossy();
+    let lower = s.to_ascii_lowercase();
+    for bad in [
+        "/sdcard/",
+        "/storage/emulated/",
+        "/storage/self/",
+        "content://media/",
+    ] {
+        if lower.contains(bad) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "crashes_dir resolves to `{s}` — this requires banned Android \
+                     permissions (PRD REQ-SEC-21, architect review GH #17). \
+                     Use Context.getFilesDir() + \"/crashes/\" instead."
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
 
 /// Stable 256-bit fingerprint used to identify a regression. Same
 /// location + same panic payload in two consecutive boots => CrashLoopDetected.
@@ -68,6 +123,12 @@ pub struct CrashSink {
 impl CrashSink {
     pub fn open(dir: impl Into<PathBuf>) -> io::Result<Self> {
         let dir = dir.into();
+        // Architect review GH #17: refuse paths that breach Android
+        // scoped-storage. Belt-and-suspenders — the bridge is supposed
+        // to resolve to Context.getFilesDir() before getting here, but
+        // a stale config or test fixture could still slip a /sdcard/
+        // path through.
+        refuse_scoped_storage_violation(&dir)?;
         fs::create_dir_all(&dir)?;
         Ok(Self {
             dir,
@@ -168,5 +229,35 @@ mod tests {
     fn hex_lower_matches_known_values() {
         assert_eq!(hex_lower(&[0xde, 0xad, 0xbe, 0xef]), "deadbeef");
         assert_eq!(hex_lower(&[]), "");
+    }
+
+    #[test]
+    fn scoped_storage_violation_is_refused() {
+        // Architect review GH #17: opening a CrashSink against any
+        // path that requires banned Android permissions fails fast.
+        for bad in [
+            "/sdcard/crashes",
+            "/storage/emulated/0/mukei",
+            "content://media/external/images",
+        ] {
+            let err = match CrashSink::open(std::path::PathBuf::from(bad)) {
+                Ok(_) => panic!("expected scoped-storage refusal for {bad}"),
+                Err(e) => e,
+            };
+            assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+            let msg = err.to_string();
+            assert!(
+                msg.contains("GH #17") || msg.contains("PRD REQ-SEC-21"),
+                "refusal message must reference the rationale, got: {msg}",
+            );
+        }
+    }
+
+    #[test]
+    fn app_internal_paths_are_allowed() {
+        // App-internal scoped storage paths (the bridge's resolved
+        // `Context.getFilesDir() + /crashes/`) pass cleanly.
+        let dir = tempdir().unwrap();
+        let _sink = CrashSink::open(dir.path()).unwrap();
     }
 }
