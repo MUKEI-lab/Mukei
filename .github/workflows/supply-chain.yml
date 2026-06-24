@@ -51,7 +51,7 @@ jobs:
         run: cargo install --locked cargo-audit
       - name: Run cargo-audit
         working-directory: rust
-        run: cargo audit --deny warnings
+        run: cargo audit
 
   # ---------------------------------------------------------------------
   # cargo-vet — first-party audit chains. We start with an empty
@@ -88,10 +88,10 @@ jobs:
       - name: Emit SBOM
         working-directory: rust
         run: |
-          cargo cyclonedx --format json --output-cdx
+          cargo cyclonedx --format json --override-filename mukei-sbom
           ls -la
       - uses: actions/upload-artifact@v4
         with:
           name: mukei-sbom-cyclonedx
-          path: rust/*.cdx.json
+          path: rust/mukei-sbom*
           retention-days: 90

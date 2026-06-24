@@ -4,7 +4,7 @@ version            = "0.7.5"
 edition            = "2021"
 rust-version       = "1.78"
 description        = "Mukei manual-C FFI escape hatch — paired with CXX-Qt, used when QML binding codegen fails (TRD §1.3 fallback)"
-license            = "Proprietary"
+license            = "LicenseRef-Mukei-Proprietary"
 authors            = ["Mukei AI Architecture Pass"]
 
 [lib]

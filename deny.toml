@@ -6,13 +6,31 @@
 # with explicit sign-off — this is a privacy-critical, zero-telemetry,
 # proprietary product and every dep is a supply-chain attack surface.
 
+[graph]
+# Only audit the targets Mukei actually ships for. This prevents
+# target-only crates for unrelated platforms from poisoning the graph.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-linux-android",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+all-features = true
+exclude-dev = true
+
 [advisories]
-# Pull the latest RustSec advisory db on every run; fail on any
-# unmaintained/yanked crate that has not been explicitly allowed.
+# Pull the latest RustSec advisory db on every run.
 db-urls       = ["https://github.com/rustsec/advisory-db"]
 yanked        = "deny"
-unmaintained  = "warn"
-unsound       = "deny"
+# New cargo-deny schema: these fields are scope selectors, not lint levels.
+# We only gate unmaintained crates at the workspace boundary; transitive
+# maintenance churn is tracked via explicit refresh work, not by breaking
+# every PR on deep optional trees.
+unmaintained  = "workspace"
+# Unsound crates remain forbidden anywhere in the graph.
+unsound       = "all"
 notice        = "warn"
 
 # Granular allow-list for advisories we knowingly accept (must include
@@ -21,9 +39,8 @@ notice        = "warn"
 ignore = []
 
 [licenses]
-# Mukei itself is Proprietary, so every dep license MUST be one we can
-# legally redistribute under that posture.
-unlicensed = "deny"
+# Mukei itself uses a private custom SPDX identifier.
+unused-allowed-license = "allow"
 allow      = [
     "MIT",
     "Apache-2.0",
@@ -36,10 +53,11 @@ allow      = [
     "Zlib",
     "CC0-1.0",
     "0BSD",
-    # The workspace itself is Proprietary; whitelist it explicitly.
-    "Proprietary",
+    # Private first-party workspace crates.
+    "LicenseRef-Mukei-Proprietary",
 ]
 confidence-threshold = 0.93
+private = { ignore = true }
 exceptions = []
 
 [bans]
@@ -53,7 +71,7 @@ highlight = "all"
 deny = [
     # `openssl-sys` is the classic supply-chain attack surface. We
     # standardise on rustls everywhere.
-    { name = "openssl-sys", reason = "TRD §11.5 — Mukei is rustls-only." },
+    { crate = "openssl-sys", reason = "TRD §11.5 — Mukei is rustls-only." },
 ]
 
 # Skip duplicate-version warnings for these specific crates if a

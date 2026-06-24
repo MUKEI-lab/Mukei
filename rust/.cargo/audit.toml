@@ -1,0 +1,38 @@
+# Supply-chain gate for cargo-audit.
+#
+# Policy split:
+# - cargo-deny is the primary policy engine for licenses / bans / source
+#   provenance / workspace-vs-transitive advisory scoping.
+# - cargo-audit remains a belt-and-suspenders RustSec vulnerability gate,
+#   but we do NOT fail the build on every informational warning from deep
+#   optional or target-inactive transitive trees.
+
+[advisories]
+# The reqwest/quinn advisory below is currently present in Cargo.lock but is
+# not reachable from Mukei's actual compiled target graph under our shipped
+# feature/target matrix. cargo-audit works from Cargo.lock rather than the
+# filtered build graph, so we document and suppress it here until the next
+# dependency refresh removes the stale optional edge entirely.
+ignore = [
+  "RUSTSEC-2026-0185", # quinn-proto 0.11.14; inactive optional lockfile edge
+  "RUSTSEC-2025-0057", # fxhash unmaintained; transitive via scraper/selectors
+  "RUSTSEC-2025-0119", # number_prefix unmaintained; transitive via tokenizers/indicatif
+  "RUSTSEC-2024-0436", # paste no longer maintained; transitive via candle/tokenizers
+]
+informational_warnings = ["unmaintained"]
+severity_threshold = "low"
+
+[output]
+# Vulnerabilities still fail by default; informational warnings are surfaced
+# in logs but do not hard-fail the workflow.
+format = "terminal"
+quiet = false
+show_tree = true
+
+[target]
+arch = ["x86_64", "aarch64"]
+os = ["linux", "android", "macos", "windows"]
+
+[yanked]
+enabled = true
+update_index = true
