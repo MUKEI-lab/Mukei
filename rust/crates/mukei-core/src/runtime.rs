@@ -129,6 +129,50 @@ mod tests {
         assert_eq!(MAX_BLOCKING_THREADS, 8);
     }
 
+    /// Architect review GH #33 — confirm the cfg-gate that turns
+    /// `MAX_BLOCKING_THREADS = 6` on Android compiles to a constant
+    /// of 6, and that the desktop arm is exactly 8. This is a
+    /// regression guard against a future refactor that accidentally
+    /// swaps the arms or drops the `#[cfg(target_os = "android")]`.
+    ///
+    /// We exercise both arms simultaneously — the cfg-gate evaluates
+    /// at compile time, so only one of these assertions is live for
+    /// any given target build. The matrix `lint` job covers Linux
+    /// (desktop arm); the Android NDK build that runs in the bridge
+    /// crate covers the Android arm.
+    #[test]
+    fn blocking_thread_cap_matches_trd_section_2_2() {
+        #[cfg(target_os = "android")]
+        {
+            assert_eq!(
+                MAX_BLOCKING_THREADS, 6,
+                "TRD §2.2: Android must cap blocking pool at 6 \
+                 (4–6 core SoC + LMK headroom)."
+            );
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            assert_eq!(
+                MAX_BLOCKING_THREADS, 8,
+                "TRD §2.2: desktop / CI default must stay at 8 \
+                 (matches the original tokio default before the v0.7.4 \
+                 Android tightening)."
+            );
+        }
+        // The tool semaphore is a separate, smaller bound; verify it
+        // is strictly less than the blocking-thread cap on every
+        // target so a saturated tool semaphore can never starve every
+        // blocking-pool worker.
+        assert!(
+            TOOL_BLOCKING_SLOTS < MAX_BLOCKING_THREADS,
+            "TOOL_BLOCKING_SLOTS ({}) must stay strictly below \
+             MAX_BLOCKING_THREADS ({}) so tool work cannot starve \
+             inference / DB workers.",
+            TOOL_BLOCKING_SLOTS,
+            MAX_BLOCKING_THREADS,
+        );
+    }
+
     #[test]
     fn tool_slots_arc_can_be_cloned() {
         let a = tool_slots();

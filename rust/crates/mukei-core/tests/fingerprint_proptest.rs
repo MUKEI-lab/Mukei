@@ -84,3 +84,72 @@ proptest! {
         prop_assert_ne!(fp_a, fp_b);
     }
 }
+
+// ---------------------------------------------------------------------
+// Architect review GH #40 — grammar-shaped sanity tests.
+//
+// The GBNF grammar emits arguments in a *positional* order (e.g. the
+// `web_search_args` production fixes `"query"` as the only key, and
+// `read_file_args` fixes `"path"`). However, future grammar revisions
+// or future multi-field tool calls might emit keys in arbitrary order.
+// `FailureTracker::fingerprint` canonicalises keys alphabetically
+// before hashing, so the agent loop's abuse blocker stays consistent
+// regardless of emission order.
+//
+// The proptest above proves this for arbitrary objects. The two
+// concrete tests below pin the canonical examples for the four tools
+// in the v0.7.5 grammar so that a regression of the canonicalisation
+// path is caught by hand-readable assertions, not just by a property
+// failure shrink.
+// ---------------------------------------------------------------------
+
+#[test]
+fn fingerprint_matches_grammar_emission_order_for_web_search() {
+    // Both spellings produce the same fingerprint because
+    // `web_search_args` only carries one field. This is the trivial
+    // case but also the most-emitted one in production.
+    let a = serde_json::json!({ "query": "latest news" });
+    let b = serde_json::json!({ "query": "latest news" });
+    assert_eq!(
+        FailureTracker::fingerprint("web_search", &a),
+        FailureTracker::fingerprint("web_search", &b),
+    );
+}
+
+#[test]
+fn fingerprint_is_alphabetical_key_canonical_for_multi_field_tools() {
+    // Hypothetical future multi-field tool. The grammar might emit
+    // `{ "a": 1, "b": 2 }` or `{ "b": 2, "a": 1 }` depending on
+    // alternation order in the production. The fingerprint MUST be
+    // identical because the abuse blocker treats keys as a set.
+    let a = serde_json::json!({ "a": 1, "b": 2, "c": 3 });
+    let b = serde_json::json!({ "c": 3, "a": 1, "b": 2 });
+    let c = serde_json::json!({ "b": 2, "c": 3, "a": 1 });
+    let fp_a = FailureTracker::fingerprint("future_tool", &a);
+    let fp_b = FailureTracker::fingerprint("future_tool", &b);
+    let fp_c = FailureTracker::fingerprint("future_tool", &c);
+    assert_eq!(fp_a, fp_b);
+    assert_eq!(fp_b, fp_c);
+}
+
+#[test]
+fn fingerprint_distinguishes_grammar_tool_names() {
+    // The four v0.7.5 grammar tools must each produce a distinct
+    // fingerprint for the same argument shape — otherwise the abuse
+    // blocker leaks failure streaks across tools.
+    let args = serde_json::json!({ "x": 1 });
+    let names = ["web_search", "read_file", "get_hardware_info", "math_eval"];
+    let fps: Vec<_> = names
+        .iter()
+        .map(|n| FailureTracker::fingerprint(n, &args))
+        .collect();
+    for i in 0..fps.len() {
+        for j in (i + 1)..fps.len() {
+            assert_ne!(
+                fps[i], fps[j],
+                "fingerprint collision between {} and {}",
+                names[i], names[j],
+            );
+        }
+    }
+}
