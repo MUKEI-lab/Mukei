@@ -106,23 +106,6 @@ deny = [
     { crate = "openssl-sys", reason = "TRD §11.5 — Mukei is rustls-only." },
 ]
 
-# Workspace-dependency lint policy.
-#
-# `unused` defaults to `deny`, which breaks builds for feature-gated
-# optional workspace deps such as `llama-cpp-rs` (only resolved when the
-# `llama_cpp` feature is enabled — see TRD §8.2 / GH #4). cargo-deny
-# sees the entry as "unused" on the default build matrix and refuses
-# to validate. Set to `allow`: the optional-feature pattern is
-# intentional and the supply-chain workflow runs `--all-features` so
-# any genuinely unused workspace entry will still show up in the
-# matrix as a stale dep that needs trimming.
-[bans.workspace-dependencies]
-unused = "allow"
-# Path deps are intentionally excluded from the duplicate check —
-# our intra-workspace crates (mukei-core, mukei-bridge, mukei-ffi-shim)
-# share dependencies on purpose.
-include-path-dependencies = false
-
 # Skip duplicate-version warnings for these specific crates if a
 # transitive needs the older line. Each entry must cite the path that
 # forces the duplicate; revisit on every quarterly refresh.
@@ -167,6 +150,25 @@ skip = [
     { crate = "winnow@0.7.15",            reason = "toml 0.8 transitive — clears with toml 1.0 rollout" },
 ]
 skip-tree = []
+
+# Workspace-dependency lint policy. MUST stay AFTER the scalar keys of
+# [bans] (TOML sub-table semantics: once we open [bans.workspace-dependencies]
+# every subsequent key would be parsed as a member of the sub-table).
+#
+# `unused` defaults to `deny`, which breaks builds for feature-gated
+# optional workspace deps such as `llama-cpp-rs` (only resolved when the
+# `llama_cpp` feature is enabled — see TRD §8.2 / GH #4). cargo-deny
+# sees the entry as "unused" on the default build matrix and refuses
+# to validate. Set to `allow`: the optional-feature pattern is
+# intentional and the supply-chain workflow runs `--all-features` so
+# any genuinely unused workspace entry will still show up in the
+# matrix as a stale dep that needs trimming.
+[bans.workspace-dependencies]
+unused = "allow"
+# Path deps are intentionally excluded from the duplicate check —
+# our intra-workspace crates (mukei-core, mukei-bridge, mukei-ffi-shim)
+# share dependencies on purpose.
+include-path-dependencies = false
 
 [sources]
 unknown-registry = "deny"
