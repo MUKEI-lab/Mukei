@@ -6,6 +6,9 @@ rust-version       = "1.78"
 description        = "Mukei CXX-Qt bridge — exposes MukeiAgent, MukeiBridge, and JNI helpers to Qt/QML (TRD §1.2, §1.3, §9.4)"
 license            = "LicenseRef-Mukei-Proprietary"
 authors            = ["Mukei AI Architecture Pass"]
+# First-party proprietary crate; see mukei-core/Cargo.toml for why
+# `publish = false` is also required for cargo-deny.
+publish            = false
 
 [lib]
 crate-type         = ["cdylib", "staticlib"]   # Android .so + Linux .a fallback

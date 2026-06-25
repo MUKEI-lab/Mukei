@@ -106,6 +106,23 @@ deny = [
     { crate = "openssl-sys", reason = "TRD §11.5 — Mukei is rustls-only." },
 ]
 
+# Workspace-dependency lint policy.
+#
+# `unused` defaults to `deny`, which breaks builds for feature-gated
+# optional workspace deps such as `llama-cpp-rs` (only resolved when the
+# `llama_cpp` feature is enabled — see TRD §8.2 / GH #4). cargo-deny
+# sees the entry as "unused" on the default build matrix and refuses
+# to validate. Set to `allow`: the optional-feature pattern is
+# intentional and the supply-chain workflow runs `--all-features` so
+# any genuinely unused workspace entry will still show up in the
+# matrix as a stale dep that needs trimming.
+[bans.workspace-dependencies]
+unused = "allow"
+# Path deps are intentionally excluded from the duplicate check —
+# our intra-workspace crates (mukei-core, mukei-bridge, mukei-ffi-shim)
+# share dependencies on purpose.
+include-path-dependencies = false
+
 # Skip duplicate-version warnings for these specific crates if a
 # transitive needs the older line. Each entry must cite the path that
 # forces the duplicate; revisit on every quarterly refresh.
@@ -128,11 +145,11 @@ skip = [
     { crate = "itertools@0.11.0",         reason = "tokenizers 0.19 transitive — clears with 0.20" },
     # `meval` 0.2 (the math evaluator from TRD §5.5) still uses `nom 1.x`.
     { crate = "nom@1.2.4",                reason = "meval 0.2 transitive; meval is unmaintained but small and audited (TRD §5.5)" },
-    # `scraper` / `markup5ever` family keeps `phf 0.10` alongside `phf 0.11`.
-    { crate = "phf@0.10.1",               reason = "selectors 0.25 transitive — clears with scraper 0.20 upgrade path" },
-    { crate = "phf_codegen@0.10.0",       reason = "selectors 0.25 transitive — see phf above" },
-    { crate = "phf_generator@0.10.0",     reason = "selectors 0.25 transitive — see phf above" },
-    { crate = "phf_shared@0.10.0",        reason = "selectors 0.25 transitive — see phf above" },
+    # NOTE: the `phf@0.10` / `phf_codegen@0.10` / `phf_generator@0.10` /
+    # `phf_shared@0.10` / `siphasher@0.3` skip entries were removed in
+    # the same supply-chain pass that dropped `scraper`. Those crates
+    # are no longer in the lockfile, so cargo-deny would (correctly)
+    # raise `unmatched-skip` errors if we kept them.
     # `candle-core`, `tokenizers`, `uuid` span the rand 0.8/0.9/0.10 lifecycle.
     { crate = "rand@0.8.6",               reason = "candle/tokenizers transitive — pinned to 0.8 by upstream" },
     { crate = "rand@0.9.4",               reason = "half 2.7 transitive — clears with candle 0.8" },
@@ -140,7 +157,6 @@ skip = [
     { crate = "rand_core@0.6.4",          reason = "rand 0.8 + rustls 0.23 transitive" },
     { crate = "rand_core@0.9.5",          reason = "rand 0.9 transitive (half 2.7)" },
     { crate = "rand_distr@0.4.3",         reason = "candle-core 0.7 transitive" },
-    { crate = "siphasher@0.3.11",         reason = "phf 0.10 transitive — see phf above" },
     # `toml` 0.8 still uses `toml_edit 0.22`/`toml_datetime 0.6`; cxx-build chain
     # is on the 1.x line.
     { crate = "toml_datetime@0.6.11",     reason = "toml 0.8 transitive — clears with toml 1.0 rollout" },

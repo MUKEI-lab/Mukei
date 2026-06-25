@@ -6,6 +6,12 @@ rust-version       = "1.78"
 description        = "Mukei Agent Core — ReAct loop, RAG engine, tool executor, storage, diagnostics (TRD v0.7.5)"
 license            = "LicenseRef-Mukei-Proprietary"
 authors            = ["Mukei AI Architecture Pass"]
+# First-party proprietary crate, never published to crates.io. The
+# explicit `publish = false` also tells cargo-deny to treat this
+# member as private, which is the only way to make
+# `allow-wildcard-paths = true` actually apply to intra-workspace
+# `path = "../..."` deps (architect review GH #7, supply-chain CI).
+publish            = false
 
 [lib]
 crate-type         = ["lib"]
