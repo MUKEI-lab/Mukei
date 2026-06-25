@@ -160,6 +160,7 @@ impl SearchCache {
     ///   1. every expired entry is dropped;
     ///   2. if still over the cap, the oldest-by-insertion entries are
     ///      dropped until `len < MAX_ENTRIES`.
+    ///
     /// See module-level docs for the full eviction policy.
     pub fn put(&self, task: TaskKind, engine: SearchEngineKind, query: &str, hits: Vec<SearchHit>) {
         let key = Self::key(task, engine, query);

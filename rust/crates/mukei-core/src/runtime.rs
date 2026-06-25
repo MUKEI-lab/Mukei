@@ -34,6 +34,20 @@ pub const MAX_BLOCKING_THREADS: usize = 8;
 /// Number of concurrent `tool`-side `spawn_blocking` slots (TRD §2.2).
 pub const TOOL_BLOCKING_SLOTS: usize = 2;
 
+// Architect review GH #33 — compile-time invariant.
+//
+// `TOOL_BLOCKING_SLOTS` MUST stay strictly less than
+// `MAX_BLOCKING_THREADS` on every target so a saturated tool semaphore
+// can never starve every blocking-pool worker (inference, SQLite
+// writer, RAG indexer). Enforced at build time — a future refactor
+// that violates this ordering fails `cargo check`, not just CI.
+const _: () = assert!(
+    TOOL_BLOCKING_SLOTS < MAX_BLOCKING_THREADS,
+    "TOOL_BLOCKING_SLOTS must be strictly less than MAX_BLOCKING_THREADS \
+     (see TRD §2.2): otherwise saturating the tool semaphore would starve \
+     the inference / DB / RAG workers."
+);
+
 /// Number of async worker threads. 4 is the sweet-spot for mobile — it
 /// survives thermal-throttled 4-core SoCs without thrashing.
 const WORKER_THREADS: usize = 4;
@@ -159,18 +173,14 @@ mod tests {
                  Android tightening)."
             );
         }
-        // The tool semaphore is a separate, smaller bound; verify it
-        // is strictly less than the blocking-thread cap on every
-        // target so a saturated tool semaphore can never starve every
-        // blocking-pool worker.
-        assert!(
-            TOOL_BLOCKING_SLOTS < MAX_BLOCKING_THREADS,
-            "TOOL_BLOCKING_SLOTS ({}) must stay strictly below \
-             MAX_BLOCKING_THREADS ({}) so tool work cannot starve \
-             inference / DB workers.",
-            TOOL_BLOCKING_SLOTS,
-            MAX_BLOCKING_THREADS,
-        );
+        // The tool-semaphore vs. blocking-pool ordering check is a
+        // compile-time invariant; the clippy lint
+        // `assertions_on_constants` (correctly) flags a runtime
+        // `assert!` on two `const usize` operands as redundant. The
+        // module-level `const _: () = assert!(..)` next to the
+        // `TOOL_BLOCKING_SLOTS` definition enforces the same property
+        // at build time, which is strictly stronger than a runtime
+        // test.
     }
 
     #[test]
