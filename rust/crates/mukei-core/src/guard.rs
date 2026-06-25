@@ -49,6 +49,10 @@ pub enum GuardError {
         /// The guard's live generation at the time of dispatch.
         current: u64,
     },
+    /// The callback panicked while we were delivering it across the FFI
+    /// boundary. The panic was caught and converted into a typed error.
+    #[error("callback panicked while guarded")]
+    Panic,
 }
 
 /// ABI-stable handle. On the FFI struct this is exposed as a bare `u64`
@@ -210,15 +214,16 @@ impl Inner {
 ///
 /// # Returns
 /// - `Ok(T)` if generation matched and callback returned `Ok`.
-/// - `Err(GuardError::Released)` if the guard is NULL or a panic was caught.
+/// - `Err(GuardError::Released)` if the guard is NULL.
 /// - `Err(GuardError::GenerationMismatch)` if the guard is live but stale.
+/// - `Err(GuardError::Panic)` if the callback panicked while we were
+///   delivering it across the FFI boundary.
 ///
 /// # Panic policy
 /// A panic inside `$callback` is caught via `std::panic::catch_unwind` and
-/// reported as `Err(GuardError::Released)`. There is no separate `Panic`
-/// variant on [`GuardError`] — callers cannot distinguish "QObject gone"
-/// from "panicked while delivering", which is intentional: both outcomes
-/// require the same recovery action (drop the callback).
+/// converted into `Err(GuardError::Panic)`. This preserves the no-panic-
+/// across-FFI guarantee while letting audit/diagnostics distinguish "target
+/// destroyed" from "delivery panicked".
 #[macro_export]
 macro_rules! callback_with_guard {
     ($guard_ptr:expr, $snapshot:expr, $callback:block) => {{
@@ -241,7 +246,7 @@ macro_rules! callback_with_guard {
             } else {
                 match std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || $callback)) {
                     Ok(result) => result,
-                    Err(_) => Err($crate::guard::GuardError::Released), // any panic => drop
+                    Err(_) => Err($crate::guard::GuardError::Panic),
                 }
             }
         }
@@ -325,7 +330,7 @@ mod tests {
         let result: Result<i32, GuardError> = callback_with_guard!(ptr, snap, {
             panic!("intentional");
         });
-        assert_eq!(result.unwrap_err(), GuardError::Released);
+        assert_eq!(result.unwrap_err(), GuardError::Panic);
 
         unsafe { CallbackGuard::release(ptr) };
     }

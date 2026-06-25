@@ -13,6 +13,9 @@ use crate::tools::Tool;
 
 const MAX_EXPRESSION_BYTES: usize = 1024;
 const TIMEOUT: Duration = Duration::from_secs(8);
+// TRD §5.5: these built-ins are intentionally allowed. The regression
+// tests below lock the list so future refactors don't accidentally widen
+// or narrow the evaluator surface without an explicit review.
 const ALLOWED_IDENTIFIERS: &[&str] = &[
     "pi", "e", "abs", "sqrt", "cbrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin",
     "acos", "atan", "sinh", "cosh", "tanh", "floor", "ceil", "round", "signum", "min", "max",
@@ -151,5 +154,20 @@ mod tests {
     fn rejects_unknown_identifiers() {
         let err = validate_expression("system(1)").unwrap_err();
         assert!(matches!(err, MukeiError::ToolArgumentInvalid { .. }));
+    }
+
+    #[test]
+    fn documented_builtins_are_explicitly_allowed() {
+        for expr in ["pi", "exp(1)", "ln(1)", "sqrt(9)"] {
+            validate_expression(expr).unwrap();
+        }
+    }
+
+    #[test]
+    fn builtin_like_identifiers_not_on_the_whitelist_are_rejected() {
+        for expr in ["tau", "sqrtx(9)", "exploit(1)", "lnx(1)"] {
+            let err = validate_expression(expr).unwrap_err();
+            assert!(matches!(err, MukeiError::ToolArgumentInvalid { .. }));
+        }
     }
 }

@@ -7,6 +7,8 @@
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use tracing_subscriber::fmt::writer::MakeWriter;
+
 use crate::diagnostics::crash_logger::CrashSink;
 use crate::error::MukeiError;
 
@@ -24,21 +26,27 @@ pub fn crash_sink() -> Option<Arc<CrashSink>> {
     CRASH_SINK.get().cloned()
 }
 
+/// Writer used by the core crate before any file-backed subscriber is
+/// installed by the embedding app. This MUST stay silent: on Android,
+/// stdout/stderr are mirrored into `adb logcat`, which is a privacy leak
+/// for a zero-telemetry product.
+fn bootstrap_log_writer() -> impl for<'writer> MakeWriter<'writer> + Clone {
+    std::io::sink
+}
+
 /// Local-only tracing subscriber. We do **not** enable JSON or any
-/// remote exporter; the only sink is a rolling `.log` file on disk.
+/// remote exporter; the default bootstrap path intentionally discards
+/// bytes until the embedding app installs its own file-backed sink.
 pub fn initialize_tracing() {
     use tracing_subscriber::EnvFilter;
 
     // Honour RUST_LOG, otherwise default to "mukei=info".
     let env = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("mukei=info"));
 
-    // Local-only subscriber. The bridge crate replaces this with a
-    // tee'd subscriber that also forwards into android logcat on the
-    // `target_os = "android"` target (still local).
     let _ = tracing_subscriber::fmt()
         .with_env_filter(env)
         .with_target(true)
-        .with_writer(std::io::sink) // default: drop. Bridge crate re-installs.
+        .with_writer(bootstrap_log_writer())
         .try_init();
 }
 
@@ -56,10 +64,23 @@ pub fn log_error(err: &MukeiError) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use tracing_subscriber::fmt::writer::MakeWriter;
+
+    #[test]
+    fn bootstrap_writer_accepts_bytes_without_stdio_side_effects() {
+        let make = bootstrap_log_writer();
+        let mut writer = make.make_writer();
+        writer
+            .write_all(b"secret-that-must-not-hit-logcat")
+            .unwrap();
+        writer.flush().unwrap();
+    }
 
     #[test]
     fn log_error_emits_expected_fields() {
-        // No panic; tracing has an in-memory sink here.
+        // No panic; bootstrap logging discards bytes until the embedder
+        // installs a file-backed subscriber.
         log_error(&MukeiError::OOM);
         log_error(&MukeiError::PromptLeakage);
     }
