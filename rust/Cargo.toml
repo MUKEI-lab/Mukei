@@ -56,8 +56,16 @@ r2d2        = "0.8"
 r2d2_sqlite = "0.24"
 
 # ----- HTTP & parsing (TRD §5.1) ---------------------------------------
+# NOTE on `scraper`: the v0.7.0 plan listed `scraper` for streaming HTML
+# parsing of search-engine result pages. The current implementation
+# (search/engines/{brave,tavily}.rs) uses JSON-only APIs, so `scraper`
+# is not referenced from any source file. It also pulls in MPL-2.0
+# transitive crates (`cssparser`, `selectors`, `dtoa-short`,
+# `cssparser-macros`) which violate the Apache/MIT-only license policy
+# in `deny.toml`. The dependency is removed in v0.7.5; re-add behind a
+# dedicated `html_scraping` feature with an MPL-2.0 exception entry
+# when an HTML-scraping engine is actually wired up.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
-scraper = "0.19"
 url     = "2.5"
 
 # ----- Serialisation (TRD §12.5 strict config) -------------------------

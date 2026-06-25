@@ -5,6 +5,15 @@
 # The matrix below intentionally errs on the strict side; loosen only
 # with explicit sign-off — this is a privacy-critical, zero-telemetry,
 # proprietary product and every dep is a supply-chain attack surface.
+#
+# Policy intent (PRD §III + user sign-off):
+#   * First-party code:           LicenseRef-Mukei-Proprietary
+#   * Allowed third-party FOSS:   permissive only (Apache-2.0 / MIT
+#                                 family + a few well-known permissive
+#                                 data licenses for trust roots).
+#   * Disallowed:                 MPL-2.0 and any other copyleft. Each
+#                                 added crate MUST be reviewed against
+#                                 this list before merge.
 
 [graph]
 # Only audit the targets Mukei actually ships for. This prevents
@@ -54,6 +63,14 @@ allow      = [
     "Zlib",
     "CC0-1.0",
     "0BSD",
+    # `webpki-roots` v1.x ships the Mozilla CCADB trust-root data under
+    # CDLA-Permissive-2.0. This is a permissive (Open Definition–compliant,
+    # non-copyleft) data licence; it only governs the embedded root-cert
+    # blob, not any Rust source we extend. Approved for shipping the
+    # rustls TLS trust store. Upstream:
+    #   https://github.com/rustls/webpki-roots
+    #   https://cdla.dev/permissive-2-0/
+    "CDLA-Permissive-2.0",
     # Private first-party workspace crates.
     "LicenseRef-Mukei-Proprietary",
 ]
@@ -64,8 +81,22 @@ exceptions = []
 [bans]
 # Block known-evil / unmaintained crates by name. Add aliases as we
 # discover them in the dependency tree.
+#
+# `multiple-versions = "warn"` matches the policy intent — duplicate
+# versions are a code-smell we want surfaced, not a hard release
+# blocker. The supply-chain workflow runs with `-D warnings` so the
+# warn-level still becomes a CI error UNLESS an entry below explicitly
+# documents the duplicate. Each `skip` MUST cite the upstream gap that
+# forces the duplicate; remove it the moment upstream catches up.
 multiple-versions = "warn"
 wildcards = "deny"
+# The workspace uses path-based intra-workspace dependencies (e.g.
+# `mukei-core = { path = "../mukei-core", ... }`). Without this flag
+# cargo-deny treats those path entries as wildcard public deps. Per
+# cargo-deny 0.14+ semantics, this allows wildcards inside private /
+# workspace crates only — public, registry-style wildcards remain
+# denied.
+allow-wildcard-paths = true
 highlight = "all"
 
 # Deny list — extend cautiously.
@@ -76,8 +107,49 @@ deny = [
 ]
 
 # Skip duplicate-version warnings for these specific crates if a
-# transitive needs the older line. Add entries with a justification.
-skip = []
+# transitive needs the older line. Each entry must cite the path that
+# forces the duplicate; revisit on every quarterly refresh.
+skip = [
+    # `tokenizers` v0.19 still pins `base64 = 0.13`; `reqwest`/`hyper`
+    # use the current `0.22`. Upstream tokenizers 0.20+ moves to 0.22.
+    { crate = "base64@0.13.1",            reason = "tokenizers 0.19 transitive — fixed in tokenizers >= 0.20" },
+    # `fancy-regex` (candle-transformers) keeps `bit-set 0.5` ⇒ `bit-vec 0.6`.
+    { crate = "bit-vec@0.6.3",            reason = "candle-transformers transitive via fancy-regex 0.13" },
+    # `raw-cpuid` (used by gemm/candle) still pins `bitflags 1.x`.
+    { crate = "bitflags@1.3.2",           reason = "candle-core/gemm transitive via raw-cpuid 10.x" },
+    # `sha2` 0.10 lags one minor behind `blake3`/`chacha20` for cpufeatures.
+    { crate = "cpufeatures@0.2.17",       reason = "sha2 0.10 transitive; blake3/chacha20 already on 0.3" },
+    # The 0.2/0.3/0.4 split tracks the rand/uuid major bump cycle.
+    { crate = "getrandom@0.2.17",         reason = "rand 0.8/rustls 0.23 transitive — clears with rand 0.10 rollout" },
+    { crate = "getrandom@0.4.3",          reason = "uuid 1.10+ pulls rand 0.10 → getrandom 0.4" },
+    # `rusqlite` 0.31 pins `hashlink 0.9` → `hashbrown 0.14`; cxx-build is on 0.17.
+    { crate = "hashbrown@0.14.5",         reason = "rusqlite 0.31 transitive via hashlink 0.9" },
+    # `tokenizers` v0.19 mixes `itertools 0.11` and `0.12`.
+    { crate = "itertools@0.11.0",         reason = "tokenizers 0.19 transitive — clears with 0.20" },
+    # `meval` 0.2 (the math evaluator from TRD §5.5) still uses `nom 1.x`.
+    { crate = "nom@1.2.4",                reason = "meval 0.2 transitive; meval is unmaintained but small and audited (TRD §5.5)" },
+    # `scraper` / `markup5ever` family keeps `phf 0.10` alongside `phf 0.11`.
+    { crate = "phf@0.10.1",               reason = "selectors 0.25 transitive — clears with scraper 0.20 upgrade path" },
+    { crate = "phf_codegen@0.10.0",       reason = "selectors 0.25 transitive — see phf above" },
+    { crate = "phf_generator@0.10.0",     reason = "selectors 0.25 transitive — see phf above" },
+    { crate = "phf_shared@0.10.0",        reason = "selectors 0.25 transitive — see phf above" },
+    # `candle-core`, `tokenizers`, `uuid` span the rand 0.8/0.9/0.10 lifecycle.
+    { crate = "rand@0.8.6",               reason = "candle/tokenizers transitive — pinned to 0.8 by upstream" },
+    { crate = "rand@0.9.4",               reason = "half 2.7 transitive — clears with candle 0.8" },
+    { crate = "rand_chacha@0.3.1",        reason = "rand 0.8 transitive" },
+    { crate = "rand_core@0.6.4",          reason = "rand 0.8 + rustls 0.23 transitive" },
+    { crate = "rand_core@0.9.5",          reason = "rand 0.9 transitive (half 2.7)" },
+    { crate = "rand_distr@0.4.3",         reason = "candle-core 0.7 transitive" },
+    { crate = "siphasher@0.3.11",         reason = "phf 0.10 transitive — see phf above" },
+    # `toml` 0.8 still uses `toml_edit 0.22`/`toml_datetime 0.6`; cxx-build chain
+    # is on the 1.x line.
+    { crate = "toml_datetime@0.6.11",     reason = "toml 0.8 transitive — clears with toml 1.0 rollout" },
+    { crate = "toml_edit@0.22.27",        reason = "toml 0.8 transitive — clears with toml 1.0 rollout" },
+    # `indicatif` / `console` keep windows-sys 0.59 while mio/socket2 use 0.61.
+    { crate = "windows-sys@0.59.0",       reason = "indicatif/console transitive — clears with indicatif 0.18" },
+    # `toml_edit 0.22` keeps `winnow 0.7`; the cxx-build chain is on 1.x.
+    { crate = "winnow@0.7.15",            reason = "toml 0.8 transitive — clears with toml 1.0 rollout" },
+]
 skip-tree = []
 
 [sources]

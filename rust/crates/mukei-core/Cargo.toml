@@ -29,7 +29,10 @@ llama_cpp          = ["dep:llama-cpp-rs"]
 usearch_hnsw       = ["dep:usearch"]
 rusqlite           = ["dep:rusqlite", "dep:r2d2", "dep:r2d2_sqlite"]
 sqlcipher          = ["rusqlite"]  # SQLCipher == rusqlite + encrypted backend
-network            = ["dep:reqwest", "dep:scraper", "dep:url"]
+# `scraper` removed in v0.7.5 (see workspace Cargo.toml note): the
+# current search engines use JSON-only APIs and `scraper` pulls in
+# MPL-2.0 transitives that violate the Apache/MIT-only license policy.
+network            = ["dep:reqwest", "dep:url"]
 candle             = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers"]
 # Declared so the `#[cfg(feature = "ddg")] compile_error!(...)` anti-regression
 # tripwire is recognized by check-cfg rather than surfacing as a warning.
@@ -73,7 +76,6 @@ r2d2        = { workspace = true, optional = true }
 r2d2_sqlite = { workspace = true, optional = true }
 usearch     = { workspace = true, optional = true }
 reqwest     = { workspace = true, optional = true }
-scraper     = { workspace = true, optional = true }
 url         = { workspace = true, optional = true }
 tokenizers  = { workspace = true, optional = true }
 candle-core = { workspace = true, optional = true }
