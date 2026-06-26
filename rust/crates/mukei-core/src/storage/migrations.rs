@@ -334,4 +334,108 @@ mod tests {
         let ids: Vec<_> = pending.iter().map(|(i, _, _)| *i).collect();
         assert_eq!(ids, vec![2, 3]);
     }
+
+    /// Architect review GH #37 — end-to-end rollback test.
+    ///
+    /// Verifies that when the DB is at `applied = [1, 3]` (a gap at
+    /// version 2, simulating manual tampering or partial recovery) and
+    /// the filesystem ships migrations `[1, 2, 3, 4]`, `apply_pending`:
+    ///
+    /// 1. Returns `MukeiError::MigrationOrderConflict` (not a partial
+    ///    success, not silent forward progress on top of the gap).
+    /// 2. Does NOT apply migration 4 — i.e. the post-conflict DB still
+    ///    has exactly two rows in `migrations_applied`, the same two it
+    ///    had before the boot path tried to apply pending.
+    ///
+    /// The order check runs BEFORE any DDL transaction (cf. line 166 in
+    /// `apply_pending`), so a clean rollback is the contract this test
+    /// pins. Issue #12 + GH #37.
+    #[tokio::test]
+    async fn apply_pending_with_gap_in_applied_set_rolls_back_cleanly() {
+        use crate::storage::pool::DatabasePool;
+
+        // Write four numbered SQL files so the migrator's directory
+        // scan sees `[1, 2, 3, 4]` as available.
+        let mig_dir = tempfile::tempdir().unwrap();
+        for (id, body) in [
+            (1u32, "CREATE TABLE t1 (x INTEGER);"),
+            (2u32, "CREATE TABLE t2 (x INTEGER);"),
+            (3u32, "CREATE TABLE t3 (x INTEGER);"),
+            (4u32, "CREATE TABLE t4 (x INTEGER);"),
+        ] {
+            let fname = format!("V{id:03}__test.sql");
+            std::fs::write(mig_dir.path().join(fname), body).unwrap();
+        }
+
+        // Open a fresh SQLite pool and pre-populate `migrations_applied`
+        // with [1, 3] (the gap scenario).
+        let db_dir = tempfile::tempdir().unwrap();
+        let db_path = db_dir.path().join("mukei-mig-test.db");
+        let pool = DatabasePool::open(&db_path).unwrap();
+        pool.with_conn(|c| {
+            c.execute_batch(
+                "CREATE TABLE migrations_applied ( \
+                    version INTEGER PRIMARY KEY, \
+                    name TEXT NOT NULL UNIQUE, \
+                    applied_at TEXT NOT NULL, \
+                    checksum TEXT, \
+                    execution_ms INTEGER, \
+                    success INTEGER NOT NULL DEFAULT 1 CHECK (success IN (0, 1)) \
+                 );\
+                 INSERT INTO migrations_applied (version, name, applied_at, checksum, execution_ms, success) \
+                    VALUES (1, 'V001__test.sql', '2026-01-01T00:00:00Z', 'x', 1, 1); \
+                 INSERT INTO migrations_applied (version, name, applied_at, checksum, execution_ms, success) \
+                    VALUES (3, 'V003__test.sql', '2026-01-01T00:00:00Z', 'z', 1, 1);",
+            )?;
+            Ok::<_, crate::storage::pool::DbError>(())
+        })
+        .await
+        .unwrap();
+
+        // Boot path: `apply_pending` must surface the conflict and NOT
+        // touch any DDL.
+        let migrator = Migrator::new(mig_dir.path());
+        let err = migrator.apply_pending(&pool).await.unwrap_err();
+        // The MigrationOrderConflict bubbles up through DbError::Manager;
+        // the message is the only stable surface for the assertion.
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("MigrationOrderConflict") || msg.contains("order"),
+            "expected migration-order conflict, got: {msg}"
+        );
+
+        // Rollback contract: the table must still hold exactly the two
+        // rows we pre-inserted, no row for migration 2 or 4, and table
+        // `t2` / `t4` must NOT have been created.
+        let post_state: (i64, i64, i64) = pool
+            .with_conn(|c| {
+                let applied_count: i64 =
+                    c.query_row("SELECT COUNT(*) FROM migrations_applied", [], |r| r.get(0))?;
+                let t2_exists: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='t2'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let t4_exists: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='t4'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok::<_, crate::storage::pool::DbError>((applied_count, t2_exists, t4_exists))
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            post_state.0, 2,
+            "migrations_applied must still hold exactly the two pre-existing rows"
+        );
+        assert_eq!(
+            post_state.1, 0,
+            "migration 2's DDL must not have run (rollback contract)"
+        );
+        assert_eq!(
+            post_state.2, 0,
+            "migration 4's DDL must not have run (rollback contract)"
+        );
+    }
 }
