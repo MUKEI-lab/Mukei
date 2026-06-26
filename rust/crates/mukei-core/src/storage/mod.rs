@@ -46,3 +46,14 @@ pub use pool::{DatabasePool, DbError, PooledConnectionExt};
 pub use recovery::{RecoveryState, RecoveryStore};
 #[cfg(feature = "rusqlite")]
 pub use saf::{SafRegistry, SafTokenRow};
+
+// TRD §8.1 / PRD REQ-MOD-01 — on-device GGUF downloader. Independent of
+// the rusqlite-gated persistence layer because testers must be able to
+// fetch the model even on builds without encrypted SQLite (e.g. early
+// desktop runs). The real reqwest-backed implementation is gated on
+// `network`; the sandbox build gets a stub plus the validation /
+// hashing / event types so unit tests still cover them.
+#[cfg(feature = "tokio")]
+pub mod model_download;
+#[cfg(feature = "tokio")]
+pub use model_download::{run_download, verify_file_sha256, DownloadEvent, DownloadRequest};

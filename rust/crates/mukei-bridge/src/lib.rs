@@ -106,6 +106,78 @@ static GLOBAL_AUDIT_LOG_WRITER: Lazy<Arc<AuditLogWriter>> =
 /// credentials rotate.
 static GLOBAL_CONFIG: Lazy<Mutex<Option<MukeiConfig>>> = Lazy::new(|| Mutex::new(None));
 
+/// Default on-device model directory. Testers can override this via
+/// `set_model_dir` before calling `download_model`; otherwise the
+/// bridge picks a sensible per-OS path:
+///
+///   * Android: the app-private external files dir, populated by the
+///     Java/Kotlin side via `set_model_dir` before any download runs.
+///   * Linux/Mac desktop: `$XDG_DATA_HOME/mukei/models` (or
+///     `$HOME/.local/share/mukei/models`).
+///
+/// Stored as `Mutex<PathBuf>` so the QML / JNI side can rewrite it at
+/// any time.
+static GLOBAL_MODEL_DIR: Lazy<Mutex<std::path::PathBuf>> = Lazy::new(|| {
+    let p = std::env::var("XDG_DATA_HOME")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| std::path::PathBuf::from(h).join(".local/share"))
+        })
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("mukei")
+        .join("models");
+    Mutex::new(p)
+});
+
+/// Resolve a QML `download_model(url, sha256)` request into a typed
+/// [`mukei_core::storage::DownloadRequest`]. Accepts two call shapes:
+///
+/// 1. **Canonical id** — `url` is a [`ModelId::as_str`] value
+///    (e.g. `"gemma-4-e2b-it"`) and `sha256` is empty or matches the
+///    pinned digest. The URL + SHA come from the binary catalogue
+///    (TRD §8.1).
+/// 2. **Bespoke URL** — `url` is an `https://` URL and `sha256` is the
+///    matching 64-hex digest. Used for QA before the
+///    release-engineering pass pins the real CDN URL.
+async fn resolve_download_request(
+    url_or_id: &str,
+    sha256: &str,
+) -> mukei_core::error::Result<mukei_core::storage::DownloadRequest> {
+    let model_dir = GLOBAL_MODEL_DIR.lock().await.clone();
+
+    if let Some(descriptor) = mukei_core::engine::lookup_model_str(url_or_id) {
+        let trimmed = sha256.trim();
+        if !trimmed.is_empty() && !trimmed.eq_ignore_ascii_case(descriptor.expected_sha256) {
+            return Err(mukei_core::error::MukeiError::ToolArgumentInvalid {
+                field: "sha256",
+                reason: format!(
+                    "sha256 mismatch for model id {} — caller passed {}, manifest pins {}",
+                    descriptor.id, trimmed, descriptor.expected_sha256
+                ),
+            });
+        }
+        return Ok(mukei_core::storage::DownloadRequest {
+            url: descriptor.download_url.to_string(),
+            expected_sha256: descriptor.expected_sha256.to_string(),
+            dest: model_dir.join(descriptor.filename),
+        });
+    }
+
+    let filename = url_or_id
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("model.gguf");
+    Ok(mukei_core::storage::DownloadRequest {
+        url: url_or_id.to_string(),
+        expected_sha256: sha256.to_string(),
+        dest: model_dir.join(filename),
+    })
+}
+
 /// Bridge-side wrapped-secrets helper. The bridge crate is responsible
 /// for unwrapping the Keystore-protected ciphertext that arrives over
 /// the JNI boundary and handing the plaintext to the core; the
@@ -209,6 +281,15 @@ pub mod ffi {
         fn note_thermal_status(self: Pin<&mut MukeiBridge>, status: i32);
         #[qinvokable]
         fn saf_registry_count(self: Pin<&mut MukeiBridge>) -> i32;
+        // TRD §8.1 / REQ-MOD-01 — model download surface.
+        #[qinvokable]
+        fn set_model_dir(self: Pin<&mut MukeiBridge>, path: QString);
+        #[qinvokable]
+        fn model_dir(self: Pin<&mut MukeiBridge>) -> QString;
+        #[qinvokable]
+        fn recommended_model_id(self: Pin<&mut MukeiBridge>, total_ram_mib: i32) -> QString;
+        #[qinvokable]
+        fn model_catalogue_json(self: Pin<&mut MukeiBridge>) -> QString;
 
         #[qobject]
         pub type SafRegistry = super::SafRegistryRust;
@@ -510,12 +591,113 @@ impl MukeiAgentRust {
         self.cancel_token = CancellationToken::new();
     }
 
-    pub fn download_model(self: Pin<&mut Self>, _url: QString, _sha256: QString) {
+    /// Kick off a streaming GGUF download (TRD §8.1 / REQ-MOD-01).
+    ///
+    /// QML can call this in two ways:
+    /// 1. `url` is the canonical model id (`gemma-4-e2b-it` or
+    ///    `gemma-4-e4b-it`) and `sha256` is empty. The bridge uses
+    ///    the pinned URL + SHA from `model_registry`.
+    /// 2. `url` is a bespoke HTTPS URL and `sha256` is the matching
+    ///    64-hex digest. Useful for tester QA before the release
+    ///    engineering pass pins the final CDN URL.
+    ///
+    /// Progress comes back through `download_progress(progress, status)`:
+    /// * `started:<bytes|unknown>`
+    /// * `downloading:<bytes_downloaded>`
+    /// * `complete:<absolute_path>`
+    /// * `error:<ERR_CODE>:<message>`
+    pub fn download_model(self: Pin<&mut Self>, url: QString, sha256: QString) {
         let qt = self.qt_thread();
-        let _ = qt.queue(|mut qobject| {
-            qobject
-                .as_mut()
-                .download_progress(0.0, QString::from("not_implemented_in_sandbox"));
+        let cancel = self.cancel_token.clone();
+        let url_or_id = url.to_string();
+        let sha = sha256.to_string();
+
+        mukei_core::runtime::get().spawn(async move {
+            let req = match resolve_download_request(&url_or_id, &sha).await {
+                Ok(r) => r,
+                Err(e) => {
+                    let code = e.error_code().to_string();
+                    let message = e.to_string();
+                    let _ = qt.queue(move |mut qobject| {
+                        qobject.as_mut().download_progress(
+                            0.0,
+                            QString::from(format!("error:{code}:{message}")),
+                        );
+                    });
+                    return;
+                }
+            };
+
+            let dest_for_status = req.dest.clone();
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<mukei_core::storage::DownloadEvent>(32);
+            let req_for_dl = req.clone();
+            let cancel_for_dl = cancel.clone();
+            let dl_handle = mukei_core::runtime::get().spawn(async move {
+                mukei_core::storage::run_download(req_for_dl, tx, cancel_for_dl).await
+            });
+
+            while let Some(ev) = rx.recv().await {
+                let qt_for_ev = qt.clone();
+                match ev {
+                    mukei_core::storage::DownloadEvent::Started { total_bytes } => {
+                        let status = match total_bytes {
+                            Some(n) => format!("started:{n}"),
+                            None => "started:unknown".to_string(),
+                        };
+                        let _ = qt_for_ev.queue(move |mut qobject| {
+                            qobject
+                                .as_mut()
+                                .download_progress(0.0, QString::from(status));
+                        });
+                    }
+                    mukei_core::storage::DownloadEvent::Progress {
+                        progress,
+                        bytes_downloaded,
+                    } => {
+                        let status = format!("downloading:{bytes_downloaded}");
+                        let _ = qt_for_ev.queue(move |mut qobject| {
+                            qobject
+                                .as_mut()
+                                .download_progress(progress, QString::from(status));
+                        });
+                    }
+                    mukei_core::storage::DownloadEvent::Complete { final_path } => {
+                        let status = format!("complete:{}", final_path.to_string_lossy());
+                        let _ = qt_for_ev.queue(move |mut qobject| {
+                            qobject
+                                .as_mut()
+                                .download_progress(1.0, QString::from(status));
+                        });
+                    }
+                    mukei_core::storage::DownloadEvent::Error { code, message } => {
+                        let status = format!("error:{code}:{message}");
+                        let _ = qt_for_ev.queue(move |mut qobject| {
+                            qobject
+                                .as_mut()
+                                .download_progress(0.0, QString::from(status));
+                        });
+                    }
+                }
+            }
+
+            match dl_handle.await {
+                Ok(Ok(())) => {
+                    tracing::info!(path = %dest_for_status.display(), "model download finalised");
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!(error = %e, "model download failed");
+                }
+                Err(join_err) => {
+                    let msg = format!("download task panicked: {join_err}");
+                    tracing::error!(error = %msg);
+                    let _ = qt.queue(move |mut qobject| {
+                        qobject.as_mut().download_progress(
+                            0.0,
+                            QString::from(format!("error:ERR_FFI_PANIC:{msg}")),
+                        );
+                    });
+                }
+            }
         });
     }
 
@@ -574,6 +756,54 @@ impl MukeiBridgeRust {
 
     pub fn saf_registry_count(self: Pin<&mut Self>) -> i32 {
         GLOBAL_SAF_REGISTRY.count() as i32
+    }
+
+    // -----------------------------------------------------------------
+    // Model download surface (TRD §8.1 / REQ-MOD-01)
+    // -----------------------------------------------------------------
+
+    pub fn set_model_dir(self: Pin<&mut Self>, path: QString) {
+        let new_path = std::path::PathBuf::from(path.to_string());
+        mukei_core::runtime::get().spawn(async move {
+            *GLOBAL_MODEL_DIR.lock().await = new_path;
+            tracing::info!("model directory updated");
+        });
+    }
+
+    pub fn model_dir(self: Pin<&mut Self>) -> QString {
+        let p = GLOBAL_MODEL_DIR.blocking_lock().clone();
+        QString::from(p.to_string_lossy().as_ref())
+    }
+
+    pub fn recommended_model_id(self: Pin<&mut Self>, total_ram_mib: i32) -> QString {
+        let ram = total_ram_mib.max(0) as u32;
+        let m = mukei_core::engine::recommended_for_device(ram);
+        QString::from(m.id.as_str())
+    }
+
+    pub fn model_catalogue_json(self: Pin<&mut Self>) -> QString {
+        #[derive(serde::Serialize)]
+        struct Entry {
+            id: &'static str,
+            display_name: &'static str,
+            description: &'static str,
+            approximate_bytes: u64,
+            min_device_ram_mib: u32,
+            recommended_n_ctx: usize,
+        }
+        let entries: Vec<Entry> = mukei_core::engine::MODELS
+            .iter()
+            .map(|m| Entry {
+                id: m.id.as_str(),
+                display_name: m.display_name,
+                description: m.description,
+                approximate_bytes: m.approximate_bytes,
+                min_device_ram_mib: m.min_device_ram_mib,
+                recommended_n_ctx: m.recommended_n_ctx,
+            })
+            .collect();
+        let json = serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string());
+        QString::from(json)
     }
 }
 
