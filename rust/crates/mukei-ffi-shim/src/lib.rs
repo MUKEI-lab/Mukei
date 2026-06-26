@@ -249,22 +249,37 @@ mod tests {
 
         // Defence-in-depth: catch the inverse drift where the header
         // gains a phantom symbol the Rust source no longer exports.
-        // We grep for any `mukei_*(` open-paren occurrence in the
-        // header and ensure each one is in the canonical list above.
+        // We grep for every `mukei_<identifier>(` occurrence in the
+        // header (including the case where the function name is glued
+        // to its open-paren, e.g. `mukei_acquire_callback_guard(void)`)
+        // and ensure each one is in the canonical list above.
         for line in header.lines() {
-            for token in line.split_whitespace() {
-                let token = token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_');
-                if token.starts_with("mukei_")
-                    && !exported.contains(&token)
-                    && line.contains('(')
-                    && !line.trim_start().starts_with("//")
-                    && !line.trim_start().starts_with('*')
-                {
-                    panic!(
-                        "C header declares `{token}(...)` but Rust does not export it. \
-                         Either remove it from `mukei_ffi_shim.h` or add the \
-                         matching `#[no_mangle] pub extern \"C\"` to `lib.rs`."
-                    );
+            let trimmed = line.trim_start();
+            // Skip comment lines so prose mentions of "mukei_*(...)" in
+            // the rationale block don't trip the detector.
+            if trimmed.starts_with("//") || trimmed.starts_with('*') || trimmed.starts_with("/*") {
+                continue;
+            }
+            // Walk the line manually so we treat the `(` as a strict
+            // identifier terminator (not just a whitespace boundary).
+            let chars: Vec<char> = line.chars().collect();
+            let mut i = 0;
+            while i < chars.len() {
+                if chars[i] == 'm' && line[i..].starts_with("mukei_") {
+                    let start = i;
+                    while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                        i += 1;
+                    }
+                    let sym: String = chars[start..i].iter().collect();
+                    if i < chars.len() && chars[i] == '(' && !exported.contains(&sym.as_str()) {
+                        panic!(
+                            "C header declares `{sym}(...)` but Rust does not export it. \
+                             Either remove it from `mukei_ffi_shim.h` or add the \
+                             matching `#[no_mangle] pub extern \"C\"` to `lib.rs`."
+                        );
+                    }
+                } else {
+                    i += 1;
                 }
             }
         }
