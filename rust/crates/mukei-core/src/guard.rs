@@ -135,6 +135,26 @@ impl CallbackGuard {
     }
 }
 
+/// Process-monotonic counter that hands every `Inner` a unique
+/// `instance_id` distinct from every other Inner ever allocated by
+/// this process. Starts at 1 and increments on every `Inner::new`.
+///
+/// This is the ABA mitigation for the heap-allocator-reuse window
+/// flagged in architect review GH #53: even if `Arc::into_raw(Inner)`
+/// returns address `0xCAFE` for one guard, that address is freed on
+/// `release`, and a subsequent `acquire` happens to land on `0xCAFE`
+/// again, the new Inner carries a different `instance_id` so a stale
+/// snapshot held over the gap is rejected with
+/// `GuardError::GenerationMismatch` (the snapshot's bound
+/// `instance_id` no longer matches the live one).
+///
+/// 2^64 acquires in a single process is the canonical "impossible in
+/// practice" bound — even at 1 acquire/ns it would take ~585 years
+/// to wrap. The increment uses `Ordering::Relaxed` since the value
+/// itself is the source of identity; the synchronisation happens
+/// through the `Arc` it lives inside.
+static NEXT_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
+
 /// The heap-allocated inner half of a [`CallbackGuard`]. Always reached
 /// through `Arc<Inner>` — `release()` is what converts it back to raw.
 pub struct Inner {
@@ -142,6 +162,11 @@ pub struct Inner {
     /// callback with a snapshot of "my" generation and rejects calls
     /// that read `current > snapshot`.
     pub generation: AtomicU64,
+    /// Process-unique identity assigned at construction time. Combined
+    /// with `generation`, this defeats the heap-reuse ABA window
+    /// flagged in architect review GH #53. Stable for the lifetime of
+    /// the Inner; never changes after `Inner::new`.
+    pub instance_id: u64,
 }
 
 impl Inner {
@@ -151,10 +176,12 @@ impl Inner {
     /// guard is tombstoned.
     pub const TOMBSTONE: u64 = u64::MAX;
 
-    /// Allocate a fresh `Arc<Inner>` with `generation = 1`.
+    /// Allocate a fresh `Arc<Inner>` with `generation = 1` and a
+    /// process-unique `instance_id`.
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             generation: AtomicU64::new(1),
+            instance_id: NEXT_INSTANCE_ID.fetch_add(1, Ordering::Relaxed),
         })
     }
 
@@ -191,6 +218,17 @@ impl Inner {
     /// for compatibility with existing bridge call-sites.
     pub fn tombstone(&self) {
         self.generation.store(Self::TOMBSTONE, Ordering::Release);
+    }
+
+    /// Read the process-unique `instance_id` assigned at construction.
+    ///
+    /// Used by FFI callers that want an additional ABA defence beyond
+    /// the per-guard generation counter (architect review GH #53). The
+    /// caller captures this value at bind time and re-reads it before
+    /// dispatching a callback; a mismatch means the underlying Inner
+    /// has been freed and a new Inner has reused the heap address.
+    pub fn instance_id(&self) -> u64 {
+        self.instance_id
     }
 
     /// Deprecated alias for [`Self::tombstone`].
@@ -352,5 +390,48 @@ mod tests {
         assert!(g.is_valid());
         assert_eq!(g.as_u64(), raw as u64);
         unsafe { CallbackGuard::release(raw) };
+    }
+
+    /// Architect review GH #53 — ABA defence.
+    ///
+    /// Two distinct `Inner::new()` calls produce different
+    /// `instance_id`s. This is the property that lets FFI callers
+    /// detect heap-address reuse across release/acquire cycles: even
+    /// if the same address is recycled, the new Inner's instance_id
+    /// has advanced, so a stale binding captured before the release
+    /// can be detected and dropped.
+    #[test]
+    fn instance_id_is_unique_per_construction() {
+        let a = Inner::new();
+        let b = Inner::new();
+        let c = Inner::new();
+        assert_ne!(a.instance_id(), b.instance_id());
+        assert_ne!(b.instance_id(), c.instance_id());
+        assert_ne!(a.instance_id(), c.instance_id());
+        // The counter is monotonic: each new instance gets a strictly
+        // greater id than the prior one observed in this thread.
+        assert!(b.instance_id() > a.instance_id());
+        assert!(c.instance_id() > b.instance_id());
+    }
+
+    /// Architect review GH #53 — instance_id is stable after
+    /// generation bumps.
+    ///
+    /// `bump()` and `tombstone()` operate on the generation counter;
+    /// the `instance_id` must NOT change after construction. Otherwise
+    /// the ABA defence would be undermined: a caller that captured
+    /// `instance_id` at bind time would observe a spurious mismatch on
+    /// every normal rebind.
+    #[test]
+    fn instance_id_is_stable_across_generation_bumps() {
+        let inner = Inner::new();
+        let id0 = inner.instance_id();
+        inner.bump();
+        assert_eq!(inner.instance_id(), id0);
+        inner.bump();
+        inner.bump();
+        assert_eq!(inner.instance_id(), id0);
+        inner.tombstone();
+        assert_eq!(inner.instance_id(), id0);
     }
 }

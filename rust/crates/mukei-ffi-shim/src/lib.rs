@@ -109,6 +109,25 @@ pub extern "C" fn mukei_stop_generation(guard_ptr: *const Inner) {
     let _ = mukei_callback_guard_bump_generation(guard_ptr);
 }
 
+/// Read the process-unique `instance_id` assigned at guard
+/// construction. Returns 0 if `guard_ptr` is NULL.
+///
+/// Architect review GH #53 — the instance_id defeats the heap-allocator
+/// reuse window: even if the same address is recycled by a later
+/// acquire, the new Inner carries a different instance_id so a caller
+/// who captured the old (pointer, generation, instance_id) triple will
+/// detect the reuse and drop the stale callback.
+#[no_mangle]
+pub extern "C" fn mukei_callback_guard_instance_id(guard_ptr: *const Inner) -> u64 {
+    if guard_ptr.is_null() {
+        return 0;
+    }
+    // SAFETY: pointer was produced by `mukei_acquire_callback_guard` and
+    // has not been released yet (caller's contract).
+    let inner = unsafe { &*guard_ptr };
+    inner.instance_id()
+}
+
 // ---------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------
@@ -236,6 +255,7 @@ mod tests {
             "mukei_callback_guard_bump_generation",
             "mukei_callback_guard_matches",
             "mukei_stop_generation",
+            "mukei_callback_guard_instance_id",
             "mukei_initialize",
             "mukei_send_message",
         ];

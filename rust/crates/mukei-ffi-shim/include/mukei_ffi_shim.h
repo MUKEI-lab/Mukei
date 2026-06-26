@@ -130,6 +130,26 @@ bool mukei_callback_guard_matches(const MukeiCallbackGuardInner* guard_ptr,
  */
 void mukei_stop_generation(const MukeiCallbackGuardInner* guard_ptr);
 
+/*
+ * Read the process-unique `instance_id` assigned at guard
+ * construction. Returns 0 if `guard_ptr` is NULL.
+ *
+ * Architect review GH #53. Combine with `current_generation` for an
+ * ABA-safe bind:
+ *
+ *   bound_id  = mukei_callback_guard_instance_id(g);
+ *   bound_gen = mukei_callback_guard_bump_generation(g);
+ *   ...later, before dispatching the callback...
+ *   if (mukei_callback_guard_instance_id(g) != bound_id) { drop; }
+ *   if (!mukei_callback_guard_matches(g, bound_gen))    { drop; }
+ *
+ * Even if the underlying heap address is freed and a later `acquire`
+ * lands on the same address, the new Inner carries a different
+ * instance_id so the stale binding is rejected.
+ */
+uint64_t mukei_callback_guard_instance_id(
+    const MukeiCallbackGuardInner* guard_ptr);
+
 /* --------------------------------------------------------------------
  * Engine entry points
  * ------------------------------------------------------------------ */
