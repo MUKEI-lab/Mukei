@@ -235,17 +235,35 @@ pub mod ffi {
 pub struct MukeiAgentRust {
     cancel_token: CancellationToken,
     state: Arc<Mutex<String>>,
-    /// Re-entrancy guard for `send_message` (user priority follow-up to
-    /// the architect-review batch). The flag is flipped from `false`
-    /// to `true` by the synchronous entry into `send_message`; a
-    /// second call that observes `true` is rejected with
-    /// `ERR_BRIDGE_BUSY` and emits no side effects. The streaming task
-    /// clears the flag after the chunk channel drains and the final
-    /// `IDLE_READY` state is queued, regardless of whether the loop
-    /// succeeded, errored, or was cancelled. Stored as an
-    /// `Arc<AtomicBool>` so the spawned streaming task can clear it
-    /// from the Tokio runtime.
+    /// Re-entrancy guard for `send_message` (user priority follow-up).
+    /// The flag is flipped from `false` to `true` by the synchronous
+    /// entry into `send_message`; a second call that observes `true`
+    /// is rejected with `ERR_BRIDGE_BUSY` and emits no side effects.
+    ///
+    /// **Release is RAII**, via [`BusyGuard`] — the spawned streaming
+    /// task owns a guard that clears the flag in `Drop`. This covers
+    /// every termination path (success, `handle.run` error,
+    /// missing-loop, cancellation) **and the panic path** for free:
+    /// the workspace mandates `panic = "unwind"` (TRD §1.3 / PRD G1),
+    /// so a panic inside the spawned task still unwinds through
+    /// `Drop`. A manual `store(false, ...)` at the end of the block
+    /// would skip Drop on panic and soft-lock the bridge for the rest
+    /// of the app's life — architect-review follow-up confirmed this
+    /// is the correct primitive.
     busy: Arc<AtomicBool>,
+}
+
+/// RAII guard that clears the re-entrancy flag on `Drop`. Held by the
+/// spawned `send_message` task; runs on both the normal-completion
+/// and the unwinding (panic) paths because `panic = "unwind"` is a
+/// workspace-wide invariant. Pairs `Ordering::Release` with the
+/// `compare_exchange(..., AcqRel, Acquire)` that flipped the flag.
+struct BusyGuard(Arc<AtomicBool>);
+
+impl Drop for BusyGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 pub struct MukeiBridgeRust;
@@ -411,6 +429,14 @@ impl MukeiAgentRust {
             return;
         }
 
+        // We hold the flag now (compare_exchange returned Ok). From
+        // here on, the BusyGuard owns release — Drop runs on every
+        // exit path, including the panic-unwind path that a manual
+        // `store(false, ...)` at the end of the spawned block would
+        // skip. Architect-review follow-up: this is the only release
+        // site; no other code in the workspace should touch `busy`.
+        let busy_guard = BusyGuard(busy);
+
         let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel::<String>(256);
         let ui_thread = qt_thread.clone();
 
@@ -468,13 +494,14 @@ impl MukeiAgentRust {
             }
             let _ = chunk_tx.send("\u{0001}STREAM_FINAL\u{0001}".to_string()).await;
             let _ = qt_thread.queue(|mut qobject| qobject.as_mut().state_changed(QString::from("IDLE_READY")));
-            // Re-entrancy guard release (user priority follow-up). This
-            // runs on every termination path — success, error_occurred,
-            // missing-loop, and cancellation — because the streaming
-            // task always reaches this point after the channel closes.
-            // `Ordering::Release` pairs with the AcqRel compare-exchange
-            // at the top of `send_message`.
-            busy.store(false, Ordering::Release);
+            // BusyGuard drops here on the normal path. Critically, it
+            // *also* drops on the panic-unwind path — anything inside
+            // `handle.run(...)` that panics (currently the `unwrap()`s
+            // sprinkled across rag/embedder, engine/llama_wrapper,
+            // engine/streaming, agent/context) will still release the
+            // flag, so a single panic can no longer soft-lock the
+            // bridge with a permanently-stuck `ERR_BRIDGE_BUSY`.
+            drop(busy_guard);
         });
     }
 
@@ -624,3 +651,67 @@ pub extern "C" fn Java_com_mukei_app_MukeiBridge_nativeOnThermalStatus(status: i
 
 #[no_mangle]
 pub extern "C" fn Java_com_mukei_app_MukeiBridge_nativeOnSafGrantRevoked() {}
+
+#[cfg(test)]
+mod busy_guard_tests {
+    //! Panic-safety regression for the `send_message` re-entrancy guard.
+    //!
+    //! `BusyGuard` is pure stdlib so these tests build on every host
+    //! that can compile the bridge. They lock the architect-review
+    //! follow-up invariant: the flag clears on *both* the normal and
+    //! the panic-unwind paths, because a manual `store(false, ...)` at
+    //! the end of the spawned block would skip on panic and soft-lock
+    //! the bridge.
+
+    use super::BusyGuard;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn drop_releases_the_flag_on_normal_path() {
+        let flag = Arc::new(AtomicBool::new(true));
+        {
+            let _g = BusyGuard(flag.clone());
+            assert!(
+                flag.load(Ordering::Acquire),
+                "flag must be held inside scope"
+            );
+        }
+        assert!(
+            !flag.load(Ordering::Acquire),
+            "flag must be released after BusyGuard drops normally"
+        );
+    }
+
+    #[test]
+    fn drop_releases_the_flag_on_panic_unwind() {
+        // Architect-review follow-up: the whole point of RAII here is
+        // panic safety. `panic = "unwind"` is a workspace invariant
+        // (TRD §1.3 / PRD G1), so Drop runs while the stack unwinds.
+        let flag = Arc::new(AtomicBool::new(true));
+        let flag_clone = flag.clone();
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _g = BusyGuard(flag_clone);
+            panic!("intentional: simulate a panic inside the spawned send_message task");
+        }));
+        assert!(panicked.is_err(), "the closure must have panicked");
+        assert!(
+            !flag.load(Ordering::Acquire),
+            "flag must be released even when BusyGuard drops via unwind"
+        );
+    }
+
+    #[test]
+    fn drop_is_idempotent_across_clones() {
+        // Two BusyGuards sharing the same Arc<AtomicBool> would both
+        // clear it; the second store is a no-op. Guards against a
+        // future bug where someone splits the guard between receive
+        // and send tasks — the flag would still end up cleared.
+        let flag = Arc::new(AtomicBool::new(true));
+        {
+            let _g1 = BusyGuard(flag.clone());
+            let _g2 = BusyGuard(flag.clone());
+        }
+        assert!(!flag.load(Ordering::Acquire));
+    }
+}
