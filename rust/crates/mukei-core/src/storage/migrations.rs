@@ -352,7 +352,7 @@ mod tests {
     /// pins. Issue #12 + GH #37.
     #[tokio::test]
     async fn apply_pending_with_gap_in_applied_set_rolls_back_cleanly() {
-        use crate::storage::pool::DatabasePool;
+        use crate::storage::pool::{DatabasePool, PooledConnectionExt};
 
         // Write four numbered SQL files so the migrator's directory
         // scan sees `[1, 2, 3, 4]` as available.
