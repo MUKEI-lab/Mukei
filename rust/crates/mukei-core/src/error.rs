@@ -29,6 +29,14 @@ pub enum MukeiError {
     /// (panic or cancellation inside the blocking pool).
     #[error("spawn_blocking task join failed: {0}")]
     BlockingJoinFailed(String),
+    /// A bridge entry point that is documented as single-shot (currently
+    /// `MukeiAgent::send_message`) was re-entered while a prior invocation
+    /// was still streaming. The second call is rejected without side
+    /// effects; the in-flight stream continues normally. The QML side
+    /// must either await `stream_finalized` or call `stop_generation`
+    /// before issuing the next `send_message`.
+    #[error("bridge entry point is busy — another send_message is still streaming")]
+    BridgeBusy,
 
     // ------------------------------------------------------------------
     // Resource exhaustion (TRD §38)
@@ -260,6 +268,7 @@ impl MukeiError {
             Self::FFIPanic => "ERR_FFI_PANIC",
             Self::CallbackGuardExpired => "ERR_CALLBACK_GUARD_EXPIRED",
             Self::BlockingJoinFailed(_) => "ERR_BLOCKING_JOIN",
+            Self::BridgeBusy => "ERR_BRIDGE_BUSY",
 
             Self::OOM => "ERR_OOM",
             Self::MemoryPreflightRejected(_) => "ERR_MEM_PREFLIGHT",
@@ -362,6 +371,11 @@ impl MukeiError {
             Self::FFIPanic | Self::CallbackGuardExpired | Self::BlockingJoinFailed(_) => {
                 ErrorClass::Resource
             }
+            // BridgeBusy is a UX-layer guard, not a resource exhaustion
+            // or security tripwire — classify as Agent so the QML side
+            // surfaces it next to the other interaction-layer errors
+            // (tool argument rejections, watchdog kicks, etc.).
+            Self::BridgeBusy => ErrorClass::Agent,
             Self::CrashLoopDetected { .. } => ErrorClass::Device,
             Self::Cancelled | Self::Invariant(_) | Self::Internal(_) => ErrorClass::Unknown,
         }
@@ -489,5 +503,19 @@ mod tests {
             MukeiError::ToolLoopDetected(5).classification(),
             ErrorClass::Agent
         );
+    }
+
+    /// User priority follow-up: the bridge re-entrancy guard surfaces
+    /// `BridgeBusy` to QML. Lock the stable error code and Agent
+    /// classification so the QML side can localise the dialog without
+    /// risk of a silent rename on a future refactor.
+    #[test]
+    fn bridge_busy_has_stable_code_and_classification() {
+        let err = MukeiError::BridgeBusy;
+        assert_eq!(err.error_code(), "ERR_BRIDGE_BUSY");
+        assert_eq!(err.classification(), ErrorClass::Agent);
+        let rendered = format!("{err}");
+        assert!(rendered.contains("busy"));
+        assert!(rendered.contains("send_message"));
     }
 }

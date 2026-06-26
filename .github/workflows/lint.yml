@@ -80,3 +80,38 @@ jobs:
             -p mukei-core \
             --no-default-features --features "std,tokio" \
             --lib || echo "::warning::1.78 build broken \u2014 see GH #21"
+
+  # ---------------------------------------------------------------------
+  # User priority follow-up - run the full mukei-core test matrix on every
+  # PR. The existing `sandbox-check.yml` ran only the lib-target tests on
+  # the default sandbox feature set; this job exercises the broader
+  # `std,tokio,rusqlite` combination (FailureTracker fingerprint, migration
+  # rollback, SAF token persistence, audit-log writer) plus every
+  # `tests/*_proptest.rs` integration file. The bridge crate is excluded
+  # because it requires Qt / cxx-qt-build which the GitHub-hosted Ubuntu
+  # runners do not have; the ffi-shim crate is included because its
+  # C-header drift detector is a release-blocker (GH #49 / GH #50).
+  # ---------------------------------------------------------------------
+  tests:
+    name: cargo test (sandbox features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo test - mukei-core (std,tokio,rusqlite)
+        working-directory: rust
+        run: |
+          cargo test \
+            -p mukei-core \
+            --no-default-features --features "std,tokio,rusqlite" \
+            --lib --tests \
+            -- --nocapture
+      - name: cargo test - mukei-ffi-shim (default features)
+        working-directory: rust
+        run: |
+          cargo test \
+            -p mukei-ffi-shim \
+            --lib --tests \
+            -- --nocapture

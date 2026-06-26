@@ -51,6 +51,7 @@ mod core_saf {
 }
 
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use cxx_qt::CxxQtType;
@@ -234,6 +235,17 @@ pub mod ffi {
 pub struct MukeiAgentRust {
     cancel_token: CancellationToken,
     state: Arc<Mutex<String>>,
+    /// Re-entrancy guard for `send_message` (user priority follow-up to
+    /// the architect-review batch). The flag is flipped from `false`
+    /// to `true` by the synchronous entry into `send_message`; a
+    /// second call that observes `true` is rejected with
+    /// `ERR_BRIDGE_BUSY` and emits no side effects. The streaming task
+    /// clears the flag after the chunk channel drains and the final
+    /// `IDLE_READY` state is queued, regardless of whether the loop
+    /// succeeded, errored, or was cancelled. Stored as an
+    /// `Arc<AtomicBool>` so the spawned streaming task can clear it
+    /// from the Tokio runtime.
+    busy: Arc<AtomicBool>,
 }
 
 pub struct MukeiBridgeRust;
@@ -244,6 +256,7 @@ impl Default for MukeiAgentRust {
         Self {
             cancel_token: CancellationToken::new(),
             state: Arc::new(Mutex::new("UNINITIALIZED".to_string())),
+            busy: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -374,7 +387,30 @@ impl MukeiAgentRust {
     pub fn send_message(self: Pin<&mut Self>, user_input: QString) {
         let qt_thread = self.qt_thread();
         let cancel_token = self.cancel_token.clone();
+        let busy = self.busy.clone();
         let input = user_input.to_string();
+
+        // Re-entrancy guard (user priority follow-up): refuse the call
+        // if a prior `send_message` is still streaming. The QML side
+        // must either await `stream_finalized` or call
+        // `stop_generation` first. The check + flip is atomic so a
+        // racing second invocation sees `Err(true)` and bails out
+        // before allocating the chunk channel or spawning any task.
+        if busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            let err = mukei_core::error::MukeiError::BridgeBusy;
+            let code = err.error_code().to_string();
+            let message = err.to_string();
+            let _ = qt_thread.queue(move |mut qobject| {
+                qobject
+                    .as_mut()
+                    .error_occurred(QString::from(code), QString::from(message));
+            });
+            return;
+        }
+
         let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel::<String>(256);
         let ui_thread = qt_thread.clone();
 
@@ -432,6 +468,13 @@ impl MukeiAgentRust {
             }
             let _ = chunk_tx.send("\u{0001}STREAM_FINAL\u{0001}".to_string()).await;
             let _ = qt_thread.queue(|mut qobject| qobject.as_mut().state_changed(QString::from("IDLE_READY")));
+            // Re-entrancy guard release (user priority follow-up). This
+            // runs on every termination path — success, error_occurred,
+            // missing-loop, and cancellation — because the streaming
+            // task always reaches this point after the channel closes.
+            // `Ordering::Release` pairs with the AcqRel compare-exchange
+            // at the top of `send_message`.
+            busy.store(false, Ordering::Release);
         });
     }
 
