@@ -203,4 +203,70 @@ mod tests {
         );
         assert_eq!(gen, 0);
     }
+
+    /// Architect review GH #49 / #50 — C-header drift detector.
+    ///
+    /// The hand-maintained `include/mukei_ffi_shim.h` is the source of
+    /// truth for the C ABI shipped to Qt/QML. This test parses the
+    /// header and asserts that every Rust-side `#[no_mangle] pub extern
+    /// "C" fn ...` symbol is declared in the header, and vice versa.
+    ///
+    /// Why hand-maintained vs `cbindgen`: see the rationale block at
+    /// the top of `mukei_ffi_shim.h`. The short version is that a
+    /// build-time codegen tool would (a) introduce a host-build
+    /// dependency, (b) defeat reproducible-build invariants, and
+    /// (c) widen the supply-chain attack surface.
+    #[test]
+    fn c_header_lists_every_exported_symbol() {
+        let mut header_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        header_path.push("include");
+        header_path.push("mukei_ffi_shim.h");
+        let header = std::fs::read_to_string(&header_path)
+            .unwrap_or_else(|e| panic!("missing C header at {header_path:?}: {e}"));
+
+        // Canonical list of every `#[no_mangle] pub extern "C" fn` in
+        // this file. Adding a new export REQUIRES adding the symbol
+        // both here and in the C header. Removing one REQUIRES
+        // removing it from both. The Rust-side compiler enforces the
+        // function definitions; this test enforces the header.
+        let exported: &[&str] = &[
+            "mukei_acquire_callback_guard",
+            "mukei_release_callback_guard",
+            "mukei_callback_guard_current_generation",
+            "mukei_callback_guard_bump_generation",
+            "mukei_callback_guard_matches",
+            "mukei_stop_generation",
+            "mukei_initialize",
+            "mukei_send_message",
+        ];
+        for sym in exported {
+            assert!(
+                header.contains(sym),
+                "C header `mukei_ffi_shim.h` is missing the declaration for `{sym}`. \
+                 Add it (matching the Rust signature) and re-run the test."
+            );
+        }
+
+        // Defence-in-depth: catch the inverse drift where the header
+        // gains a phantom symbol the Rust source no longer exports.
+        // We grep for any `mukei_*(` open-paren occurrence in the
+        // header and ensure each one is in the canonical list above.
+        for line in header.lines() {
+            for token in line.split_whitespace() {
+                let token = token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_');
+                if token.starts_with("mukei_")
+                    && !exported.contains(&token)
+                    && line.contains('(')
+                    && !line.trim_start().starts_with("//")
+                    && !line.trim_start().starts_with('*')
+                {
+                    panic!(
+                        "C header declares `{token}(...)` but Rust does not export it. \
+                         Either remove it from `mukei_ffi_shim.h` or add the \
+                         matching `#[no_mangle] pub extern \"C\"` to `lib.rs`."
+                    );
+                }
+            }
+        }
+    }
 }
