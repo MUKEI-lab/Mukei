@@ -17,7 +17,6 @@
 
 #![cfg(feature = "rusqlite")]
 
-use parking_lot::Mutex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -74,13 +73,13 @@ impl AuditEntry {
 pub struct AuditLogWriter {
     /// Hex digest of the most recent row's `entry_hash`. `None` until
     /// the first row is written.
-    previous_hash: Mutex<Option<String>>,
+    previous_hash: tokio::sync::Mutex<Option<String>>,
 }
 
 impl Default for AuditLogWriter {
     fn default() -> Self {
         Self {
-            previous_hash: Mutex::new(None),
+            previous_hash: tokio::sync::Mutex::new(None),
         }
     }
 }
@@ -106,7 +105,7 @@ impl AuditLogWriter {
                 }
             })
             .await?;
-        *self.previous_hash.lock() = hash;
+        *self.previous_hash.lock().await = hash;
         Ok(())
     }
 
@@ -114,33 +113,16 @@ impl AuditLogWriter {
     /// `SHA256(previous_hash || canonical_fields)` and the rolling
     /// previous-hash is advanced on success.
     pub async fn record(&self, pool: &DatabasePool, entry: AuditEntry) -> Result<()> {
-        let previous = self.previous_hash.lock().clone();
+        // Serialize the read/compute/write/advance sequence. Holding a
+        // Tokio mutex across the awaited DB write is intentional here:
+        // audit-chain correctness is more important than write
+        // parallelism, and `tokio::sync::MutexGuard` is async-aware.
+        let mut previous_guard = self.previous_hash.lock().await;
+        let previous = previous_guard.clone();
         let prev_for_hash = previous.clone().unwrap_or_default();
+        let entry_hash = compute_entry_hash(&prev_for_hash, &entry);
 
-        // Canonical field set folded into the chain. Order matters and
-        // is fixed by this implementation (changing the order requires
-        // a chain reset; flagged in TRD \u00a76.1 amendment).
-        let mut h = Sha256::new();
-        h.update(prev_for_hash.as_bytes());
-        h.update([0u8]);
-        h.update(entry.tool_call_id.as_bytes());
-        h.update([0u8]);
-        h.update(entry.tool_name.as_bytes());
-        h.update([0u8]);
-        h.update(entry.args_json.as_bytes());
-        h.update([0u8]);
-        h.update(entry.fingerprint_sha256.as_bytes());
-        h.update([0u8]);
-        h.update(if entry.success { b"1" } else { b"0" });
-        h.update([0u8]);
-        h.update(entry.duration_ms.to_be_bytes());
-        h.update([0u8]);
-        if let Some(code) = &entry.error_code {
-            h.update(code.as_bytes());
-        }
-        let entry_hash = hex_helper(&h.finalize());
         let entry_hash_for_db = entry_hash.clone();
-
         let prev_for_db = previous.clone();
         let entry_for_db = entry.clone();
 
@@ -172,13 +154,16 @@ impl AuditLogWriter {
 
         // Advance the chain. Failure to write makes us NOT advance —
         // re-trying after a transient error preserves continuity.
-        *self.previous_hash.lock() = Some(entry_hash);
+        *previous_guard = Some(entry_hash);
         Ok(())
     }
 
     /// Current chain tip (testing / forensics).
     pub fn current_tip(&self) -> Option<String> {
-        self.previous_hash.lock().clone()
+        self.previous_hash
+            .try_lock()
+            .ok()
+            .and_then(|guard| guard.clone())
     }
 }
 
@@ -303,6 +288,28 @@ impl AuditLogReader {
     }
 }
 
+fn compute_entry_hash(previous_hash: &str, entry: &AuditEntry) -> String {
+    let mut h = Sha256::new();
+    h.update(previous_hash.as_bytes());
+    h.update([0u8]);
+    h.update(entry.tool_call_id.as_bytes());
+    h.update([0u8]);
+    h.update(entry.tool_name.as_bytes());
+    h.update([0u8]);
+    h.update(entry.args_json.as_bytes());
+    h.update([0u8]);
+    h.update(entry.fingerprint_sha256.as_bytes());
+    h.update([0u8]);
+    h.update(if entry.success { b"1" } else { b"0" });
+    h.update([0u8]);
+    h.update(entry.duration_ms.to_be_bytes());
+    h.update([0u8]);
+    if let Some(code) = &entry.error_code {
+        h.update(code.as_bytes());
+    }
+    hex_helper(&h.finalize())
+}
+
 const PREVIEW_MAX: usize = 256;
 
 fn truncate_preview(s: &str) -> String {
@@ -341,5 +348,65 @@ mod tests {
     fn fresh_writer_has_no_chain_tip() {
         let w = AuditLogWriter::new();
         assert!(w.current_tip().is_none());
+    }
+
+    #[tokio::test]
+    async fn concurrent_records_preserve_single_hash_chain() {
+        use crate::storage::pool::{DatabasePool, PooledConnectionExt};
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let pool = DatabasePool::open(&dir.path().join("audit.db")).unwrap();
+        pool.with_conn(|c| {
+            c.execute_batch(
+                r#"CREATE TABLE tool_audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conversation_id INTEGER,
+                    message_id INTEGER,
+                    tool_call_id TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    args_json TEXT NOT NULL,
+                    result_preview TEXT NOT NULL,
+                    success INTEGER NOT NULL,
+                    duration_ms INTEGER NOT NULL,
+                    error_code TEXT,
+                    fingerprint_sha256 TEXT NOT NULL,
+                    previous_hash TEXT,
+                    entry_hash TEXT NOT NULL
+                 );"#,
+            )?;
+            Ok::<_, DbError>(())
+        })
+        .await
+        .unwrap();
+
+        let writer = Arc::new(AuditLogWriter::new());
+        let entry = |id: &str| AuditEntry {
+            conversation_id: Some(1),
+            message_id: Some(1),
+            tool_call_id: id.to_string(),
+            tool_name: "test_tool".into(),
+            args_json: "{}".into(),
+            result_preview: "ok".into(),
+            success: true,
+            duration_ms: 1,
+            error_code: None,
+            fingerprint_sha256: format!("fp-{id}"),
+        };
+
+        let a = writer.clone();
+        let b = writer.clone();
+        let (first, second) =
+            tokio::join!(a.record(&pool, entry("a")), b.record(&pool, entry("b")));
+        first.unwrap();
+        second.unwrap();
+
+        assert_eq!(
+            AuditLogReader::verify_chain(&pool).await.unwrap(),
+            AuditChainStatus::Ok {
+                rows_checked: 2,
+                tip: writer.current_tip(),
+            }
+        );
     }
 }
