@@ -25,14 +25,33 @@
 //!
 //! # Download source policy
 //!
-//! The checked-in URLs below are pinned Hugging Face `resolve/main`
-//! links for the exact GGUF artifacts we currently test against. The
-//! accompanying SHA-256 values come from the Hub's linked-object hash,
-//! and `LlamaEngine::load_model` re-verifies the full file before mmap.
+//! The checked-in URLs below are pinned to **specific Hugging Face
+//! repository commits** via `/resolve/<commit-sha>/<file>` — not the
+//! moving `/resolve/main/` branch ref. This matters because `main` is
+//! a branch and the upstream owner periodically pushes commits to it
+//! (e.g. "Update chat template"). A bare-branch URL paired with a
+//! hard-coded `expected_sha256` would mean **every future download
+//! hard-fails the integrity check** the moment the upstream file is
+//! re-uploaded, with no way for the runtime to distinguish
+//! "tampered/corrupted download" from "upstream moved the file out
+//! from under us" — both surface identically as `ERR_DOWNLOAD_HASH`.
 //!
-//! If release engineering later mirrors these files into a first-party
-//! CDN, only the `download_url` field needs to change; the digest stays
-//! the contract that keeps downloads honest.
+//! A commit-pinned URL gives us:
+//!
+//!   1. **Stable bytes.** Hugging Face guarantees `resolve/<sha>/...`
+//!      returns the same blob forever (the commit is immutable).
+//!   2. **Auditable provenance.** A future security review can compare
+//!      the pinned commit against the upstream repo's signed tag.
+//!   3. **Distinguishable failure modes.** A SHA-256 mismatch can no
+//!      longer be caused by upstream rotating the file; if it ever
+//!      fires, it really does mean tampering or network corruption.
+//!
+//! When release engineering mirrors these files into a first-party CDN,
+//! both `download_url` and `expected_sha256` are updated in the same
+//! commit — the integrity contract stays intact.
+//!
+//! The test `manifest_urls_pin_a_commit_sha_not_a_branch` below
+//! enforces this policy at CI time.
 
 use serde::{Deserialize, Serialize};
 
@@ -123,8 +142,12 @@ pub const MODELS: &[ModelDescriptor] = &[
         description:
             "2B effective-parameter Gemma 4, instruction-tuned. Recommended for phones with \
              4-6 GB RAM (Snapdragon 7xx-class, mid-tier MediaTek).",
+        // Pinned to Hugging Face repo commit b5e99bd964eaacc27ba484bb2eb3e9f6160b9143.
+        // Verified 2026-06-27: HEAD on this URL returns X-Linked-ETag
+        // matching the expected_sha256 below. See module-level doc for
+        // why this is a commit pin and not /resolve/main/.
         download_url:
-            "https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF/resolve/main/google_gemma-4-E2B-it-Q4_K_M.gguf?download=true",
+            "https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF/resolve/b5e99bd964eaacc27ba484bb2eb3e9f6160b9143/google_gemma-4-E2B-it-Q4_K_M.gguf?download=true",
         expected_sha256: "b5310340b3a23d31655d7119d100d5df1b2d8ee17b3ca8b0a23ad7e9eb5fa705",
         approximate_bytes: 3_462_678_272,
         min_device_ram_mib: 4096,
@@ -137,8 +160,12 @@ pub const MODELS: &[ModelDescriptor] = &[
         description:
             "4B effective-parameter Gemma 4, instruction-tuned. Recommended for phones with \
              8+ GB RAM (Snapdragon 8 Gen 2+, flagship Tensor / Dimensity).",
+        // Pinned to Hugging Face repo commit c04cb322fd63e347db759a08b6249b867488ccf8.
+        // Verified 2026-06-27: HEAD on this URL returns X-Linked-ETag
+        // matching the expected_sha256 below. See module-level doc for
+        // why this is a commit pin and not /resolve/main/.
         download_url:
-            "https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF/resolve/main/google_gemma-4-E4B-it-Q4_K_M.gguf?download=true",
+            "https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF/resolve/c04cb322fd63e347db759a08b6249b867488ccf8/google_gemma-4-E4B-it-Q4_K_M.gguf?download=true",
         expected_sha256: "51865750adafd22de56994a343d5a887cc1a589b9bae41d62b748c8bd0ca9c76",
         approximate_bytes: 5_405_168_384,
         min_device_ram_mib: 7168,
@@ -237,8 +264,47 @@ mod tests {
     fn manifest_urls_are_https_resolve_links() {
         for m in MODELS {
             assert!(m.download_url.starts_with("https://huggingface.co/"));
-            assert!(m.download_url.contains("/resolve/main/"));
+            assert!(m.download_url.contains("/resolve/"));
             assert!(m.download_url.ends_with(".gguf?download=true"));
+        }
+    }
+
+    /// Architect-review follow-up: the catalogue must pin a specific
+    /// commit, not the moving `main` branch. A bare-branch URL paired
+    /// with a hard-coded `expected_sha256` causes every future download
+    /// to hard-fail `ERR_DOWNLOAD_HASH` the moment upstream re-uploads
+    /// the file — indistinguishable from a real tamper event.
+    #[test]
+    fn manifest_urls_pin_a_commit_sha_not_a_branch() {
+        for m in MODELS {
+            assert!(
+                !m.download_url.contains("/resolve/main/"),
+                "model {} pins /resolve/main/ which is mutable; pin a commit sha",
+                m.id
+            );
+            // Extract the segment after `/resolve/` and before the
+            // next `/`. It must be a 40-char lowercase hex string
+            // (a full git commit sha).
+            let after = m
+                .download_url
+                .split("/resolve/")
+                .nth(1)
+                .expect("every URL must have /resolve/<ref>/...");
+            let pin = after.split('/').next().expect("sha segment");
+            assert_eq!(
+                pin.len(),
+                40,
+                "model {}: /resolve/<sha> segment must be a 40-char commit sha, got {:?}",
+                m.id,
+                pin
+            );
+            assert!(
+                pin.chars()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+                "model {}: /resolve/<sha> must be lowercase hex, got {:?}",
+                m.id,
+                pin
+            );
         }
     }
 

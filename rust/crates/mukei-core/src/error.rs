@@ -37,6 +37,26 @@ pub enum MukeiError {
     /// before issuing the next `send_message`.
     #[error("bridge entry point is busy — another send_message is still streaming")]
     BridgeBusy,
+    /// A second `download_model` call targeted the **same destination
+    /// path** as a download that is still in flight. Two different
+    /// model ids download in parallel; two downloads of the *same*
+    /// model id (or the same bespoke URL → same dest path) would race
+    /// on a single `.partial` file with two independent SHA hashers,
+    /// and each task would only ever hash the bytes *it* wrote — i.e.
+    /// both could plausibly believe the file is intact and atomically
+    /// rename a corrupted GGUF into the path `LlamaEngine::load_model`
+    /// then mmaps. We reject the second call before any I/O happens.
+    ///
+    /// The QML side can either await the in-flight download's
+    /// `download_progress("complete:…")` event, or call
+    /// `stop_download()` to cancel it before re-issuing.
+    #[error("download already in flight for destination {dest}")]
+    DownloadBusy {
+        /// Absolute destination path of the in-flight download. Stable
+        /// enough for QML to dedup a UI prompt against, never contains
+        /// secret material.
+        dest: String,
+    },
 
     // ------------------------------------------------------------------
     // Resource exhaustion (TRD §38)
@@ -269,6 +289,7 @@ impl MukeiError {
             Self::CallbackGuardExpired => "ERR_CALLBACK_GUARD_EXPIRED",
             Self::BlockingJoinFailed(_) => "ERR_BLOCKING_JOIN",
             Self::BridgeBusy => "ERR_BRIDGE_BUSY",
+            Self::DownloadBusy { .. } => "ERR_DOWNLOAD_BUSY",
 
             Self::OOM => "ERR_OOM",
             Self::MemoryPreflightRejected(_) => "ERR_MEM_PREFLIGHT",
@@ -376,6 +397,10 @@ impl MukeiError {
             // surfaces it next to the other interaction-layer errors
             // (tool argument rejections, watchdog kicks, etc.).
             Self::BridgeBusy => ErrorClass::Agent,
+            // DownloadBusy is functionally the same UX-layer guard,
+            // just for the model downloader. Classifying it as Agent
+            // keeps the QML routing logic uniform.
+            Self::DownloadBusy { .. } => ErrorClass::Agent,
             Self::CrashLoopDetected { .. } => ErrorClass::Device,
             Self::Cancelled | Self::Invariant(_) | Self::Internal(_) => ErrorClass::Unknown,
         }
@@ -517,5 +542,22 @@ mod tests {
         let rendered = format!("{err}");
         assert!(rendered.contains("busy"));
         assert!(rendered.contains("send_message"));
+    }
+
+    /// Architect-review follow-up: `download_model` must reject a
+    /// re-entrant download of the same destination path to keep the
+    /// SHA-256 integrity check from being silently defeated by an
+    /// interleaved-writes race. Lock the stable error code and the
+    /// Agent classification so the QML side can localise the dialog.
+    #[test]
+    fn download_busy_has_stable_code_and_classification() {
+        let err = MukeiError::DownloadBusy {
+            dest: "/data/models/gemma-4-E2B-it-Q4_K_M.gguf".into(),
+        };
+        assert_eq!(err.error_code(), "ERR_DOWNLOAD_BUSY");
+        assert_eq!(err.classification(), ErrorClass::Agent);
+        let rendered = format!("{err}");
+        assert!(rendered.contains("already in flight"));
+        assert!(rendered.contains("gemma-4-E2B-it-Q4_K_M.gguf"));
     }
 }

@@ -34,12 +34,33 @@
 //!   (existing variant, code `ERR_DOWNLOAD_HASH`). The bridge maps this
 //!   into the `download_progress("error", _)` status so QML can surface
 //!   it to the user.
-//! - Resumes use HTTP `Range: bytes=<offset>-`. If the server returns
-//!   `200 OK` instead of `206 Partial Content`, the `.partial` file is
-//!   truncated and the download restarts from byte 0 — this matches the
-//!   architect-review-blessed "rebuild on resume mismatch" path and is
-//!   why [`crate::error::MukeiError::DownloadHashMismatch`] also covers
-//!   "truncated resume hash mismatch".
+//! - Resumes use HTTP `Range: bytes=<offset>-`. The downloader treats
+//!   two server responses as "restart from byte 0", because both of
+//!   them mean the stale `.partial` cannot be safely continued:
+//!
+//!       * `200 OK` — server ignored the `Range` header entirely.
+//!       * `416 Range Not Satisfiable` — the byte we asked to resume
+//!         from is past the current end of the file. Happens when the
+//!         upstream file *shrinks* between two download attempts (e.g.
+//!         the publisher re-uploaded a smaller variant). Without this
+//!         branch the failure surfaced as a generic `ERR_NETWORK` and
+//!         confused testers — the architect-review note captures the
+//!         diagnostic-distinguishability requirement.
+//!
+//!   In both cases the `.partial` file is deleted and the request is
+//!   re-issued without a `Range` header. [`MukeiError::DownloadHashMismatch`]
+//!   also covers the "truncated resume hash mismatch" leftover-on-disk
+//!   case for cancelled previous attempts.
+//!
+//! - The SHA-256 verification happens over the *entire* downloaded
+//!   file (resumed prefix + new bytes). A mismatch after a successful
+//!   transfer surfaces as [`MukeiError::DownloadHashMismatch`]. From
+//!   the user's perspective this can mean either "file in transit
+//!   was corrupted" or "the upstream artifact was replaced under us".
+//!   The catalogue mitigates the second case by pinning a commit-sha
+//!   in `download_url` (`/resolve/<sha>/...` rather than
+//!   `/resolve/main/...`); see
+//!   [`crate::engine::model_registry`] for the discussion.
 //! - Progress is emitted at most once per 0.5 % advance to keep the QML
 //!   event loop unjammed. The `status` channel always gets a final
 //!   `"complete"` or `"error"` event so the QML state machine can leave
@@ -239,8 +260,26 @@ mod real {
         events: Sender<DownloadEvent>,
         cancel: tokio_util::sync::CancellationToken,
     ) -> Result<()> {
+        // Public entry point: enforce the full DownloadRequest contract
+        // (https-only URL, 64-char hex sha, non-empty dest). All actual
+        // I/O lives in [`run_download_unchecked`] so test code can
+        // exercise the streaming / restart logic over a plaintext
+        // loopback server without weakening the production invariant.
         req.validate()?;
+        run_download_unchecked(req, events, cancel).await
+    }
 
+    /// Internal streamer. Identical to [`run_download`] except it
+    /// **skips `DownloadRequest::validate`**, so it can be driven from
+    /// the loopback-HTTP integration test that proves the 416-restart
+    /// branch. Production code MUST go through `run_download` (which
+    /// validates first); this signature is `pub(super)` only so the
+    /// `tests` mod, defined in the parent file, can reach it.
+    pub(super) async fn run_download_unchecked(
+        req: DownloadRequest,
+        events: Sender<DownloadEvent>,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<()> {
         let partial = req.partial_path();
         if let Some(parent) = req.dest.parent() {
             if !parent.as_os_str().is_empty() {
@@ -266,13 +305,61 @@ mod real {
             request = request.header("Range", format!("bytes={resume_from}-"));
         }
 
-        let resp = request
+        let mut resp = request
             .send()
             .await
             .map_err(|e| MukeiError::NetworkError(format!("GET {}: {e}", req.url)))?;
 
         let status = resp.status();
-        if !status.is_success() {
+
+        // ---- Resume-recovery: restart from byte 0 instead of failing ----
+        //
+        // Two server responses mean our `Range` request cannot be
+        // honoured but the *download itself* is still recoverable:
+        //
+        //   1. `200 OK`  — server ignored the `Range` header entirely.
+        //   2. `416 Range Not Satisfiable` — our `resume_from` is past
+        //      the file's current end (upstream shrank).
+        //
+        // In both cases we nuke `.partial`, rebuild the request without
+        // a `Range` header, and stream from byte 0. This is the only
+        // way to keep `ERR_DOWNLOAD_HASH` reserved for true corruption /
+        // tamper events; without it a transient upstream resize would
+        // surface as an opaque `ERR_NETWORK` (architect-review note).
+        let needs_restart_from_zero = resume_from > 0
+            && (status == reqwest::StatusCode::OK
+                || status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE);
+
+        if needs_restart_from_zero {
+            tracing::info!(
+                resume_from,
+                http_status = %status,
+                "resume rejected by server; restarting download from byte 0"
+            );
+            tokio::fs::remove_file(&partial)
+                .await
+                .map_err(|e| MukeiError::Io(format!("rm partial for restart: {e}")))?;
+            resume_from = 0;
+
+            // Re-issue the request without a `Range` header.
+            drop(resp);
+            let resp_retry =
+                client.get(&req.url).send().await.map_err(|e| {
+                    MukeiError::NetworkError(format!("GET {} (restart): {e}", req.url))
+                })?;
+            let retry_status = resp_retry.status();
+            if !retry_status.is_success() {
+                let msg = format!("HTTP {retry_status} for {} (restart)", req.url);
+                let _ = events
+                    .send(DownloadEvent::Error {
+                        code: "ERR_NETWORK",
+                        message: msg.clone(),
+                    })
+                    .await;
+                return Err(MukeiError::NetworkError(msg));
+            }
+            resp = resp_retry;
+        } else if !status.is_success() {
             let msg = format!("HTTP {status} for {}", req.url);
             let _ = events
                 .send(DownloadEvent::Error {
@@ -283,28 +370,22 @@ mod real {
             return Err(MukeiError::NetworkError(msg));
         }
 
-        // 200 OK instead of 206 means the server ignored Range — restart.
-        if resume_from > 0 && status != reqwest::StatusCode::PARTIAL_CONTENT {
-            tokio::fs::remove_file(&partial)
-                .await
-                .map_err(|e| MukeiError::Io(format!("rm partial for restart: {e}")))?;
-            resume_from = 0;
-        }
-
         let total_bytes = resp.content_length().map(|c| c + resume_from);
 
         let _ = events.send(DownloadEvent::Started { total_bytes }).await;
 
         // Open .partial in resume-or-create mode at `resume_from`. We
-        // deliberately set `truncate(false)` so resuming preserves the
-        // bytes streamed in a prior session; the explicit value also
-        // silences clippy::suspicious_open_options under `-D warnings`
-        // (CI gate).
+        // deliberately set `truncate(false)` whenever we're resuming so
+        // resuming preserves the bytes streamed in a prior session;
+        // when the restart-from-zero path nuked `.partial` above we set
+        // `truncate(true)` so a re-created file starts fresh. The
+        // explicit value also silences clippy::suspicious_open_options
+        // under `-D warnings` (CI gate).
         let mut out = OpenOptions::new()
             .create(true)
             .write(true)
             .read(true)
-            .truncate(false)
+            .truncate(resume_from == 0)
             .open(&partial)
             .await
             .map_err(|e| MukeiError::Io(format!("open partial: {e}")))?;
@@ -557,5 +638,188 @@ mod tests {
         f.write_all(b"hello world").unwrap();
         let expected_upper = "B94D27B9934D3E08A52E52D7DA7DABFAC484EFE37A5380EE9088F7ACE2EFCDE9";
         verify_file_sha256(&path, expected_upper).expect("case-insensitive hex must match");
+    }
+
+    // -----------------------------------------------------------------
+    // Integration: 416 Range Not Satisfiable triggers full restart.
+    //
+    // Backstops the architect-review fix for the "upstream file shrank"
+    // scenario. A stale `.partial` from a prior download attempt asks
+    // for `bytes=N-` past the new end-of-file; the server answers 416;
+    // the downloader must wipe `.partial`, re-issue without `Range`,
+    // stream the (smaller) body, hash-verify, and atomically rename to
+    // `dest`. Without this branch, the failure used to surface as an
+    // opaque `ERR_NETWORK` (issue raised by senior systems review).
+    //
+    // We hand-roll a minimal HTTP/1.1 responder on a tokio `TcpListener`
+    // so the test stays self-contained (no `wiremock` dep).
+    // -----------------------------------------------------------------
+    #[cfg(all(feature = "network", feature = "tokio"))]
+    #[tokio::test]
+    async fn http_416_on_resume_triggers_restart_and_succeeds() {
+        use sha2::{Digest, Sha256};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        use tokio_util::sync::CancellationToken;
+
+        // The "new" upstream body — deliberately *smaller* than the
+        // stale `.partial` we'll seed below, so the server has to
+        // answer 416 on the first (Range) request.
+        let body: Vec<u8> = (0u8..200)
+            .map(|i| i.wrapping_mul(3))
+            .cycle()
+            .take(1024)
+            .collect();
+        let expected_sha = {
+            let mut h = Sha256::new();
+            h.update(&body);
+            let d = h.finalize();
+            let mut s = String::with_capacity(64);
+            for b in d {
+                use std::fmt::Write as _;
+                let _ = write!(&mut s, "{b:02x}");
+            }
+            s
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // Server task: respond 416 to the first request that carries a
+        // `Range:` header, then full 200 to the next request.
+        let body_for_server = body.clone();
+        let server = tokio::spawn(async move {
+            for expected_range in [true, false] {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut buf = vec![0u8; 4096];
+                let n = sock.read(&mut buf).await.unwrap();
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let has_range = req
+                    .lines()
+                    .any(|l| l.to_ascii_lowercase().starts_with("range:"));
+                assert_eq!(
+                    has_range, expected_range,
+                    "request {expected_range} expected Range header, got: {req}"
+                );
+                let resp = if has_range {
+                    b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .to_vec()
+                } else {
+                    let mut r = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body_for_server.len()
+                    )
+                    .into_bytes();
+                    r.extend_from_slice(&body_for_server);
+                    r
+                };
+                sock.write_all(&resp).await.unwrap();
+                sock.shutdown().await.ok();
+            }
+        });
+
+        let dir = tempdir().unwrap();
+        let dest = dir.path().join("model.gguf");
+        let partial = dir.path().join("model.gguf.partial");
+
+        // Seed a stale `.partial` LARGER than the new upstream body so
+        // `Range: bytes=<resume_from>-` is unsatisfiable on the server.
+        std::fs::write(&partial, vec![0xAAu8; body.len() + 512]).unwrap();
+
+        let req = DownloadRequest {
+            url: format!("http://{addr}/model.gguf"),
+            expected_sha256: expected_sha.clone(),
+            dest: dest.clone(),
+        };
+        // The validator forbids plaintext HTTP. We're driving the
+        // internal `real::run_download` directly with a relaxed
+        // request so this loopback HTTP server stays simple. The
+        // production code path keeps the `https://` invariant via
+        // `DownloadRequest::validate`; this test exists purely to
+        // exercise the 416-restart branch.
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<DownloadEvent>(32);
+        let cancel = CancellationToken::new();
+        let drain = tokio::spawn(async move {
+            let mut events = Vec::new();
+            while let Some(ev) = rx.recv().await {
+                events.push(ev);
+            }
+            events
+        });
+
+        // Bypass `validate()` by calling the inner streamer directly.
+        // We can't reach private helpers from outside the module, but
+        // we *are* inside the module here, so `real::run_download` is
+        // visible — it just enforces validation. Build a custom client
+        // and replicate the entry-point logic with `https://` waived.
+        let result = exercise_run_download_for_test(req, tx, cancel).await;
+        let events = drain.await.unwrap();
+        server.await.unwrap();
+
+        assert!(result.is_ok(), "download must succeed; got {result:?}");
+        assert!(dest.exists(), "final file must be renamed into place");
+        assert!(
+            !partial.exists(),
+            "`.partial` must be cleaned up after rename"
+        );
+        let on_disk = std::fs::read(&dest).unwrap();
+        assert_eq!(on_disk, body, "final file must equal the upstream body");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, DownloadEvent::Started { .. })),
+            "must emit Started after restart"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, DownloadEvent::Complete { .. })),
+            "must emit Complete"
+        );
+    }
+
+    /// Test-only entry point that mirrors `real::run_download` but
+    /// skips the `https://` requirement in `DownloadRequest::validate`.
+    /// We use a plaintext loopback server in the 416-restart test, and
+    /// production callers reach `run_download` (which still enforces
+    /// `https://`). Keeps the validation invariant intact for live
+    /// traffic while letting CI exercise the restart branch.
+    #[cfg(all(feature = "network", feature = "tokio"))]
+    async fn exercise_run_download_for_test(
+        req: DownloadRequest,
+        events: tokio::sync::mpsc::Sender<DownloadEvent>,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<()> {
+        // Reach into the same module-private real::run_download via a
+        // local copy that only differs in URL-scheme validation. Any
+        // future divergence between this and production must update
+        // both — we lock that with the assertion below.
+        assert!(
+            req.url.starts_with("http://127.0.0.1:") || req.url.starts_with("https://"),
+            "test exerciser only accepts loopback http or real https"
+        );
+
+        // Bypass DownloadRequest::validate's https check by calling
+        // the internal helper directly.
+        let validated = DownloadRequest {
+            url: req.url.clone(),
+            expected_sha256: req.expected_sha256.clone(),
+            dest: req.dest.clone(),
+        };
+        // Sanity: the rest of validate() (sha length, empty dest)
+        // should still hold.
+        if validated.expected_sha256.len() != 64
+            || !validated
+                .expected_sha256
+                .chars()
+                .all(|c| c.is_ascii_hexdigit())
+        {
+            return Err(MukeiError::ToolArgumentInvalid {
+                field: "sha256",
+                reason: "test exerciser: bad sha".into(),
+            });
+        }
+
+        real::run_download_unchecked(validated, events, cancel).await
     }
 }

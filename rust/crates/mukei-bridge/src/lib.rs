@@ -50,6 +50,7 @@ mod core_saf {
     }
 }
 
+use std::collections::HashSet;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -105,6 +106,56 @@ static GLOBAL_AUDIT_LOG_WRITER: Lazy<Arc<AuditLogWriter>> =
 /// Shared validated config snapshot so we can rebuild the loop when web-search
 /// credentials rotate.
 static GLOBAL_CONFIG: Lazy<Mutex<Option<MukeiConfig>>> = Lazy::new(|| Mutex::new(None));
+
+/// Global per-destination-path registry of in-flight downloads.
+///
+/// # Why a set, not a single flag?
+///
+/// We *want* two different models (e.g. E2B and E4B) to download in
+/// parallel — they target distinct `.partial` files and never race.
+/// What we must reject is a second call targeting the **same dest path**
+/// as a download already in flight, because two `tokio::fs::File` handles
+/// would then write through independent cursors into the same `.partial`,
+/// each task's SHA-256 hasher would only see the bytes *it* wrote, and
+/// both tasks could plausibly atomically-rename a corrupted GGUF into
+/// the path `LlamaEngine::load_model` mmaps. The integrity check would
+/// be silently defeated by interleaved writes.
+///
+/// Keyed on the canonical absolute destination path; entries are
+/// inserted in `download_model` *before* the streaming task spawns and
+/// removed by [`DownloadSlotGuard::Drop`], which runs on every exit
+/// path including panic-unwind (workspace mandates `panic = "unwind"`).
+static GLOBAL_DOWNLOADS_IN_FLIGHT: Lazy<Arc<Mutex<HashSet<std::path::PathBuf>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(HashSet::new())));
+
+/// RAII guard that removes its destination path from
+/// [`GLOBAL_DOWNLOADS_IN_FLIGHT`] on `Drop`. Pairs with the same RAII
+/// pattern used by [`BusyGuard`]: a manual remove at the end of the
+/// spawned task would be skipped on panic-unwind, leaving the slot
+/// permanently "in flight" and soft-locking every future download of
+/// the same model.
+///
+/// The handle clones an `Arc` of the registry plus an owned
+/// `PathBuf` so `Drop` can spawn an async task on the shared runtime
+/// without borrowing from the originating future. We intentionally
+/// avoid `blocking_lock()` to keep `Drop` runtime-agnostic.
+struct DownloadSlotGuard {
+    registry: Arc<Mutex<HashSet<std::path::PathBuf>>>,
+    dest: std::path::PathBuf,
+}
+
+impl Drop for DownloadSlotGuard {
+    fn drop(&mut self) {
+        // `Drop` cannot `await`. Fire-and-forget the release on the
+        // shared runtime; the path-removal is idempotent (HashSet) so
+        // a duplicate release is harmless.
+        let registry = self.registry.clone();
+        let dest = std::mem::take(&mut self.dest);
+        mukei_core::runtime::get().spawn(async move {
+            registry.lock().await.remove(&dest);
+        });
+    }
+}
 
 /// Default on-device model directory. Testers can override this via
 /// `set_model_dir` before calling `download_model`; otherwise the
@@ -254,6 +305,11 @@ pub mod ffi {
         fn stop_generation(self: Pin<&mut MukeiAgent>);
         #[qinvokable]
         fn download_model(self: Pin<&mut MukeiAgent>, url: QString, sha256: QString);
+        /// Cancel an in-flight `download_model` call. Independent of
+        /// `stop_generation` so a user pressing the chat Stop button
+        /// never kills a model download running underneath the UI.
+        #[qinvokable]
+        fn stop_download(self: Pin<&mut MukeiAgent>);
         #[qinvokable]
         fn clear_conversation(self: Pin<&mut MukeiAgent>);
         #[qinvokable]
@@ -314,7 +370,18 @@ pub mod ffi {
 }
 
 pub struct MukeiAgentRust {
+    /// Cancellation token for the **chat / inference** path only
+    /// (`send_message` ↔ `stop_generation`). Architect-review
+    /// follow-up: this used to be shared with the download path, which
+    /// meant `stop_generation()` silently cancelled any in-flight
+    /// `download_model` running in the background. The two surfaces
+    /// now own independent tokens; see [`Self::download_cancel`].
     cancel_token: CancellationToken,
+    /// Cancellation token for the **model download** path only
+    /// (`download_model` ↔ `stop_download`). Independent of
+    /// `cancel_token` so a user pressing the chat Stop button never
+    /// kills a multi-gigabyte download running underneath the UI.
+    download_cancel: CancellationToken,
     state: Arc<Mutex<String>>,
     /// Re-entrancy guard for `send_message` (user priority follow-up).
     /// The flag is flipped from `false` to `true` by the synchronous
@@ -331,6 +398,11 @@ pub struct MukeiAgentRust {
     /// would skip Drop on panic and soft-lock the bridge for the rest
     /// of the app's life — architect-review follow-up confirmed this
     /// is the correct primitive.
+    ///
+    /// **Scope is chat-only.** `download_model` has its own re-entrancy
+    /// mechanism via [`GLOBAL_DOWNLOADS_IN_FLIGHT`] + [`DownloadSlotGuard`]
+    /// because a chat turn and a download are not mutually exclusive,
+    /// but two downloads of the same dest path are.
     busy: Arc<AtomicBool>,
 }
 
@@ -354,6 +426,7 @@ impl Default for MukeiAgentRust {
     fn default() -> Self {
         Self {
             cancel_token: CancellationToken::new(),
+            download_cancel: CancellationToken::new(),
             state: Arc::new(Mutex::new("UNINITIALIZED".to_string())),
             busy: Arc::new(AtomicBool::new(false)),
         }
@@ -586,9 +659,26 @@ impl MukeiAgentRust {
         });
     }
 
+    /// Cancel the in-flight chat/inference stream (if any).
+    ///
+    /// **Scope is chat-only.** Architect-review follow-up: this used
+    /// to share a token with [`Self::download_model`], which meant a
+    /// user pressing the chat Stop button also killed any model
+    /// download running in the background — two unrelated features
+    /// cross-wired through one cancellation source. The two surfaces
+    /// now own independent tokens; call [`Self::stop_download`] to
+    /// cancel a download.
     pub fn stop_generation(mut self: Pin<&mut Self>) {
         self.cancel_token.cancel();
         self.cancel_token = CancellationToken::new();
+    }
+
+    /// Cancel the in-flight model download (if any). Independent of
+    /// `stop_generation` so pressing the chat Stop button never kills
+    /// a multi-gigabyte model fetch running underneath the UI.
+    pub fn stop_download(mut self: Pin<&mut Self>) {
+        self.download_cancel.cancel();
+        self.download_cancel = CancellationToken::new();
     }
 
     /// Kick off a streaming GGUF download (TRD §8.1 / REQ-MOD-01).
@@ -601,6 +691,23 @@ impl MukeiAgentRust {
     ///    64-hex digest. Useful for tester QA before the release
     ///    engineering pass pins the final CDN URL.
     ///
+    /// # Re-entrancy contract
+    ///
+    /// Two `download_model` calls targeting **different** dest paths
+    /// (e.g. E2B and E4B at the same time) run in parallel. Two calls
+    /// targeting the **same** dest path are rejected: the second one
+    /// emits a single `error:ERR_DOWNLOAD_BUSY:…` event and exits.
+    /// This is what stops two `tokio::fs::File` handles from racing on
+    /// one `.partial`, which would otherwise let each task hash only
+    /// the bytes *it* wrote and atomically rename a corrupted GGUF
+    /// into the model directory.
+    ///
+    /// # Cancellation
+    ///
+    /// Uses `self.download_cancel`, not `self.cancel_token`. The chat
+    /// Stop button (`stop_generation`) and the download Stop button
+    /// (`stop_download`) are wired through independent tokens.
+    ///
     /// Progress comes back through `download_progress(progress, status)`:
     /// * `started:<bytes|unknown>`
     /// * `downloading:<bytes_downloaded>`
@@ -608,7 +715,9 @@ impl MukeiAgentRust {
     /// * `error:<ERR_CODE>:<message>`
     pub fn download_model(self: Pin<&mut Self>, url: QString, sha256: QString) {
         let qt = self.qt_thread();
-        let cancel = self.cancel_token.clone();
+        // Architect-review follow-up: use the *download-only* token so
+        // `stop_generation()` no longer silently cancels the download.
+        let cancel = self.download_cancel.clone();
         let url_or_id = url.to_string();
         let sha = sha256.to_string();
 
@@ -626,6 +735,38 @@ impl MukeiAgentRust {
                     });
                     return;
                 }
+            };
+
+            // --- Per-destination re-entrancy guard -------------------
+            //
+            // Insert `req.dest` into the global in-flight registry
+            // BEFORE spawning any I/O. A second call that observes the
+            // path already-present is rejected with `ERR_DOWNLOAD_BUSY`
+            // and emits no side effects on disk. Release is RAII via
+            // [`DownloadSlotGuard`], which fires even on panic-unwind
+            // (workspace mandates `panic = "unwind"`).
+            {
+                let mut in_flight = GLOBAL_DOWNLOADS_IN_FLIGHT.lock().await;
+                if in_flight.contains(&req.dest) {
+                    drop(in_flight);
+                    let err = mukei_core::error::MukeiError::DownloadBusy {
+                        dest: req.dest.to_string_lossy().into_owned(),
+                    };
+                    let code = err.error_code().to_string();
+                    let message = err.to_string();
+                    let _ = qt.queue(move |mut qobject| {
+                        qobject.as_mut().download_progress(
+                            0.0,
+                            QString::from(format!("error:{code}:{message}")),
+                        );
+                    });
+                    return;
+                }
+                in_flight.insert(req.dest.clone());
+            }
+            let _slot_guard = DownloadSlotGuard {
+                registry: GLOBAL_DOWNLOADS_IN_FLIGHT.clone(),
+                dest: req.dest.clone(),
             };
 
             let dest_for_status = req.dest.clone();
@@ -943,5 +1084,106 @@ mod busy_guard_tests {
             let _g2 = BusyGuard(flag.clone());
         }
         assert!(!flag.load(Ordering::Acquire));
+    }
+}
+
+#[cfg(test)]
+mod download_guard_tests {
+    //! Re-entrancy and cancellation regression tests for the model
+    //! downloader — architect-review follow-up. These tests live in
+    //! the bridge crate because the guard primitives ([`DownloadSlotGuard`],
+    //! the global in-flight set) are bridge-owned. They use only
+    //! pure-stdlib + tokio primitives so they build on every host.
+
+    use super::{DownloadSlotGuard, GLOBAL_DOWNLOADS_IN_FLIGHT};
+    use std::path::PathBuf;
+    use tokio_util::sync::CancellationToken;
+
+    /// Two cancellation tokens used by the bridge — the chat token and
+    /// the download token — must be independent. A user pressing the
+    /// chat Stop button cannot kill an in-flight download, and vice
+    /// versa. This is the invariant `download_model` relies on when it
+    /// clones `self.download_cancel` instead of `self.cancel_token`.
+    #[tokio::test]
+    async fn chat_and_download_cancel_tokens_are_independent() {
+        let chat = CancellationToken::new();
+        let download = CancellationToken::new();
+        chat.cancel();
+        assert!(chat.is_cancelled(), "chat token must be cancelled");
+        assert!(
+            !download.is_cancelled(),
+            "cancelling chat must not cascade to the download token"
+        );
+        download.cancel();
+        assert!(download.is_cancelled(), "download token cancels separately");
+    }
+
+    /// Inserting a dest path into the global in-flight set must reject
+    /// a second concurrent attempt at the same path. Drop of the slot
+    /// guard then frees the slot for a future attempt. This locks the
+    /// behaviour that makes interleaved-writes corruption impossible.
+    #[tokio::test]
+    async fn per_destination_slot_rejects_concurrent_same_dest() {
+        let dest = PathBuf::from("/tmp/mukei-test/per-dest-slot.gguf");
+
+        // First insertion succeeds.
+        {
+            let mut s = GLOBAL_DOWNLOADS_IN_FLIGHT.lock().await;
+            assert!(!s.contains(&dest));
+            s.insert(dest.clone());
+        }
+
+        // A second call would see the path present — the
+        // download_model body returns ERR_DOWNLOAD_BUSY in that case.
+        {
+            let s = GLOBAL_DOWNLOADS_IN_FLIGHT.lock().await;
+            assert!(
+                s.contains(&dest),
+                "a second call must observe the dest already in flight"
+            );
+        }
+
+        // Drop the guard. The Drop impl spawns a release on the shared
+        // runtime; yield until the release fires.
+        {
+            let _guard = DownloadSlotGuard {
+                registry: GLOBAL_DOWNLOADS_IN_FLIGHT.clone(),
+                dest: dest.clone(),
+            };
+        }
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+            let s = GLOBAL_DOWNLOADS_IN_FLIGHT.lock().await;
+            if !s.contains(&dest) {
+                return;
+            }
+            drop(s);
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("DownloadSlotGuard::Drop must release the slot eventually");
+    }
+
+    /// Different dest paths must NOT contend with each other — the
+    /// E2B and E4B Gemma 4 variants live at different filenames and
+    /// can legitimately download in parallel. A naive single-flag
+    /// implementation would block them; the per-dest set must not.
+    #[tokio::test]
+    async fn different_destinations_do_not_block_each_other() {
+        let a = PathBuf::from("/tmp/mukei-test/model-a.gguf");
+        let b = PathBuf::from("/tmp/mukei-test/model-b.gguf");
+
+        let mut s = GLOBAL_DOWNLOADS_IN_FLIGHT.lock().await;
+        // Clear any state left by other tests.
+        s.remove(&a);
+        s.remove(&b);
+
+        assert!(!s.contains(&a));
+        assert!(!s.contains(&b));
+        s.insert(a.clone());
+        s.insert(b.clone());
+        assert!(s.contains(&a) && s.contains(&b));
+
+        s.remove(&a);
+        s.remove(&b);
     }
 }
