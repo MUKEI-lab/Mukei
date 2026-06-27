@@ -37,15 +37,14 @@
 //! - Resumes use HTTP `Range: bytes=<offset>-`. The downloader treats
 //!   two server responses as "restart from byte 0", because both of
 //!   them mean the stale `.partial` cannot be safely continued:
-//!
-//!       * `200 OK` — server ignored the `Range` header entirely.
-//!       * `416 Range Not Satisfiable` — the byte we asked to resume
-//!         from is past the current end of the file. Happens when the
-//!         upstream file *shrinks* between two download attempts (e.g.
-//!         the publisher re-uploaded a smaller variant). Without this
-//!         branch the failure surfaced as a generic `ERR_NETWORK` and
-//!         confused testers — the architect-review note captures the
-//!         diagnostic-distinguishability requirement.
+//!   - `200 OK` — server ignored the `Range` header entirely.
+//!   - `416 Range Not Satisfiable` — the byte we asked to resume from
+//!     is past the current end of the file. Happens when the upstream
+//!     file *shrinks* between two download attempts (e.g. the publisher
+//!     re-uploaded a smaller variant). Without this branch the failure
+//!     surfaced as a generic `ERR_NETWORK` and confused testers — the
+//!     architect-review note captures the
+//!     diagnostic-distinguishability requirement.
 //!
 //!   In both cases the `.partial` file is deleted and the request is
 //!   re-issued without a `Range` header. [`MukeiError::DownloadHashMismatch`]
