@@ -140,6 +140,20 @@ mukei-ffi-shim                                                3 passed
   `from_non_null(NonNull<Inner>)` (architect review GH #10). Re-bind is
   `Inner::bump()`; permanent destroy is `Inner::tombstone()`
   (architect review GH #9).
+- **Storage contract (TRD §6 / BS §10).** Single `DatabasePool` opened
+  via `DatabasePool::open` or `open_with_cipher_key` (SQLCipher gated
+  on `feature = "sqlcipher"`). All async DB work routes through
+  `PooledConnectionExt::with_conn` which wraps the synchronous
+  `rusqlite` closure in `spawn_blocking`. Pool defaults:
+  `max_size = 8`, `WAL`, `synchronous = NORMAL`, `foreign_keys = ON`,
+  `busy_timeout = 5000`. SQLCipher key bytes are bound via `PRAGMA key`
+  inside `with_init` and `Zeroize`d before the closure exits.
+- **Migrator (TRD §6.1).** `Migrator::list_available()` parses
+  `migrations/V{nnn}__{name}.sql`, computes a SHA-256 over each body,
+  and `apply_pending(pool)` runs each pending migration in its own
+  transaction. A non-contiguous applied set surfaces
+  `MukeiError::MigrationOrderConflict { expected, applied }` so the
+  bridge cannot silently DDL around the schema.
 - **AgentLoop graceful degrade (TRD §2.3).** `agent/loop_.rs` is the
   single inference caller. Parse failures, validator rejections,
   no-progress backoff, and abuse-blocked tools all surface as

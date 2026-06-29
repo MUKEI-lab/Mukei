@@ -97,6 +97,26 @@ Documentation index (under `docs/`):
   (downloads). `stop_generation()` rotates only the chat token;
   `stop_download()` rotates only the download token. The chat Stop
   button no longer silently kills a model download.
+- **Storage pool (TRD §6).** `DatabasePool` is `r2d2` + `r2d2_sqlite`,
+  with `open(path)` for plain SQLite and
+  `open_with_cipher_key(path, unwrapped_key)` for the SQLCipher path
+  (`feature = "sqlcipher"`). The cipher path binds the key via
+  `PRAGMA key = x'<hex>'` inside `with_init`, then `Zeroize`s the
+  bytes before the closure exits. All async DB work MUST go through
+  `PooledConnectionExt::with_conn(|c| { ... })` which `spawn_blocking`s
+  the synchronous closure; a `JoinError` surfaces as
+  `MukeiError::BlockingJoinFailed`.
+- **Migrator (TRD §6.1).** `Migrator::list_available()` reads
+  `migrations/V{nnn}__{name}.sql` in strict ascending order and
+  computes a SHA-256 checksum of each body. `apply_pending(pool)` is
+  the single mutation entry point; a non-contiguous applied set
+  surfaces `MukeiError::MigrationOrderConflict { expected, applied }`
+  (Issue #12, REQ-DB-04).
+- **SAF registry (TRD §5.4).** `SafRegistry::hydrate_from_pool`
+  re-reads every non-revoked row from `saf_tokens` at boot;
+  `persist_upsert` / `persist_revoke` mirror in-memory mutations back
+  to disk. `resolve()` never returns a raw filesystem path; the
+  resolved target is the app-internal cache UUID.
 - **AgentLoop graceful degrade (TRD §2.3).** The ReAct loop in
   `agent/loop_.rs` is the **only** caller of
   `engine::llama_wrapper::run_inference`. Parse failures, partial

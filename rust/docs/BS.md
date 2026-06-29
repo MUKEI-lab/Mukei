@@ -706,20 +706,25 @@ A pre-commit test (`test_no_plaintext_secret_in_repo`) greps the entire repo for
 
 ## 10. Concurrency Model
 
-### 10.1 Writer Rule
+### 10.1 Pool + spawn-blocking rule
 
-> Exactly ONE writer at a time, period.
+> Async code MUST NOT hold a `rusqlite::Connection` across `.await`.
 
-Writers:
+Live contract:
 
-- Rust background indexer (RAG embedder).
-- QML/Flow action handlers (message lifecycle).
-
-Locking strategy:
-
-- A `Mutex<DbConn>` over the rusqlite connection.
-- All writes go through a single async-st Tokio task (`db_writer`).
-- QML never writes directly; it enqueues intent messages on an MPSC channel.
+- The crate exposes one `DatabasePool` (`r2d2` + `r2d2_sqlite`), opened
+  via `DatabasePool::open` or `DatabasePool::open_with_cipher_key`
+  (SQLCipher gated on `feature = "sqlcipher"`).
+- All async DB work goes through
+  `PooledConnectionExt::with_conn(|c| { ... })` which wraps the
+  synchronous closure in `tokio::task::spawn_blocking`. A `JoinError`
+  surfaces as `MukeiError::BlockingJoinFailed`.
+- Pool defaults: `max_size = 8`, `journal_mode = WAL`,
+  `synchronous = NORMAL`, `foreign_keys = ON`, `busy_timeout = 5000`.
+- SQLCipher key bytes are bound via `PRAGMA key = x'<hex>'` inside the
+  pool's `with_init` and `Zeroize`d immediately afterwards.
+- WAL gives multiple readers; writers serialise naturally on the
+  busy-timeout fence.
 
 ### 10.2 Lock Ordering
 
@@ -741,9 +746,17 @@ Reads run from Tokio tasks using `tokio::sync::RwLock`. WAL allows concurrent re
 
 `generation: u64` on the Source QObject pins the token's owner. Late tokens = dropped at FFI edge.
 
-### 10.5 FailureTracker Concurrency
+### 10.5 FailureTracker / Audit Concurrency
 
-A `FailureTrace` is `Send + Sync`. It does not contain locks but does have a `Vec<CallRecord>` updated atomically per attempt (REQ-AGT-04).
+- `FailureTracker` and `OutputRepeatTracker` are guarded by
+  `parking_lot::Mutex` and are reset per turn via
+  `ToolExecutor::reset_for_new_turn`.
+- `AuditLogWriter` serialises chain advancement with a
+  `tokio::sync::Mutex` so two concurrent `record()` calls cannot tear
+  the `previous_hash` linkage. `AuditLogReader::verify_chain` is
+  read-only (no contention with the writer) and walks rows in `rowid`
+  order to recompute every `entry_hash` (REQ-SEC-03, architect review
+  GH #19).
 
 ---
 

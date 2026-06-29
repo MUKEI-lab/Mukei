@@ -3291,7 +3291,59 @@ pub async fn execute(
 
 ## 6. SQLite Schema & Migrations
 
-### 6.1 Database Schema — `V001__schema.sql` (BUGFIX v0.6)
+**Authoritative source:** `rust/crates/mukei-core/src/storage/{mod,pool,migrations,saf,recovery,audit_log}.rs` + the `migrations/V***__*.sql` files.
+
+### 6.0 Current storage contract
+
+- The crate exposes a single `DatabasePool` (`r2d2` + `r2d2_sqlite`).
+  Construction goes through `DatabasePool::open(path)` for the plain
+  path, and `DatabasePool::open_with_cipher_key(path, unwrapped_key)`
+  for the SQLCipher path (`feature = "sqlcipher"`). The cipher path
+  binds the key via `PRAGMA key = x'<hex>'` inside `with_init`, then
+  `Zeroize`s the key buffer before the closure exits — so the key
+  never lingers in heap memory once SQLCipher has consumed it.
+- Pool defaults: `max_size = 8`, `journal_mode = WAL`,
+  `synchronous = NORMAL`, `foreign_keys = ON`, `busy_timeout = 5000`.
+- **Golden Rule (TRD §2.4).** All async DB calls MUST go through
+  `PooledConnectionExt::with_conn(|c| { ... })`, which wraps the
+  synchronous `rusqlite` work in `tokio::task::spawn_blocking` and
+  maps a tokio `JoinError` to `MukeiError::BlockingJoinFailed`.
+  `blocking_acquire()` is the only sync escape hatch and is callable
+  only from `spawn_blocking` contexts already.
+- `DbError` is the internal pool error (`PoolTimeout | Sqlite | Manager`);
+  it converts into `MukeiError::DatabaseInitFailed(_)` so QML always
+  sees a stable `ERR_DB_INIT` code.
+- The bridge crate hydrates three persisted surfaces on boot, in this
+  order: `Migrator::apply_pending` (§6.1), `AuditLogWriter::hydrate_from_pool`
+  (§6.4), then `SafRegistry::hydrate_from_pool` (§5.4). Each helper
+  consumes the pool through `with_conn` so the boot path is uniform.
+
+### 6.1 Database Schema (current contract + historical sketch)
+
+**Migrator surface** (live code):
+
+- Migrations live as raw `V{nnn}__{name}.sql` files inside
+  `migrations/`. `MIGRATIONS_DIR = "migrations"` and
+  `MIGRATION_FILE_PREFIX = "V"` are exported constants so the bridge
+  can resolve the path uniformly across desktop and Android.
+- `Migrator::list_available()` returns `(id, name, body)` in strict
+  ascending order, computing a SHA-256 checksum of the body so a
+  future audit can compare against the row stored in
+  `migrations_applied`.
+- `Migrator::pending(available, applied)` filters strictly by
+  `id > max_applied`; a non-contiguous applied set (e.g. `[1, 3]` then
+  a new `V004`) surfaces `MukeiError::MigrationOrderConflict {
+  expected, applied }` instead of silently accepting drift.
+- `Migrator::apply_pending(pool)` is the single mutation entry point;
+  the bridge MUST NOT issue ad-hoc DDL outside this path
+  (PRD REQ-DB-04). Each migration runs in its own SQLite transaction
+  and on success inserts a `MigrationRecord { id, name, applied_at,
+  checksum }` into `migrations_applied`.
+
+The legacy code block below predates this design and is retained for
+historical context only.
+
+#### 6.1.legacy Database Schema — `V001__schema.sql` (BUGFIX v0.6)
 
 > **🛡️ BUGFIX v0.6 (Bug #2, Bug #10, Bug #11):** The previous schema enumerated only `conversations`, `messages`, `chunks`, `config`. This caused three class-A defects:
 > 1. PRD §5.2 REQ-STATE-01 requires a `recovery_state` table to resume partial LLM streams after an OS kill — missing entirely.
