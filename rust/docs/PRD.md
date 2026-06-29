@@ -72,7 +72,7 @@ Current on-device AI apps assume a "Happy Path": stable RAM, infinite battery, p
 ## 3. Goals, Non-Goals & Success Metrics
 
 ### 3.1 V1 Goals (The Fault-Tolerant MVP)
-*   **G1: Zero-Crash FFI Boundary:** The Rust Core and Qt UI must never segfault or panic across the CXX-Qt bridge, even under extreme memory pressure.
+*   **G1: Zero-Crash FFI Boundary:** The Rust Core and Qt UI must never segfault or panic across the CXX-Qt bridge, even under extreme memory pressure. Workspace mandates `panic = "unwind"` so RAII guards (`BusyGuard`, `DownloadSlotGuard`, `Inner`-backed callback guard with `catch_unwind`) keep the bridge consistent under unwind.
 *   **G2: Deterministic State Recovery:** If the app is killed by the OS during a 10-minute background RAG indexing task, it must resume exactly from the last checkpoint on next boot without database corruption.
 *   **G3: Agentic Containment:** Tool execution loops must have hard time, token, and iteration limits enforced at the Rust kernel level, unreachable by LLM prompt injection.
 *   **G4: Thermal Awareness:** The inference engine must dynamically down-sample context or pause generation if the device's thermal monitor reports critical SoC temperatures.

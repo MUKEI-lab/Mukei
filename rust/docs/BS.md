@@ -211,15 +211,21 @@ Privacy:
 
 ### 3.5 `chunks` (RAG)
 
+Produced by `rag::chunker::Chunker` (256-token windows, 32-token
+overlap, SHA-256 `digest` per chunk body) and staged by
+`rag::indexer::IndexingTransaction::stage(StagedChunk)`. Inserts go
+through the indexer's transaction so SQL rows + vector-store snapshot
+commit / roll back together (REQ-RAG-04 / TRD §4.3).
+
 | Column | Type | Notes |
 |--------|------|-------|
 | id | INTEGER PK | time-sortable 64-bit chunk id |
 | source_id | INTEGER NOT NULL | FK saf_tokens(id) |
-| seq | INTEGER NOT NULL | ordinal within source file |
-| content | TEXT NOT NULL | the chunk text |
+| seq | INTEGER NOT NULL | ordinal within source file (`StagedChunk::ordinal`) |
+| content | TEXT NOT NULL | chunk text (≤ 256 tokens by construction) |
 | byte_offset | INTEGER NOT NULL | start position in source |
 | byte_length | INTEGER NOT NULL | |
-| content_hash | TEXT NOT NULL | SHA-256 hex of `content` (lower-case) |
+| content_hash | TEXT NOT NULL | SHA-256 hex of `content` (lower-case); also the usearch payload de-dup key |
 | created_at | TEXT NOT NULL |
 
 Indexes:

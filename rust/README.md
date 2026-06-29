@@ -97,6 +97,33 @@ Documentation index (under `docs/`):
   (downloads). `stop_generation()` rotates only the chat token;
   `stop_download()` rotates only the download token. The chat Stop
   button no longer silently kills a model download.
+- **Engine contract (TRD §3).** `LlamaEngine::load_model` streams the
+  full-file SHA-256 in 1 MiB windows through `spawn_blocking` *before*
+  mmap whenever `EngineConfig::expected_sha256` is set (REQ-SEC-01).
+  `contains_tool_call` is GBNF-aware and only delegates to the
+  streaming-prefix heuristic for partial JSON. `InferenceOutcome::stop_reason`
+  is the typed `StopReason` enum; the bridge / agent loop read the
+  stop tag verbatim.
+- **Token streaming.** `engine::streaming::Drainer` coalesces upstream
+  `mpsc::Receiver<String>` tokens into 50 ms / 1024-byte batches
+  before they reach the bridge’s `chunk_generated` signal.
+- **GPU strategy.** `GpuStrategy::detect()` reads `/proc/cpuinfo`
+  (Linux/Android) + `/system/build.prop` and `uname -m` on macOS;
+  `pick_layers_with_thermal()` follows the Android `ThermalStatus`
+  enum (>= 3 → CPU; == 2 → halve layers).
+- **Gemma 4 catalogue (TRD §8.0 / REQ-MOD-01).** `engine::model_registry`
+  exposes two descriptors (`Gemma4E2bIt` / `Gemma4E4bIt`) with
+  commit-pinned URLs, full SHA-256 digests, RAM minimums, and
+  recommended `n_ctx`. The bridge surfaces them via
+  `model_catalogue_json` / `recommended_model_id`; downloads write to
+  `<dest>.partial` and atomically rename only after the full-file
+  hash matches.
+- **RAG storage hardening.** `StoreHeader` carries
+  `format_version + embedder_id + embedding_dim`; the
+  `release-hardening` feature requires both `candle` and `usearch_hnsw`
+  (architect-review tripwires GH #15 / #16) so a release build can
+  never silently fall back to the mock embedder or the flat-scan
+  backend.
 - **Silent bootstrap tracing.** `diagnostics::logger::initialize_tracing`
   uses `std::io::sink()` until the embedder installs its own file-backed
   sink, preventing privacy leaks into Android logcat during early boot.
@@ -117,9 +144,35 @@ Documentation index (under `docs/`):
   directory, and can be reclaimed with `reinstall_panic_hook()` if a
   host framework overwrites `std::panic::set_hook`.
 - **Model integrity (REQ-SEC-01).** Every GGUF artifact is streamed
-  through a SHA-256 hasher *before* mmap; the model registry pins both
+  through a SHA-256 hasher in 1 MiB windows *before* `mmap` whenever
+  `EngineConfig::expected_sha256` is set; the model registry pins both
   the upstream commit-sha and the digest. See
-  [`crate::engine::model_registry`].
+  [`crate::engine::model_registry`] and `LlamaEngine::verify_full_sha256_stream`.
+- **Typed stop reasons (TRD §3.0).** `InferenceOutcome { assistant_text,
+  used_tokens, stop_reason }` exposes `StopReason::{Completed,
+  UserStopped, ThermalKill, OutOfMemory, WatchdogTripped}` so the
+  bridge picks the right UI chip without parsing free-form strings.
+- **Token-stream drainer (TRD §3.0 / engine::streaming).** Tokens flow
+  through `Drainer` with a 50 ms / 1 KiB `TokenStreamConfig` so the
+  bridge emits coalesced batches; the inference worker never touches a
+  CXX-Qt signal directly.
+- **Thermal-aware GPU strategy (TRD §3.2 / engine::gpu_strategy).**
+  `GpuStrategy::pick_layers_with_thermal()` halves offload at Android
+  thermal level 2 and drops to CPU at level ≥ 3. `GpuKind` covers
+  `Mali | Adreno | Sugarloaf | CpuOnly | Unknown` with stable ASCII
+  tags.
+- **RAG embedder + vector store (TRD §4).** `Embedder` impls always
+  return L2-normalised vectors; `StoreHeader` carries `format_version`
+  + `embedder_id` + `embedding_dim` and boot refuses any persisted
+  file that disagrees with the wired embedder. A `release-hardening`
+  build without `candle` or without `usearch_hnsw` is a compile-time
+  error so production cannot silently ship the mock embedder or the
+  flat-scan backend (architect-review GH #15 / #16).
+- **Indexer transactional safety (TRD §4.3).**
+  `rag::indexer::IndexingTransaction` wraps SQL inserts AND the
+  vector-store snapshot in a single SQLite write transaction; `Drop`
+  without an explicit `commit()` rolls back staged vectors so a
+  mid-flight SAF revoke cannot leave orphan rows.
 - **Downloader 416-restart.** If the upstream file shrinks between
   resume attempts a stale `.partial` produces a `416 Range Not
   Satisfiable`; the downloader wipes `.partial` and restarts from byte

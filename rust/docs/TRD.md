@@ -1940,7 +1940,44 @@ impl Watchdog {
 
 ## 3. LLM Inference Engine (llama-cpp-rs Wrapper)
 
-### 3.1 Safe Wrapper over llama-cpp-rs
+**Authoritative source:** `rust/crates/mukei-core/src/engine/llama_wrapper.rs`,
+`engine/streaming.rs`, `engine/gpu_strategy.rs`, `engine/tokenizer.rs`,
+`engine/markdown.rs`, `engine/model_registry.rs`.
+
+### 3.0 Current contract
+
+The live `LlamaEngine` is *not* the v0.6 sketch below. The current
+implementation guarantees:
+
+- `EngineConfig { n_ctx, gpu_layers, expected_sha256, stream }` is the
+  only configuration surface; the bridge constructs it at boot.
+- `LlamaEngine::load_model(path, config)` runs the full-file SHA-256
+  stream through `tokio::task::spawn_blocking` BEFORE `mmap` whenever
+  `expected_sha256` is set (REQ-SEC-01). Mismatch → `ModelCorrupted`.
+- The SHA-256 hasher uses `SHA_STREAM_CHUNK = 1 MiB` windows so peak
+  RAM is bounded regardless of model size.
+- `LlamaEngine::contains_tool_call()` is grammar-aware: it parses
+  through `crate::tools::validator::parse_gbnf_output` and only falls
+  back to a streaming-prefix heuristic for partial JSON. Bare arrays /
+  prose never trip the detector.
+- `InferenceOutcome { assistant_text, used_tokens, stop_reason }` is
+  the structured return shape. `StopReason` is
+  `Completed | UserStopped | ThermalKill | OutOfMemory | WatchdogTripped`,
+  each with a stable `as_tag()` ASCII identifier.
+- `InferenceBackend` is the async trait the agent loop drives; the
+  bridge provides the real llama.cpp impl behind `feature = "llama_cpp"`,
+  while `MockInferenceBackend` keeps the sandbox build representative.
+- Token streaming goes through `engine::streaming::Drainer` with a
+  `TokenStreamConfig { flush_window: 50 ms, max_chunk_bytes: 1024 }`
+  default. The drainer reads from an upstream `mpsc::Receiver<String>`,
+  coalesces tokens, and republishes batches; CXX-Qt signals are emitted
+  by the bridge from the drainer's output channel, never from the
+  inference worker directly.
+- KV-cache and model fingerprints are exposed via
+  `model_digest()` and `kv_cache_fingerprint()` (REQ-STATE-01) for the
+  recovery snapshot in `storage::recovery`.
+
+### 3.1 Historical v0.6 wrapper sketch (superseded)
 ```rust
 // rust/src/engine/llama_wrapper.rs
 use llama_cpp_rs::{
@@ -2089,7 +2126,32 @@ fn full_response_in_scope() -> &'static str { /* unused; kept for clarity */ "" 
 fn full_response_string() -> String { OUT.with_borrow(|s| s.clone()) }
 
 
-### 3.2 GPU Strategy (Mali/Adreno Detection)
+### 3.2 GPU Strategy (current implementation — `engine::gpu_strategy`)
+
+**Authoritative source:** `engine/gpu_strategy.rs`.
+
+Current behaviour:
+
+- `GpuKind` enumerates `Mali | Adreno | Sugarloaf | CpuOnly | Unknown`
+  with a stable `as_tag()` ASCII identifier used by FFI snapshots and
+  tracing spans.
+- `GpuStrategy::detect()` is side-effect-free: it reads `/proc/cpuinfo`
+  and, when sparse, `/system/build.prop` on Linux/Android; `uname -m`
+  on macOS classifies Apple Silicon as `Sugarloaf`. The bridge may
+  override the result via `with_kind()` / `with_layers()` when the
+  platform native side has better signal.
+- `pick_layers(model_bytes)` is the size-aware policy. Today's table:
+  Mali below 1.5 GB → 99, otherwise 32; Adreno below 1.5 GB → 12,
+  otherwise 0; Sugarloaf → 99; everything else → 0.
+- `pick_layers_with_thermal(model_bytes, thermal_status)` mirrors the
+  Android `PowerManager.ThermalStatus` enum: `thermal_status >= 3`
+  drops to CPU, `== 2` halves the offload count, otherwise the base
+  picker is returned. The bridge feeds `thermal_status` through
+  `MukeiBridge::note_thermal_status`.
+- Regression tests lock the halving and CPU-fallback behaviour, the
+  large-model Adreno fallback, and the ASCII-only `as_tag()` contract.
+
+### 3.2-legacy Historical Vulkan vendor-id sketch (superseded)
 ```rust
 // rust/src/engine/gpu_strategy.rs
 use crate::diagnostics::logger;
@@ -2153,7 +2215,41 @@ fn query_vulkan_vendor_id() -> u32 {
 
 ## 4. RAG Pipeline (candle + usearch)
 
-### 4.1 Embedding Model (candle MiniLM)
+### 4.0 Module layout (current implementation)
+
+**Authoritative source:** `rust/crates/mukei-core/src/rag/{mod,chunker,embedder,vector_store,indexer}.rs`.
+
+- `rag::embedder` exposes the `Embedder` trait, `MockEmbedder` for
+  tests, and `CandleMiniLmEmbedder` behind `feature = "candle"`. Every
+  impl L2-normalises its output so cosine and dot-product agree. A
+  `release-hardening` build without `candle` fails to compile (the
+  architect-review tripwire from GH #15 — shipping `MockEmbedder` would
+  silently break RAG correctness).
+- `rag::vector_store` defines `StoreHeader { format_version,
+  embedder_id, embedding_dim, ... }` (REQ-RAG-01 / -02). Boot refuses
+  any persisted file whose `embedder_id` or `embedding_dim` does not
+  match the wired embedder; the `RebuildVerdict` enum carries that
+  decision. Persistence is atomic-rename through a `.swap` sibling
+  (`ATOMIC_SUFFIX = "swap"`), invoked only inside `spawn_blocking`
+  through the `snapshot_for_save` / `save_snapshot` split (TRD §2.4
+  Golden Rule). A `release-hardening` build without `usearch_hnsw`
+  fails to compile (GH #16 — flat-scan O(n) backend would degrade RAG
+  search on 100k+ chunks in production).
+- `rag::chunker::Chunker` produces 256-token windows with 32-token
+  overlap on whitespace-separated tokens; every chunk carries a
+  SHA-256 `digest` of its body for usearch payload de-duplication.
+- `rag::indexer` defines `IndexingTransaction`, `StagedChunk`,
+  `BackgroundIndexer`, `FileSaw`, `IndexProgress`, and the
+  `handle_revoke` SAF helper. The transaction wraps SQL inserts AND
+  the vector-store snapshot in a single SQLite write transaction so a
+  mid-flight SAF revoke leaves no orphan rows; the `Drop` impl rolls
+  back staged vectors when neither `commit()` nor `rollback()` is
+  called.
+- `rag::vector_store::VectorStore::shred` zeroises a vector in-place
+  AND deletes its row from the persistent file, satisfying the
+  REQ-RAG-03 "Forget this source" UX path.
+
+### 4.1 Historical candle-MiniLM sketch (superseded)
 ```rust
 // rust/src/rag/embedder.rs
 use candle_core::{Device, Tensor};
@@ -4038,6 +4134,64 @@ Rectangle {
 ---
 
 ## 8. Build System (CMake + Cargo Integration)
+
+### 8.0 On-device Model Catalogue & Downloader (REQ-MOD-01)
+
+**Authoritative source:** `rust/crates/mukei-core/src/engine/model_registry.rs`,
+`storage/model_download.rs`, `rust/crates/mukei-bridge/src/lib.rs` (`download_model` / `set_model_dir` / `recommended_model_id` / `model_catalogue_json` / `stop_download`).
+
+The live catalogue ships exactly two Gemma 4 GGUF variants:
+
+| `ModelId` | `display_name` | `approximate_bytes` | `min_device_ram_mib` | `recommended_n_ctx` |
+|-----------|----------------|---------------------|----------------------|----------------------|
+| `Gemma4E2bIt` | Gemma 4 E2B Instruct (Q4_K_M) | 3 462 678 272 (≈3.46 GB) | 4 096 | 4 096 |
+| `Gemma4E4bIt` | Gemma 4 E4B Instruct (Q4_K_M) | 5 405 168 384 (≈5.41 GB) | 7 168 | 8 192 |
+
+Key invariants:
+
+- Each `download_url` is **commit-pinned** to a Hugging Face
+  `/resolve/<40-char-sha>/<filename>?download=true` revision; the CI
+  test `manifest_urls_pin_a_commit_sha_not_a_branch` rejects any
+  re-introduction of `/resolve/main/`.
+- Each `expected_sha256` is a 64-char lowercase hex digest of the GGUF
+  artifact (`manifest_hashes_are_full_sha256_hex`).
+- `ModelId::from_id` accepts both the canonical `gemma-4-*-it`
+  identifiers and the deprecated `gemma-3n-*-it` aliases for one
+  migration window; new code MUST use the canonical names.
+- `recommended_for_device(total_ram_mib)` returns the E4B descriptor
+  for `>= 7168 MiB` and falls back to E2B otherwise.
+- The bridge exposes the catalogue to QML through `model_catalogue_json`
+  (serde-serialised list) and `recommended_model_id(total_ram_mib)`.
+- `set_model_dir(path)` / `model_dir()` let the embedder rewrite the
+  download destination root (Android `getFilesDir() + /models`, XDG
+  fallback on desktop). `GLOBAL_MODEL_DIR` is the only writeable root.
+- `download_model(url, sha256)` accepts either a canonical `ModelId`
+  string (with `sha256` empty or matching the manifest pin) or a
+  bespoke HTTPS URL + matching 64-hex digest. A mismatched SHA against
+  a known id surfaces `ERR_TOOL_ARGUMENT` *before* any I/O.
+- The streaming downloader (`storage::model_download::run_download`)
+  writes to `<dest>.partial`, hashes the full file as it streams, and
+  atomically renames to `<dest>` only after the digest matches. Resume
+  uses HTTP `Range: bytes=<offset>-`; both `200 OK` (server ignored the
+  range) and `416 Range Not Satisfiable` (upstream shrunk) delete the
+  stale `.partial` and restart from byte 0
+  (`http_416_on_resume_triggers_restart_and_succeeds`).
+- `DownloadEvent` is the stable progress enum forwarded to QML through
+  the `download_progress(progress, status)` qsignal:
+  `Started { total_bytes }`, `Progress { progress, bytes_downloaded }`,
+  `Complete { final_path }`, `Error { code, message }`.
+- Re-entrancy: a global `Arc<Mutex<HashSet<PathBuf>>>` keyed on the
+  canonical destination path lets E2B + E4B download in parallel but
+  rejects a second call targeting the same dest with `DownloadBusy`
+  (`ERR_DOWNLOAD_BUSY`). Release is RAII via `DownloadSlotGuard::Drop`
+  so a panic-unwind still frees the slot.
+- Cancellation: `MukeiAgent` holds an independent `download_cancel`
+  token; `stop_download()` rotates only that token, leaving any chat
+  inference untouched.
+
+Sandbox build (no `network` feature) compiles the downloader to a
+`not_supported` stub that fails immediately with a typed error so the
+bridge crate stays buildable without `reqwest`.
 
 ### 8.1 Root CMakeLists.txt
 ```cmake

@@ -117,9 +117,13 @@ mukei-ffi-shim                                                3 passed
   and vice-versa.
 - **Commit-pinned model catalogue.** `engine::model_registry` pins
   `download_url` to a Hugging Face `/resolve/<40-char-sha>/` revision,
-  *not* `/resolve/main/`. A CI test
-  (`manifest_urls_pin_a_commit_sha_not_a_branch`) fails the build if
-  anyone re-introduces a bare branch ref.
+  *not* `/resolve/main/`. The catalogue currently ships two Gemma 4
+  GGUF variants: `gemma-4-e2b-it` (≈3.46 GB, recommended for ≥6 GB RAM
+  devices) and `gemma-4-e4b-it` (≈5.41 GB, recommended for ≥8 GB RAM
+  devices). Deprecated `gemma-3n-*` aliases still resolve for one
+  migration window. CI tests `manifest_urls_pin_a_commit_sha_not_a_branch`
+  and `manifest_hashes_are_full_sha256_hex` fail the build if anyone
+  re-introduces a bare branch ref or a malformed digest.
 - **416-restart resumable downloader.** When the upstream file shrinks
   between resume attempts, a stale `.partial` produces `416 Range Not
   Satisfiable`; the downloader wipes `.partial` and restarts from byte
@@ -136,6 +140,34 @@ mukei-ffi-shim                                                3 passed
   `from_non_null(NonNull<Inner>)` (architect review GH #10). Re-bind is
   `Inner::bump()`; permanent destroy is `Inner::tombstone()`
   (architect review GH #9).
+- **Engine contract (TRD §3).** `LlamaEngine::load_model` streams the
+  full-file SHA-256 in 1 MiB windows through `spawn_blocking` *before*
+  mmap whenever `EngineConfig::expected_sha256` is set (REQ-SEC-01).
+  Tool-call detection is grammar-aware via
+  `crate::tools::validator::parse_gbnf_output`; prose / bare arrays
+  never trip the detector. `InferenceOutcome::stop_reason` is typed
+  `Completed | UserStopped | ThermalKill | OutOfMemory | WatchdogTripped`.
+  Token streaming uses `engine::streaming::Drainer` with a 50 ms /
+  1024-byte flush window, so CXX-Qt signals always carry coalesced
+  batches instead of per-token chunks.
+- **GPU + thermal strategy.** `GpuStrategy::detect()` is side-effect
+  free (`/proc/cpuinfo` + Android `build.prop` + macOS `uname -m`).
+  `pick_layers_with_thermal()` mirrors Android `PowerManager.ThermalStatus`:
+  `>= 3` drops to CPU, `== 2` halves the offload count.
+- **Gemma 4 model catalogue (TRD §8.0 / REQ-MOD-01).**
+  `engine::model_registry::MODELS` ships exactly the `Gemma4E2bIt`
+  (≈3.46 GB Q4_K_M) and `Gemma4E4bIt` (≈5.41 GB Q4_K_M) descriptors
+  with commit-pinned Hugging Face URLs, full 64-hex SHA-256 digests,
+  RAM thresholds, and recommended `n_ctx` values; QML reads the list
+  through `MukeiBridge::model_catalogue_json` and lets the device-tier
+  picker (`recommended_model_id`) downgrade to E2B below 7168 MiB.
+- **RAG storage hardening.** `vector_store::StoreHeader` records the
+  embedder id + dimension; boot refuses any file whose embedder /
+  dimension differs from the wired backend (REQ-RAG-01 / -02).
+  Persistence is atomic-rename through a `.swap` sibling, invoked only
+  from `spawn_blocking`. Two architect-review tripwires fail the build
+  if `release-hardening` is enabled without `candle` (GH #15) or
+  without `usearch_hnsw` (GH #16).
 - **Local-only diagnostics pipeline.** `diagnostics::initialize_tracing()`
   boots with `std::io::sink()` so Android stdout/stderr never leak into
   logcat. The embedder installs a `CrashSink` for app-internal storage,

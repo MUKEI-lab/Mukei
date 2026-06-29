@@ -642,11 +642,11 @@ Every tool invocation is logged in `tool_audit_log` (BS §2.6). Logs are local; 
 
 ```
 [A] File decoded (UTF-8 / detection)
-[B] Chunked (sliding window, 512 char, 64 overlap)
-[C] Embedded (candle MiniLM, 384-dim)  → Vec<f32>
-[D] usearch::Index::add(<chunk_id, vec>)
-[E] Persisted via atomic-rename: hnsw.bin.tmp → hnsw.bin (TRD §4.2 — no in-place overwrite)
-[F] chunks row inserted (BS §2.5)
+[B] Chunked (sliding window, 256 tokens, 32 overlap) — `Chunker::DEFAULT_WINDOW`/`DEFAULT_OVERLAP`
+[C] Embedded (candle MiniLM, 384-dim)  → Vec<f32>, L2-normalised
+[D] VectorStore::add(<chunk_id, vec>) (usearch HNSW under `feature = "usearch_hnsw"`)
+[E] Persisted via atomic-rename through `ATOMIC_SUFFIX = "swap"` — see `rag::vector_store::save_snapshot`
+[F] chunks row inserted (BS §3.5) inside `IndexingTransaction` so a SAF revoke leaves no orphans
 ```
 
 ### 11.3 Retrieval Path
