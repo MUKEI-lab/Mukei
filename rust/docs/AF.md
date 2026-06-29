@@ -455,8 +455,9 @@ state Msg {
     Streaming ──[user abort]──> Aborted
     Streaming ──[tool_call emitted]──> AwaitingTool
     AwaitingTool ──[tool result]──> Streaming  (back to LLM)
-    AwaitingTool ──[validator rejects]──> Streaming (with error injected)
-    AwaitingTool ──[executor fails]──> Errored
+    AwaitingTool ──[parse / validator rejects]──> Streaming (tool_error envelope injected, no hard abort)
+    AwaitingTool ──[tool abuse-blocked]──> Streaming (supervisor directive injected, no hard abort)
+    AwaitingTool ──[executor permanent failure]──> Errored
     Finalized ──[user regenerate from this id]──> Streaming (new id, parent=this.id)
     Aborted ──[user copy / delete]──> *Terminal
     Errored ──[user retry]──> Sending
@@ -464,7 +465,33 @@ state Msg {
 }
 ```
 
-(TRD §2.3 + §13.3 + §35.1; PRD REQ-CHAT-01..05, REQ-AGT-05, REQ-AGT-08.)
+**Live AgentLoop contract (TRD §2.3 / `agent/loop_.rs`):**
+
+- The loop NEVER hard-aborts on parse / validator failure. A failed
+  `parse_gbnf_output` becomes a `Role::Tool` envelope rendered via
+  `agent::tools::feedback::render_tool_error_envelope(...)` and the
+  iteration continues so the LLM can self-correct.
+- Per-call validator rejections are appended individually — valid
+  calls in a mixed batch still execute. If the validated set is
+  empty after partition, the loop yields a turn rather than aborting.
+- Tool outcomes are appended in order with the original
+  `<external_data source="tool_error" ...>` envelope; a
+  `repeat_output_notice` (no-progress backoff) is appended right
+  after the affected tool result when emitted.
+- Abuse-block / permanent-disable / unknown-tool errors do NOT
+  terminate the turn. A `render_supervisor_directive(tool, code)`
+  envelope is appended as a `Role::Tool` turn so the LLM can produce
+  a final answer from already-gathered context.
+- Every appended turn carries `parent = last_id` on the active
+  branch; the loop `debug_assert!`s the branch invariant before each
+  push so the tree shape encoded in BS §2 / V004 is never broken.
+- Wall-clock containment: the inference future is raced inside a
+  `tokio::select!` against the chat cancel token AND
+  `watchdog.remaining_wall_clock()` (architect review GH #46 / #47),
+  so a hung inference cannot outlive the agent-loop deadline.
+
+(TRD §2.3 + §2.5 + §2.6 + §13.3 + §35.1; PRD REQ-CHAT-01..05,
+REQ-AGT-04 / -05 / -08.)
 
 ### 8.2 Invariants
 
@@ -616,14 +643,28 @@ Reserved by `tool_validator.rs::ALLOWED_TOOLS = HashSet::from(["web_search","rea
 
 ### 10.3 FailureTracker Pattern (TRD §2.5)
 
-Every tool attempt is fingerprinted and tracked deterministically; after 2 consecutive failures for the same tool / argument shape, that tool is disabled for the rest of the turn and the model must continue with existing context.
+Every tool attempt is fingerprinted as
+`SHA-256(tool_name || 0x00 || canonical_json(args))` (JSON keys
+sorted), so re-ordering arguments cannot evade the blocker.
+`FailureKind` classifies each failure into
+`Transient | Validation | Cancelled | Timeout | Permanent | Abuse`:
 
-```
-tool_attempt[key] = FailureTrace { calls, fingerprints, last_error }
-finalize_fingerprint = sort_canonical_json({ context, tool_attempt, error_chain })
-```
+- `Cancelled` does NOT count toward the threshold (user-initiated
+  aborts are benign).
+- `Permanent` and `Abuse` bypass the threshold and block the tool
+  immediately.
+- Everything else (default `max_failures_per_tool = 5`) advances the
+  per-fingerprint counter; the 6th identical call flips the abuse
+  blocker and the loop appends a supervisor directive instead of
+  re-dispatching.
 
-A failure is **replayable**, not "best-effort" — the FailureTracker artifact is persisted so QA replay is exact. (PRD REQ-AGT-04.)
+`OutputRepeatTracker` detects byte-identical tool output on the same
+fingerprint and emits a `repeat_output_notice` after the affected
+tool result so the LLM sees the no-progress signal explicitly.
+
+A failure is **replayable**, not "best-effort" — the FailureTracker
+artifact is persisted so QA replay is exact. (PRD REQ-AGT-04; live
+code: `agent/tools/{policy,executor,watchdog,feedback}.rs`.)
 
 ### 10.4 Auditability
 
@@ -772,14 +813,20 @@ and the bridge emits the terminal stream signals
 llm emits malformed tool_call
        │
        ▼
-tool_validator.rs rejects (TRD §13.3 format_for_llm)
+tools::validator::validate partitions raw -> accepted + rejected
+       │                                            │
+       │ (per-rejection)                            │
+       ▼                                            ▼
+agent::tools::feedback::render_tool_error_envelope  accepted calls dispatched in parallel
+  injects a Role::Tool envelope per validation error
        │
        ▼
-Error text wrapped as `<tool_error trust="system">` injected into LLM context
-       │
-       ▼
-LLM may retry or apologize (still inside ReAct loop)
+LLM may retry / reformulate (loop continues, NO hard abort)
 ```
+
+If the partition produces zero accepted calls, the loop still yields
+the turn rather than aborting (live code:
+`agent/loop_.rs::AgentLoop::run`).
 
 ### 13.3 Backtrack
 
@@ -793,7 +840,10 @@ User `Edit → Re-send` on a finalized message:
 
 ### 13.4 Why Idempotent Finalization Matters
 
-If a `stream_finalized` signal arrives twice, second is ignored. If a `token_generated` arrives after `stream_finalized`, dropped by generation guard.
+If a `stream_finalized` signal arrives twice, the second is ignored.
+Any token bound to a previous generation / `instance_id` is dropped
+by the manual FFI guard (`callback_with_guard!` returns
+`GuardError`).
 
 ---
 

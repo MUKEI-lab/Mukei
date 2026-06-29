@@ -97,6 +97,24 @@ Documentation index (under `docs/`):
   (downloads). `stop_generation()` rotates only the chat token;
   `stop_download()` rotates only the download token. The chat Stop
   button no longer silently kills a model download.
+- **AgentLoop graceful degrade (TRD §2.3).** The ReAct loop in
+  `agent/loop_.rs` is the **only** caller of
+  `engine::llama_wrapper::run_inference`. Parse failures, partial
+  validator rejections, no-progress backoff, and abuse-blocked tool
+  calls all surface as `Role::Tool` envelopes via
+  `agent::tools::feedback::render_tool_error_envelope` /
+  `render_supervisor_directive` instead of hard-aborting the turn.
+  Each iteration is bounded by `tokio::select!` over the chat cancel
+  token AND `WatchdogHandle::remaining_wall_clock()` so a hung
+  inference cannot outlive the agent-loop deadline.
+- **FailureTracker fingerprints (TRD §2.5).** Failures key on
+  `SHA-256(tool_name || 0x00 || canonical_json(args))` with sorted
+  JSON keys, so re-ordering arguments cannot evade the blocker.
+  `FailureKind::Cancelled` is benign (does not count), `Permanent` /
+  `Abuse` bypass the threshold, everything else advances the
+  per-fingerprint counter with default `max_failures_per_tool = 5`.
+  `OutputRepeatTracker` injects a `repeat_output_notice` whenever a
+  tool returns byte-identical output for the same fingerprint.
 - **Adaptive Search Planner (TRD §5.1).** `SearchEngineKind` is the
   closed set `{ Brave, Tavily }`; a compile-time `compile_error!` in
   `search/engines/mod.rs` rejects DDG re-introduction. `SearchSelector`

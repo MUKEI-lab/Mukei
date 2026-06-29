@@ -140,6 +140,22 @@ mukei-ffi-shim                                                3 passed
   `from_non_null(NonNull<Inner>)` (architect review GH #10). Re-bind is
   `Inner::bump()`; permanent destroy is `Inner::tombstone()`
   (architect review GH #9).
+- **AgentLoop graceful degrade (TRD §2.3).** `agent/loop_.rs` is the
+  single inference caller. Parse failures, validator rejections,
+  no-progress backoff, and abuse-blocked tools all surface as
+  injected `Role::Tool` envelopes (via `render_tool_error_envelope`
+  and `render_supervisor_directive`) instead of hard-aborting the
+  turn. Wall-clock containment via `tokio::select!` over the chat
+  cancel token AND `WatchdogHandle::remaining_wall_clock()` (architect
+  review GH #46 / #47).
+- **FailureTracker fingerprints (TRD §2.5).** Failures key on
+  `SHA-256(tool_name || 0x00 || canonical_json(args))` with sorted
+  JSON keys, so reordering arguments cannot evade the blocker.
+  `Cancelled` is benign, `Permanent` / `Abuse` bypass the threshold,
+  everything else advances the per-fingerprint counter with default
+  `max_failures_per_tool = 5`. `OutputRepeatTracker` flags
+  byte-identical tool output for the same fingerprint and injects a
+  no-progress notice.
 - **Adaptive Search Planner (TRD §5.1).** `SearchEngineKind` is
   closed at `{ Brave, Tavily }` and a compile-time `compile_error!`
   blocks DDG re-introduction. `SearchSelector::select(kind)` is a
