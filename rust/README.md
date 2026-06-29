@@ -97,6 +97,9 @@ Documentation index (under `docs/`):
   (downloads). `stop_generation()` rotates only the chat token;
   `stop_download()` rotates only the download token. The chat Stop
   button no longer silently kills a model download.
+- **Silent bootstrap tracing.** `diagnostics::logger::initialize_tracing`
+  uses `std::io::sink()` until the embedder installs its own file-backed
+  sink, preventing privacy leaks into Android logcat during early boot.
 - **Thinking-tag streaming (TRD §1.2.5).** `TagsStreaming` is a 64-byte
   sliding-window detector with multi-transition support (open → close →
   open in the same chunk).
@@ -108,8 +111,11 @@ Documentation index (under `docs/`):
   boot.
 - **Post-parse tool validator + SAF (TRD §5.2 / §13.3).** `read_file`
   refuses every non-SAF URI scheme.
-- **Crash-loop fingerprint sink (TRD §36.1).** Stable SHA-256 of the
-  panic site keyed against a Bloom filter.
+- **Crash diagnostics sink (TRD §36.1).** The panic hook computes a
+  stable SHA-256 fingerprint from `location || 0x00 || reason`, writes a
+  `CrashRecord` JSON file into the installed app-internal crash
+  directory, and can be reclaimed with `reinstall_panic_hook()` if a
+  host framework overwrites `std::panic::set_hook`.
 - **Model integrity (REQ-SEC-01).** Every GGUF artifact is streamed
   through a SHA-256 hasher *before* mmap; the model registry pins both
   the upstream commit-sha and the digest. See

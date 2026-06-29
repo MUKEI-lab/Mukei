@@ -83,10 +83,9 @@
 │   ├── brave_key.enc       # Wrapped Brave API key (optional)
 │   ├── hnsw.bin            # Vector store snapshot
 │   ├── hnsw.bin.tmp        # Atomic-rename intermediate
-│   └── crash.dump          # last Rust panic, scrubbed of secrets
+│   └── crashes/<sha256>.json  # local CrashRecord sink (fingerprint keyed)
 └── cache/
-    ├── user-files/<uuid>/  # SAF-tokenized paths (canonicalized)
-    └── models/.part/.meta  # download state (TRD §5.3)
+    └── user-files/<uuid>/  # SAF-tokenized paths (canonicalized)
 ```
 
 ### 2.3 Page-Level Privacy
@@ -189,22 +188,26 @@ Invariants:
 | Column | Type | Notes |
 |--------|------|-------|
 | id | INTEGER PK | time-sortable 64-bit id |
+| conversation_id | INTEGER NULL | nullable during boot smoke tests / debugger sessions |
 | message_id | INTEGER NULL | parent LLM message |
-| tool_name | TEXT NOT NULL | one of validator's allow-list |
-| tool_args | TEXT NOT NULL | JSON (after schema validator) |
-| tool_result | BLOB NULL | success (raw bytes) |
-| error_code | INTEGER NULL | 3xx range |
-| error_message | TEXT NULL | sanitized |
-| duration_ms | INTEGER NOT NULL | perf signal |
-| fingerprint | TEXT NOT NULL | sort-canonical JSON SHA-256 |
-| created_at | TEXT NOT NULL |
+| tool_call_id | TEXT NOT NULL | LLM-emitted tool call id |
+| tool_name | TEXT NOT NULL | registered tool name |
+| args_json | TEXT NOT NULL | canonical key-sorted JSON args |
+| result_preview | TEXT NOT NULL | truncated forensic preview |
+| success | INTEGER NOT NULL | 0/1 |
+| duration_ms | INTEGER NOT NULL | wall-clock duration |
+| error_code | TEXT NULL | stable `ERR_*` string from `MukeiError::error_code()` |
+| fingerprint_sha256 | TEXT NOT NULL | FailureTracker / canonical fingerprint |
+| previous_hash | TEXT NULL | prior chain tip |
+| entry_hash | TEXT NOT NULL | SHA-256(previous_hash || canonical_fields) |
 
-Index:
-- `idx_tool_audit_message` `(message_id)`.
+Indexes / access patterns:
+- `hydrate_from_pool()` reads `entry_hash` from the most recent row to seed the writer chain.
+- Boot-time verification walks rows in order and recomputes the chain.
 
 Privacy:
-- `tool_args` may include SAF tokens. **Never** persisted in plaintext format; always occurrences are recorded as JSON-encoded `saf://` opaque tokens (the canonical path is logged separately in `saf_tokens`).
-- `tool_result` redaction: file/image results truncated at MAX (1 MB) **before** insert.
+- `args_json` may include SAF tokens; only opaque `saf://` values are stored, never resolved paths.
+- `result_preview` is intentionally short forensic text, not a full raw payload dump.
 
 ### 3.5 `chunks` (RAG)
 
@@ -264,19 +267,28 @@ Invariants:
 - `id = 1` (singleton).
 - Exactly one row at all times. Enforced by `CHECK (id = 1)`.
 
-### 3.8 `recovery_state` (Crash counter, TRD §36.1)
+### 3.8 `recovery_state` (stream-resume snapshot, TRD §6.3)
 
 | Column | Type | Notes |
 |--------|------|-------|
 | id | INTEGER PK | always 1 |
-| crash_counter | INTEGER NOT NULL DEFAULT 0 |
-| last_crash_at | TEXT NULL |
-| last_crash_class | TEXT NULL | `OOM|FFI|JVM|RUST_PANIC|UNKNOWN` |
-| first_seen_version | TEXT NOT NULL | "0.7.x" |
+| conversation_id | INTEGER NOT NULL | owning conversation |
+| branch_id | INTEGER NULL | branch being resumed |
+| last_message_id | INTEGER NOT NULL | last durable message row |
+| prompt_snapshot | TEXT NOT NULL | serialized prompt used for replay |
+| generated_prefix | TEXT NOT NULL | assistant text already shown before kill |
+| last_token_count | INTEGER NOT NULL | token count for prefix |
+| kv_cache_fingerprint | TEXT NOT NULL | rejects stale cache resumes |
+| model_fingerprint | TEXT NULL | SHA-256 of model used to generate snapshot |
+| watchdog_fingerprint | TEXT NULL | watchdog / crash-loop diagnostic marker |
+| resumed_after_kill | INTEGER NOT NULL | 0/1 replay marker |
+| updated_at | TEXT NOT NULL | RFC3339 UTC timestamp |
 
 Invariants:
-- `id = 1`.
-- Atomic rename on every write (CRASH-SAFE RENAMING strategy — see §6.4).
+- `id = 1` (single-row upsert surface).
+- `kv_cache_fingerprint` is mandatory on save.
+- Resume is refused when `model_fingerprint` does not match the currently loaded model.
+- `clear()` deletes the row after a successful completed stream.
 
 ### 3.9 `app_settings`
 
@@ -415,25 +427,27 @@ fs::write(db_key.enc, &bincode::serialize(&wrapped_key)?)
 
 Same shape but holds the Brave API key, opt-in (`config.toml.brave_key_blob`).
 
-### 6.3 `.part` and `.meta` (TRD §5.3)
+### 6.3 `.partial` downloader staging files (TRD §8.1)
 
 ```
-files/models/<id>.gguf.part     # in-progress bytes
-files/models/<id>.gguf.meta     # JSON sidecar
+<model-dir>/<filename>.partial   # in-progress bytes
+<model-dir>/<filename>           # verified final GGUF
 ```
 
-`.meta` schema:
+The current downloader does **not** maintain a JSON `.meta` sidecar.
+Resume state is inferred from the presence and length of `<dest>.partial`,
+then validated by HTTP `Range` semantics plus full-file SHA-256 after the
+transfer completes.
 
-| Field | Type | Notes |
-|-------|------|-------|
-| expected_sha256 | TEXT | hex lower-case |
-| total_bytes | INTEGER | content-length from HTTP HEAD |
-| received_bytes | INTEGER | updated atomically |
-| etag | TEXT NULL | for HTTP 304 |
-| url | TEXT NOT NULL | origin |
-| started_at | TEXT NOT NULL |
+Key invariants from `storage/model_download.rs`:
 
-Atomic update uses `mv <meta>.tmp <meta>` after fsync.
+- resume requests use `Range: bytes=<offset>-`
+- `200 OK` to a ranged request means the server ignored `Range`; delete
+  `.partial` and restart from byte 0
+- `416 Range Not Satisfiable` also deletes `.partial` and restarts from
+  byte 0
+- only a SHA-verified artifact is atomically renamed from `.partial` to
+  the final GGUF path
 
 ### 6.4 Crash-Safe Renaming
 
@@ -446,7 +460,7 @@ atomic rename(tmp, final_path)
 fsync parent dir
 ```
 
-This applies to `db_key.enc`, `brave_key.enc`, `hnsw.bin`, `.meta`, `crash.dump`, etc. TRD §36.1, §5.3.
+This applies to `db_key.enc`, `brave_key.enc`, `hnsw.bin`, crash-record JSON writes, and any future sidecar files. Model downloads use the same safety goal but finish via atomic rename from `<dest>.partial` to `<dest>`. TRD §36.1, §8.1.
 
 ---
 
@@ -592,7 +606,7 @@ deliberate so silent regressions cannot accumulate.
   "locale": "en",
   "feature": "web_search",
   "strings": {
-    "brave_key_missing_toast": "Brave API key missing — using DuckDuckGo only.",
+    "brave_key_missing_toast": "Brave API key missing — continuing with the remaining configured search engines.",
     "brave_key_paste_invalid":  "Doesn't look like a Brave API key. Keys are 20–64 alphanumeric characters, with `-` or `_` allowed.",
     "brave_key_test_ok":        "Key works. Save?",
     "brave_key_test_rejected":  "Brave rejected this key (HTTP {http_status}). Double-check the dashboard.",
@@ -640,7 +654,7 @@ deliberate so silent regressions cannot accumulate.
 | `mukei.db` (all tables) | SQLCipher 4 AES-256-CBC | 32 random |
 | `db_key.enc` | AES-GCM, no padding | Keystore alias |
 | `brave_key.enc` | AES-GCM | Keystore alias |
-| `crash.dump` | binary-truncated, keys zeroized even before write | n/a |
+| `files/crashes/<sha256>.json` | local JSON crash record; no remote export | n/a |
 
 ### 8.2 NOT Encrypted (By Design)
 
@@ -772,49 +786,68 @@ A `FailureTrace` is `Send + Sync`. It does not contain locks but does have a `Ve
 
 ## 13. FFI Surface Schema
 
-### 13.1 ABI-Exported Functions (CXX-Qt + c-FFI)
+### 13.1 ABI-Exported Functions (current manual shim + CXX-Qt bridge)
+
+Manual `extern "C"` shim (`mukei-ffi-shim`) exports:
 
 ```
+const MukeiCallbackGuardInner* mukei_acquire_callback_guard(void);
+void mukei_release_callback_guard(const MukeiCallbackGuardInner* guard_ptr);
+uint64_t mukei_callback_guard_current_generation(const MukeiCallbackGuardInner* guard_ptr);
+uint64_t mukei_callback_guard_bump_generation(const MukeiCallbackGuardInner* guard_ptr);
+bool mukei_callback_guard_matches(const MukeiCallbackGuardInner* guard_ptr, uint64_t generation);
+void mukei_stop_generation(const MukeiCallbackGuardInner* guard_ptr);
+uint64_t mukei_callback_guard_instance_id(const MukeiCallbackGuardInner* guard_ptr);
 bool mukei_initialize(const char* config_path);
-uint64_t mukei_send_message(char* user_input, void* context_ptr, void* guard, TokenCallback callback);
-bool mukei_abort(uint64_t generation);
-void mukei_pause(void);
-void mukei_resume(void);
-MukeiStatus mukei_get_status(void);
+uint64_t mukei_send_message(const char* input, void* context_ptr, const MukeiCallbackGuardInner* guard_ptr, MukeiTokenCallback callback);
 ```
+
+The main app-facing bridge is CXX-Qt (`mukei-bridge`), which exposes
+QObjects / qsignals / qinvokables rather than the legacy `abort/pause/
+resume/get_status` C ABI.
 
 ### 13.2 ABI Layout
 
 ```rust
-#[repr(C)]
-pub struct CallbackGuard { generation: u64 }     // 8 bytes
-#[repr(C)]
-pub struct MukeiStatus { state: u8, err: u16 }   // 4 bytes (rounded up)
+#[repr(transparent)]
+pub struct CallbackGuardHandle(*const Inner);
+
+pub type TokenCallback =
+    extern "C" fn(context_ptr: *mut c_void, generation: u64, token: *const c_char);
 ```
 
-(Tested by `test_callbackguard_layout_is_abi_stable` — TRD §11.1.)
+The stable lifetime object is `Inner` behind an opaque pointer. Liveness
+is guarded by generation **and** process-unique `instance_id`; this is
+what closes the ABA reuse window.
 
 ### 13.3 Channel Names
 
-| CXX-Qt channel | Direction | Type |
-|----------------|-----------|------|
-| `chunkGenerated` | Rust → QML | QString (50 ms diff-batch) |
-| `streamFinalized` | Rust → QML | QString (status JSON) |
-| `toolCallDetected` | Rust → QML | QString (tool-call JSON) |
-| `errorOccurred` | Rust → QML | QString (error JSON) |
-| `progressChanged` | Rust → QML | QString (progress/status JSON) |
+| CXX-Qt signal | Direction | Type |
+|---------------|-----------|------|
+| `chunk_generated` | Rust → QML | `QString` |
+| `stream_finalized` | Rust → QML | terminal stream marker |
+| `state_changed` | Rust → QML | `QString` state id |
+| `tool_call_started` | Rust → QML | `QString` |
+| `tool_call_completed` | Rust → QML | `(QString, QString)` |
+| `error_occurred` | Rust → QML | `(QString, QString)` |
+| `download_progress` | Rust → QML | `(f64, QString)` |
+| `thinking_started` | Rust → QML | signal |
+| `thinking_completed` | Rust → QML | signal |
+| `thermal_status_changed` | Rust → QML | `i32` |
+| `saf_grant_revoked` | Rust → QML | `QString` |
+| `token_revoked` | Rust → QML | `QString` |
 
-(TRD §2.6.)
+(TRD §1.2 / bridge source.)
 
 ### 13.4 Lifecycle Pins
 
 | Channel | Generation pinned? |
 |---------|--------------------|
-| `chunkGenerated` | yes (REQ-ARCH-05) |
-| `streamFinalized` | yes |
-| `toolCallDetected` | no (use-after-race still safe because QML reads final state only) |
-| `errorOccurred` | no |
-| `progressChanged` | yes (cross-cuts QML) |
+| `chunk_generated` | yes (manual shim guard + bridge ownership rules) |
+| `stream_finalized` | yes on the stream path |
+| `thinking_started` / `thinking_completed` | yes on the stream path |
+| `error_occurred` | no |
+| `download_progress` | no chat-generation pin; isolated by per-download slot guard + download token |
 
 ---
 
@@ -830,10 +863,9 @@ pub struct MukeiStatus { state: u8, err: u16 }   // 4 bytes (rounded up)
 │   ├── brave_key.enc                       # optional, same scheme
 │   ├── hnsw.bin                            # usearch HNSW snapshot
 │   ├── hnsw.bin.tmp                        # in-progress write
-│   ├── crash.dump                          # last panic (sanitized)
-│   ├── models/<id>.gguf                    # current
-│   ├── models/<id>.gguf.part               # in-progress download
-│   ├── models/<id>.gguf.meta               # sidecar (json)
+│   ├── crashes/<sha256>.json               # local CrashRecord sink
+│   ├── models/<id>.gguf                    # verified final model
+│   ├── models/<id>.gguf.partial            # in-progress download
 │   └── config.toml                         # non-secret prefs
 │
 ├── cache/                                  # may be reclaimed by Android
@@ -855,7 +887,7 @@ pub struct MukeiStatus { state: u8, err: u16 }   // 4 bytes (rounded up)
 | RAG → LLM | inbound | XML wrapper |
 | Web → LLM | inbound (HTTP only) | XML wrapper |
 | DB disk | outbound | SQLCipher encrypts |
-| Crash dump | outbound | keys zeroized first |
+| Crash records | outbound | local JSON only; app-internal sink, no remote export |
 | Telemetry | outbound | hard-disabled in release builds |
 | `config.toml` | outbound | only non-secret fields |
 
@@ -881,13 +913,14 @@ Format invariant: hashes always 64 hex chars (lower-case). Tests check this in T
 | `test_no_direct_schema_edit` | every `CREATE TABLE` lives inside `migrations/V*.sql`. |
 | `test_no_plaintext_secret_in_repo` | grep guard |
 | `test_migrations_tracked_after_run` | `user_version` matches |
-| `test_hnsw_header_invariant` | first 8 bytes = `MUKEIVEC` |
-| `test_schema_version_on_conversation` | non-zero after migration pass |
-| `test_msg_state_transitions_legal` | all enum transitions |
-| `test_failure_fingerprint_is_canonical` | different key orders → same fingerprint |
-| `test_no_raw_key_in_crash_dump` | dump does not contain 64 hex bytes |
-| `test_kdf_iter` | PRAGMA kdf_iter = 256000 |
-| `test_purge_after_reset` | `files/` cleared |
+| `compatible_with_model_matches_on_equal_hash` | recovery snapshot is accepted for matching model fingerprint |
+| `compatible_with_model_rejects_on_mismatch` | stale snapshot is refused on model mismatch |
+| `compatible_with_model_skips_when_persisted_fp_absent` | legacy snapshot without model fingerprint still loads |
+| `scoped_storage_violation_is_refused` | crash sink rejects banned Android storage roots |
+| `write_then_read_roundtrips` | crash records persist and reload correctly |
+| `fingerprint_is_stable_within_call` | panic fingerprint is deterministic |
+| `c_header_lists_every_exported_symbol` | manual FFI header stays in sync with shim exports |
+| `http_416_on_resume_triggers_restart_and_succeeds` | stale `.partial` restart path works |
 
 ---
 

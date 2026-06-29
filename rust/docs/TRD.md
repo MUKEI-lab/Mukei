@@ -614,216 +614,92 @@ Connections {
 
 ### 1.3 FFI Escape Hatch (Manual C-FFI Fallback)
 
-If CXX-Qt build chain fails (Phase 0 risk), we fall back to manual C-FFI with `extern "C"` and `QMetaObject::invokeMethod`.
+Authoritative source: `rust/crates/mukei-ffi-shim/src/lib.rs`,
+`rust/crates/mukei-ffi-shim/include/mukei_ffi_shim.h`, and
+`rust/crates/mukei-core/src/guard.rs`.
 
-#### 1.3.1 Manual C-FFI Bridge — Callback Lifetime Safety (BUGFIX v0.6)
+The fallback path is no longer ad-hoc callback glue. It is a dedicated
+`staticlib` crate (`mukei-ffi-shim`) that exposes a small manual
+`extern "C"` ABI for hosts that cannot use the CXX-Qt bridge.
 
-> **🛡️ BUGFIX v0.6 — Dangling-Callback Segfault Risk:** The previous draft declared the token callback as `extern "C" fn(*const c_char)` and called it directly from inside `tokio::spawn`. If the QML object that owns the bridge is destroyed mid-stream (e.g. activity rotation, GC after the screen is hidden) **the function pointer becomes dangling** — Rust keeps calling it, producing an instant `SIGSEGV` (segmentation fault) with no panic hook to catch it. The repair below pairs every callback with a **non-null `context_ptr`** that QML controls: the QML layer wraps an `std::shared_ptr`-equivalent (a `QPointer` plus an atomic generation counter) and bumps it on entry, drops it on completion. Rust only invokes the callback while the generation is alive; if the generation has been retired the token is silently dropped. Every raw pointer is also wrapped in `std::panic::catch_unwind` so a buggy `invokeMethod` can never abort the process.
+#### 1.3.1 Stable manual ABI
+
+The shim exports exactly these lifecycle and streaming entry points:
+
+- `mukei_acquire_callback_guard`
+- `mukei_release_callback_guard`
+- `mukei_callback_guard_current_generation`
+- `mukei_callback_guard_bump_generation`
+- `mukei_callback_guard_matches`
+- `mukei_stop_generation`
+- `mukei_callback_guard_instance_id`
+- `mukei_initialize`
+- `mukei_send_message`
+
+`mukei_send_message` is the load-bearing streaming primitive and the
+Rust export order is the ground truth:
 
 ```rust
-// rust/src/ffi_c.rs (Fallback implementation — v0.6 lifetime-safe)
-use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_void};
-use std::ptr::addr_of_mut;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-
-/// Generation counter for callback lifetime. Returned to QML on first
-/// send_message; QML/C++ owns the storage and Rust only overlays atomic
-/// semantics on top of the ABI-stable `u64` field.
-#[repr(C)]
-pub struct CallbackGuard {
-    pub generation: u64,          // ABI-stable storage; wrapped as AtomicU64 on Rust side
-}
-
-#[inline]
-unsafe fn guard_atomic<'a>(guard: *mut CallbackGuard) -> &'a AtomicU64 {
-    AtomicU64::from_ptr(addr_of_mut!((*guard).generation))
-}
-
-unsafe impl Send for CallbackGuard {}
-unsafe impl Sync for CallbackGuard {}
-
-/// Token callback signature with a paired context pointer.
-/// callback(context_ptr, generation, token) — callback must check
-/// `*generation == expected_generation` before touching QML.
-pub type TokenCallback = extern "C" fn(*mut c_void, u64, *const c_char);
-
-#[no_mangle]
-pub extern "C" fn mukei_initialize(config_path: *const c_char) -> bool {
-    let path = match unsafe { CStr::from_ptr(config_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        crate::initialize(path)
-    })) {
-        Ok(result) => result.is_ok(),
-        Err(_) => false,  // Panic caught, return false
-    }
-}
+pub type TokenCallback =
+    extern "C" fn(context_ptr: *mut c_void, generation: u64, token: *const c_char);
 
 #[no_mangle]
 pub extern "C" fn mukei_send_message(
     user_input: *const c_char,
-    context_ptr: *mut c_void,           // 🛡️ QObject lifetime paired with stream
-    guard:    *mut CallbackGuard,       // 🛡️ generation counter (atomic)
+    context_ptr: *mut c_void,
+    guard_ptr: *const Inner,
     callback: TokenCallback,
 ) -> u64 {
-    // Validate pointers up-front. Any null pointer is a programmer error
-    // and we refuse to spawn a stream rather than crash later.
-    if user_input.is_null() || guard.is_null() || context_ptr.is_null() {
-        return 0;
-    }
-    let input = match unsafe { CStr::from_ptr(user_input) }.to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => return 0,
-    };
-
-    // Atomically claim a fresh generation number. If QML has already retired
-    // this guard (generation > previous), we still use the new number so
-    // older streams cannot race against the new one.
-    let generation = unsafe { guard_atomic(guard) }.fetch_add(1, Ordering::SeqCst) + 1;
-
-    // The stream holds a *strong* reference to the generation number via Arc
-    // so it cannot outlive an explicit "stop" even if QML has gone away.
-    let live_gen = Arc::new(generation);
-
-    tokio::spawn(async move {
-        let mut stream = crate::generate_stream(input).await;
-
-        while let Some(token) = stream.next().await {
-            // 🛡️ Lifetime check: if the QML side has bumped the guard's
-            // generation (i.e. destroyed this QObject and started a new
-            // invocation), we silently drop the token instead of
-            // dereferencing a dangling QObject.
-            let still_alive = {
-                let current = unsafe { guard_atomic(guard).load(Ordering::SeqCst) };
-                current == *live_gen
-            };
-            if !still_alive { break; }
-
-            let c_token = match CString::new(token) {
-                Ok(s) => s,
-                Err(_) => continue,     // token had an interior nul — skip safely
-            };
-            let c_ptr = c_token.as_ptr();
-
-            // 🛡️ catch_unwind around the *callback itself*. If QML is
-            // momentarily unsafe (e.g. mid-shutdown) we don't kill the
-            // tokio worker.
-            let cb = callback;
-            let ctx = context_ptr;
-            let gen = *live_gen;
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                cb(ctx, gen, c_ptr);
-            }));
-        }
-    });
-
-    generation
-}
-
-#[no_mangle]
-pub extern "C" fn mukei_stop_generation(guard: *mut CallbackGuard) {
-    if guard.is_null() { return; }
-    // Bump the generation so any in-flight stream notices and exits cleanly.
-    unsafe { guard_atomic(guard).fetch_add(1, Ordering::SeqCst); }
-    crate::cancel_generation();
-}
-
-#[no_mangle]
-pub extern "C" fn mukei_release_callback_guard(guard: *mut CallbackGuard) {
-    if guard.is_null() { return; }
-    unsafe { drop(Box::from_raw(guard)); }   // ownership was created in QML
+    // NULL or invalid UTF-8 => reject with generation 0.
+    // Successful calls bump generation and dispatch through the guard macro.
 }
 ```
 
-**Golden Rule for the Fallback Path:**
-1. **Never** declare a bare `extern "C" fn(...)` callback that touches QML state — always pair it with `context_ptr` and `generation`.
-2. **Always** wrap the callback invocation in `std::panic::catch_unwind`. A misbehaving Qt slot cannot abort the entire Rust process.
-3. The QML / C++ side *owns* the `CallbackGuard` storage and may implement it as `std::atomic<uint64_t>` **or** a plain `uint64_t` guarded by the UI thread; Rust only relies on the field-level `#[repr(C)]` layout and re-wraps it with `AtomicU64::from_ptr`.
-4. Whenever the QML object is destroyed (rotation, GC), the QML side *must* call `mukei_stop_generation` so any in-flight stream retires gracefully.
+The implementation validates `user_input`, `context_ptr`, and
+`guard_ptr`, converts the prompt into owned Rust text, bumps the guard
+liveness token, and spawns a worker thread that delivers the callback
+only through `callback_with_guard!`.
 
-```
+#### 1.3.2 Lifetime, ABA, and unwind guarantees
 
-#### 1.3.2 QML Integration (Manual C-FFI — v0.6 lifetime-safe)
-```cpp
-// qml/MukeiBridge.cpp (Fallback — paired with §1.3.1 v0.6 Rust side)
-#include "MukeiBridge.h"
-#include <QtQml>
-#include <QPointer>
+The callback guard is backed by `mukei_core::guard::Inner`, not by a raw
+Qt-owned `u64` anymore.
 
-extern "C" {
-    struct CallbackGuard;   // opaque on the C++ side
+- `Inner` carries an `AtomicU64` generation counter used for normal
+  liveness / cancellation.
+- `Inner` also carries a process-unique `instance_id`, assigned from a
+  monotonic global counter at construction time.
+- The `(pointer, generation, instance_id)` triple closes the ABA window:
+  if the allocator reuses the same heap address after `release` +
+  `acquire`, the new guard gets a different `instance_id` and stale
+  callbacks are dropped.
+- Callback delivery is wrapped by `callback_with_guard!`, which returns
+  `GuardError` on generation mismatch, release, or panic. The panic is
+  contained with `std::panic::catch_unwind`; nothing unwinds across the
+  C ABI.
+- Workspace-wide `panic = "unwind"` remains a hard invariant. Under
+  `panic = "abort"`, the catch-unwind containment strategy would not
+  run and the FFI guarantee would collapse.
 
-    bool mukei_initialize(const char* config_path);
-    uint64_t mukei_send_message(
-        const char* input,
-        void* context_ptr,
-        CallbackGuard* guard,
-        void (*callback)(void*, uint64_t, const char*)
-    );
-    void mukei_stop_generation(CallbackGuard* guard);
-    void mukei_release_callback_guard(CallbackGuard* guard);
-}
+#### 1.3.3 Header policy and regression coverage
 
-// Free function exposed to Rust — captures `this` via context_ptr.
-static void mukei_token_callback(void* ctx, uint64_t generation, const char* token) {
-    auto* self = static_cast<MukeiBridge*>(ctx);
-    if (!self) return;
-    // Defensive: bail if the QObject has been destroyed mid-stream.
-    QPointer<MukeiBridge> guard(self);
-    if (guard.isNull()) return;
+The hand-maintained header
+`rust/crates/mukei-ffi-shim/include/mukei_ffi_shim.h` is shipped in-repo
+for reproducible Android/NDK builds; the workspace does **not** rely on
+build-time header generation.
 
-    QString qToken = QString::fromUtf8(token);
+Current regression coverage is intentionally narrow and code-grounded:
 
-    // 🛡️ Lifetime check: only push to Qt's event queue if our QObject is
-    // still alive AND the generation counter still matches. Otherwise the
-    // Rust side has already retired the stream — silently drop.
-    if (self->currentGeneration() != generation) return;
+- `tests::c_header_lists_every_exported_symbol` verifies that the header
+  and the Rust shim list the same exported symbol names.
+- `generation_round_trip_via_canonical_guard` locks the generation API.
+- `null_arguments_are_rejected` locks the reject-with-0 contract.
+- `instance_id_is_unique_per_construction` in `mukei_core::guard`
+  protects the ABA defence added in architect review GH #53.
 
-    QMetaObject::invokeMethod(
-        self,
-        "chunkGenerated",
-        Qt::QueuedConnection,
-        Q_ARG(QString, qToken)
-    );
-}
-
-void MukeiBridge::sendMessage(const QString& input) {
-    QByteArray inputBytes = input.toUtf8();
-
-    // Lazily create the lifetime guard on first use. The QML side owns it
-    // and releases it on destruction.
-    if (!m_guard) {
-        m_guard = new CallbackGuard{};       // zero-initialised generation = 0
-    }
-
-    currentGeneration = mukei_send_message(
-        inputBytes.constData(),
-        this,                       // context_ptr = QObject self
-        m_guard,
-        &mukei_token_callback
-    );
-}
-
-void MukeiBridge::stopGeneration() {
-    if (m_guard) {
-        mukei_stop_generation(m_guard);
-    }
-}
-
-MukeiBridge::~MukeiBridge() {
-    stopGeneration();                                  // retire in-flight stream
-    if (m_guard) {
-        mukei_release_callback_guard(m_guard);
-        m_guard = nullptr;
-    }
-}
-```
-
-```
+Any future ABI-shape validator should extend the existing tests instead
+of replacing the committed header with `cbindgen` or another host-build
+codegen step.
 
 ### 1.4 Memory Management Across FFI Boundary
 
@@ -850,49 +726,51 @@ pub fn stop_generation(&mut self) {
 ```
 
 #### 1.4.2 Panic Safety at FFI Boundary
-```rust
-// rust/src/lib.rs
-use std::panic;
-use tracing_panic::panic_hook;
 
-pub fn initialize_panic_hook() {
-    // Set custom panic hook that logs before crashing
-    panic::set_hook(Box::new(|info| {
-        let panic_msg = info.to_string();
-        let location = info.location().map(|l| l.to_string()).unwrap_or_default();
-        
-        // Log to local crash file
-        crate::diagnostics::log_panic(&panic_msg, &location);
-        
-        // Call default hook (prints to stderr)
-        panic_hook(info);
+Authoritative source: `rust/crates/mukei-core/src/diagnostics/{logger,panic_hook,crash_logger}.rs`.
+
+Panic handling is centralised in the diagnostics subsystem rather than
+open-coded inside every prose example.
+
+```rust
+pub fn install_panic_hook(sink: Arc<dyn PanicSink>) {
+    let _ = SINK.set(sink);
+    if INSTALLED.set(()).is_err() {
+        return;
+    }
+
+    std::panic::set_hook(Box::new(|info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "<unknown>".into());
+        let reason = panic_payload_to_string(info.payload());
+        let fp = CrashFingerprint::from_panic(&location, &reason);
+        let record = CrashRecord::new(fp.clone(), location.clone(), reason.clone());
+
+        if let Some(crash_sink) = logger::crash_sink() {
+            crash_sink.append(&record);
+        }
+        tracing::error!(target = "mukei::panic", fingerprint = %fp, location = %location, reason = %reason);
+        if let Some(sink) = SINK.get().cloned() {
+            sink.on_panic(&fp, &reason);
+        }
     }));
 }
-
-// Wrap all FFI-exposed functions in catch_unwind
-#[cxx_qt::bridge]
-pub mod ffi {
-    unsafe extern "RustQt" {
-        #[qinvokable]
-        fn initialize(self: Pin<&mut MukeiAgent>, config_path: QString) -> bool {
-            match std::panic::catch_unwind(|| {
-                // Actual initialization logic
-                self.initialize_inner(config_path)
-            }) {
-                Ok(result) => result,
-                Err(_) => {
-                    // Panic caught, return error to QML
-                    self.error_occurred(
-                        QString::from("ERR_FFI_PANIC"),
-                        QString::from("Initialization failed due to internal error")
-                    );
-                    false
-                }
-            }
-        }
-    }
-}
 ```
+
+Load-bearing invariants:
+
+1. `logger::initialize_tracing()` boots with `std::io::sink()` so early
+   logs do **not** leak into Android `logcat` through stdout / stderr.
+2. The embedding bridge installs the file-backed `CrashSink`; the core
+   crate never falls back to `/sdcard/...`.
+3. `reinstall_panic_hook()` exists because `std::panic::set_hook` is
+   process-global and downstream frameworks may overwrite the Mukei hook
+   after boot.
+4. Manual `extern "C"` callback delivery is additionally wrapped by the
+   guard macro's `catch_unwind`, so callback panics are contained even
+   outside the main bridge lifecycle.
 
 ### 1.5 Error Propagation (Rust → QML)
 
@@ -989,9 +867,9 @@ pub enum ErrorClass {
 ```
 
 Used by the failure-mode tracker (§2.5 / §36.1) and the
-crash-loop Bloom filter. The classifier is exhaustive at the
-compile level (architect review Issue #19); no future variant
-can silently land in `Unknown`.
+local crash-record lookup performed by `diagnostics::crash_logger`.
+The classifier is exhaustive at the compile level (architect review
+Issue #19); no future variant can silently land in `Unknown`.
 
 #### 1.5.3 Error Signal to QML
 
@@ -6484,171 +6362,92 @@ Item {
 
 ## 36. Boot Safety & Crash Prevention
 
-### 36.1 Crash Recovery Loop Prevention (Critical — Infinite Crash)
-**Problem:** Agar SQLite DB corrupt ho jaye, ya GGUF model file corrupt ho jaye, toh app **boot par hi crash** ho jayegi. User app reopen karega → phir crash → reopen → crash. Infinite loop. User app uninstall kar dega.
+### 36.1 Crash Recovery Loop Prevention (Current diagnostics implementation)
 
-**Severity:** 🔴 **CRITICAL** — App becomes unusable, user uninstalls.
+Authoritative source: `rust/crates/mukei-core/src/diagnostics/{crash_logger,panic_hook,logger}.rs`.
 
-#### 36.1.1 Rust Crash Counter
+The current codebase does **not** implement a numeric crash counter or a
+QML safe-mode reset screen. Instead, it persists one local JSON crash
+record per fingerprint and lets higher-level boot logic compare recent
+records against the failure currently being observed.
+
+#### 36.1.1 Crash fingerprint and sink
+
+A crash fingerprint is derived from the panic site and message:
+
 ```rust
-// rust/src/lib.rs
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::path::{Path, PathBuf};
-
-const CRASH_COUNTER_FILE: &str = "crash_count";
-const MAX_CRASHES: u32 = 3;
-
-pub enum BootMode {
-    Normal,
-    SafeMode,
-}
-
-pub fn boot_safety_check(data_dir: &str) -> BootMode {
-    let crash_file = Path::new(data_dir).join(CRASH_COUNTER_FILE);
-
-    let crash_count = match fs::read_to_string(&crash_file) {
-        Ok(content) => content.trim().parse::<u32>().unwrap_or(0),
-        Err(_) => 0,
-    };
-
-    if crash_count >= MAX_CRASHES {
-        tracing::error!("Too many crashes ({}). Entering Safe Mode.", crash_count);
-        return BootMode::SafeMode;
-    }
-
-    let new_count = crash_count + 1;
-    let _ = write_counter_atomic(&crash_file, new_count);
-    BootMode::Normal
-}
-
-pub fn on_successful_boot(data_dir: &str) {
-    let crash_file = Path::new(data_dir).join(CRASH_COUNTER_FILE);
-    let _ = write_counter_atomic(&crash_file, 0);
-}
-
-pub fn reset_crash_counter(data_dir: &str) {
-    let crash_file = Path::new(data_dir).join(CRASH_COUNTER_FILE);
-    let _ = write_counter_atomic(&crash_file, 0);
-}
-
-fn write_counter_atomic(path: &Path, value: u32) -> Result<(), std::io::Error> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let tmp = tmp_counter_path(path);
-    let mut file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&tmp)?;
-    file.write_all(value.to_string().as_bytes())?;
-    file.sync_all()?;
-    drop(file);
-    fs::rename(tmp, path)?;
-    Ok(())
-}
-
-fn tmp_counter_path(path: &Path) -> PathBuf {
-    let mut s = path.as_os_str().to_os_string();
-    s.push(format!(".tmp.{}", std::process::id()));
-    PathBuf::from(s)
+pub fn from_panic(location: &str, reason: &str) -> CrashFingerprint {
+    let mut h = Sha256::new();
+    h.update(location.as_bytes());
+    h.update([0u8]);
+    h.update(reason.as_bytes());
+    CrashFingerprint(hex_lower(&h.finalize()))
 }
 ```
 
-#### 36.1.2 QML Safe Mode UI
-```qml
-// qml/SafeModeScreen.qml
-import QtQuick 2.15
-import QtQuick.Controls 2.15
-import QtQuick.Layouts 1.15
+Each persisted record contains:
 
-Page {
-    background: Rectangle { color: Theme.background }
-    
-    ColumnLayout {
-        anchors.centerIn: parent
-        spacing: Theme.spacingLg
-        
-        Label {
-            Layout.alignment: Qt.AlignHCenter
-            text: "Mukei encountered errors"
-            font: Theme.fontSerif
-            font.pointSize: 24
-            color: Theme.textPrimary
-        }
-        
-        Label {
-            Layout.alignment: Qt.AlignHCenter
-            text: "Multiple crashes detected. You can reset all data to continue."
-            font: Theme.fontSans
-            font.pointSize: 15
-            color: Theme.textSecondary
-            wrapMode: Text.Wrap
-            horizontalAlignment: Text.AlignHCenter
-        }
-        
-        Button {
-            Layout.alignment: Qt.AlignHCenter
-            text: "Reset All Data"
-            font: Theme.fontSans
-            
-            background: Rectangle {
-                color: Theme.error
-                radius: Theme.radiusMd
-            }
-            
-            contentItem: Label {
-                text: parent.text
-                font: parent.font
-                color: "white"
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
-            
-            onClicked: resetDialog.open()
-        }
-        
-        Button {
-            Layout.alignment: Qt.AlignHCenter
-            text: "Export Crash Logs"
-            font: Theme.fontSans
-            
-            background: Rectangle {
-                color: Theme.surfaceVariant
-                radius: Theme.radiusMd
-            }
-            
-            contentItem: Label {
-                text: parent.text
-                font: parent.font
-                color: Theme.textPrimary
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
-            
-            onClicked: agent.exportCrashLogs()
-        }
+- `fingerprint: CrashFingerprint`
+- `location: String`
+- `reason: String`
+- `ts: chrono::DateTime<Utc>`
+
+`CrashSink::open(dir)` is the only filesystem-backed sink in the current
+implementation. It enforces the Android storage contract before creating
+its directory:
+
+- rejects `/sdcard/...`
+- rejects `/storage/emulated/...`
+- rejects `/storage/self/...`
+- rejects `content://media/...`
+
+This is deliberate: on Android, the bridge must resolve the sink to
+`Context.getFilesDir() + "/crashes/"`. The core crate never requests the
+banned external-storage permissions that those rejected paths would
+require.
+
+Write/read behaviour is intentionally simple and code-matched:
+
+- `append()` serialises the `CrashRecord` as pretty JSON into
+  `<crashes_dir>/<fingerprint>.json` under a mutex (`append_lock`) so two
+  panics do not tear the same file concurrently.
+- `recent_for()` reads one fingerprint-specific record.
+- `most_recent()` scans all `*.json` files in the crash directory and
+  returns the newest valid record.
+
+#### 36.1.2 Panic hook integration
+
+The diagnostics hook turns every panic into a local crash artifact and a
+bridge-visible notification:
+
+```rust
+std::panic::set_hook(Box::new(|info| {
+    let location = panic_location(info);
+    let reason = panic_reason(info);
+    let fp = CrashFingerprint::from_panic(&location, &reason);
+    let record = CrashRecord::new(fp.clone(), location.clone(), reason.clone());
+
+    if let Some(crash_sink) = logger::crash_sink() {
+        crash_sink.append(&record);
     }
-    
-    Dialog {
-        id: resetDialog
-        title: "Reset All Data?"
-        standardButtons: Dialog.Yes | Dialog.No
-        
-        Label {
-            text: "This will delete all conversations, settings, and downloaded models. This action cannot be undone."
-            wrapMode: Text.Wrap
-        }
-        
-        onAccepted: {
-            agent.resetAllData()
-            Qt.quit()
-        }
+    tracing::error!(target = "mukei::panic", fingerprint = %fp, location = %location, reason = %reason);
+    if let Some(sink) = SINK.get().cloned() {
+        sink.on_panic(&fp, &reason);
     }
-}
+}));
 ```
+
+Additional runtime guarantees:
+
+- `install_panic_hook()` installs the hook once and stores the current
+  `PanicSink`.
+- `reinstall_panic_hook()` deliberately bypasses the one-shot guard so
+  the embedder can reclaim the hook after another framework overwrites
+  `std::panic::set_hook`.
+- `logger::initialize_tracing()` uses `std::io::sink()` as the bootstrap
+  writer, preventing privacy leaks into `logcat` before a file-backed
+  sink exists.
+- No remote crash exporter exists in the current implementation.
 
 ---
 

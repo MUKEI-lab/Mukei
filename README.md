@@ -136,6 +136,14 @@ mukei-ffi-shim                                                3 passed
   `from_non_null(NonNull<Inner>)` (architect review GH #10). Re-bind is
   `Inner::bump()`; permanent destroy is `Inner::tombstone()`
   (architect review GH #9).
+- **Local-only diagnostics pipeline.** `diagnostics::initialize_tracing()`
+  boots with `std::io::sink()` so Android stdout/stderr never leak into
+  logcat. The embedder installs a `CrashSink` for app-internal storage,
+  and `panic_hook::{install_panic_hook,reinstall_panic_hook}` persists a
+  `CrashRecord { fingerprint, location, reason, ts }` JSON file per
+  fingerprint while notifying the bridge-facing `PanicSink`. Crash sinks
+  resolving to `/sdcard/...`, `/storage/emulated/...`, `/storage/self/...`,
+  or `content://media/...` are rejected at open time.
 - **Bounded runtime (TRD §2.2).** `MAX_BLOCKING_THREADS = 6` on
   `target_os = "android"`, `8` elsewhere. `TOOL_BLOCKING_SLOTS = 2`. A
   module-level `const _: () = assert!(TOOL_BLOCKING_SLOTS < MAX_BLOCKING_THREADS, …)`

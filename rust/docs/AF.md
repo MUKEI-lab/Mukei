@@ -221,17 +221,22 @@ The classic Keystore trap is **never** calling `secretKey.encoded`; that fails o
 [E] zeroize raw buffer (Zeroizing wrapper)
 ```
 
-### 4.5 Crash Counter
+### 4.5 Crash diagnostics hand-off
 
-The boot path **always** increments `crash_counter` on entry and clears it on full success. (TRD §36.1, PRD REQ-LIFE-02.)
+The current boot path is wired to the diagnostics subsystem, not to a
+numeric `crash_counter`. A panic recorded during the previous run is
+materialised as a local `CrashRecord { fingerprint, location, reason, ts }`
+in the installed crash sink. Boot-time recovery logic can consult the
+most recent record and fingerprint-specific history through
+`CrashSink::most_recent()` / `recent_for()`. (TRD §36.1, PRD REQ-ARCH-01,
+REQ-DIA-02.)
 
 ```
-boot_start → crash_counter += 1                [A]
-boot_succeed → crash_counter = 0 (transactional)         [A]
-boot_crash ≥ 2 within 24h → SafeMode()         [B]
+boot_start → diagnostics sink available
+panic during prior run → files/crashes/<fingerprint>.json exists
+next boot → inspect recent crash records → choose recovery UX / retry path
+successful boot → no destructive counter reset required
 ```
-
-The counter is persisted via `recovery_state` table (atomic rename on every write — TRD §36.1).
 
 ### 4.6 Determinism Guarantee
 
@@ -251,31 +256,28 @@ The counter is persisted via `recovery_state` table (atomic rename on every writ
 
 ### 5.2 Resumable Download State Machine
 
-(TRD §5.3 — `.part + .meta` overwrite-rename pattern, PRD REQ-DL-08.)
+(TRD §8.1 — `.partial` + atomic-rename downloader, PRD REQ-DL-08.)
 
 ```
 state Download {
     *NotStarted ──[start]──> ResolvingUrl
     ResolvingUrl ──[ok]──> NotStartedResumeCheck
-    NotStartedResumeCheck ──[.meta OK + .part OK + Range OK]──> VerifyingPartial
-    NotStartedResumeCheck ──[no meta]──> DownloadingFresh
-    VerifyingPartial ──[hash so far ✓]──> ResumingByteRange
-    VerifyingPartial ──[hash mismatch ✗]──> ShredAndRestart
-    DownloadingFresh ──[HTTP 2xx]──> PersistMeta
-    PersistMeta ──[fsync ✓]──> StreamingBytes
+    NotStartedResumeCheck ──[.partial exists + Range OK]──> ResumingByteRange
+    NotStartedResumeCheck ──[no partial]──> DownloadingFresh
+    DownloadingFresh ──[HTTP 2xx]──> StreamingBytes
     StreamingBytes ──[network drop]──> ResumePending
-    StreamingBytes ──[HTTP 416 / range fail]──> ResumePending
+    StreamingBytes ──[HTTP 416 / stale resume]──> ShredAndRestart
     ResumePending ──[user retry or auto]──> ResumingByteRange
     ResumingByteRange ──[HTTP 206]──> StreamingBytes
     StreamingBytes ──[total bytes reached]──> VerifyingFinal
     VerifyingFinal ──[SHA256 ✓ + size ✓]──> FinalRename
     VerifyingFinal ──[hash fail]──> ShredAndRestart
     FinalRename ──[rename OK + fsync]──> *Complete
-    ShredAndRestart ──[delete .part + .meta + atomic remove]──> NotStartedResumeCheck
+    ShredAndRestart ──[delete .partial and restart from byte 0]──> NotStartedResumeCheck
 }
 ```
 
-**Atomic-rename rule** (TRD §5.3): `temp` file is never `rename()`d to the canonical name unless the SHA256 is verified AND fsync succeeded. No exceptions.
+**Atomic-rename rule** (TRD §8.1): `.partial` is never `rename()`d to the canonical name unless the SHA256 is verified AND fsync succeeded. No exceptions.
 
 ### 5.3 Why Not Just Resume From Offset?
 
@@ -286,11 +288,11 @@ state Download {
 | File-system corrupt | SHA256 catches it | trust truncated file |
 | Storage full on restart | graceful failed state | out-of-band fail |
 
-The `.meta` JSON sidecar stores `{expected_sha256, total_bytes, received_bytes, etag, url}` — see BS §6.3 for schema.
+The current downloader does **not** persist a `.meta` JSON sidecar. Resume state comes from the presence/length of `<dest>.partial`, HTTP `Range`, and final full-file SHA-256 verification — see BS §6.3.
 
 ### 5.4 Cancellation
 
-User cancel hits ⇒ `cancel_install = true` CAS flag; in-flight HTTP read errors out (`reqwest` aborts); `ShredAndRestart` runs; `ModelManager.qml` returns to picker. (TRD §5.3.)
+User cancel hits `MukeiAgent::stop_download()`, which cancels the dedicated `download_cancel` token without touching chat inference. The in-flight task stops, `DownloadSlotGuard` releases the destination-path lock, and any surviving `.partial` remains the candidate resume source for the next attempt unless the downloader itself decides it must restart from byte 0. (TRD §8.1.)
 
 ---
 
@@ -309,7 +311,7 @@ User cancel hits ⇒ `cancel_install = true` CAS flag; in-flight HTTP read error
 | 1 | `WelcomeScreen` | (lands here) | Set the privacy / on-device trust frame; no DB writes yet | UXB §7.1 |
 | 2 | `WelcomeScreen` | Tap **Get Started** | Navigate to `ModelPickerScreen`; default conversation row is **not** created yet | UXB §7.1.2 |
 | 3 | `ModelPickerScreen` | Inspect bundled model cards (size, quantisation, editorial blurb) | Inline storage check (warning banner if free space < model size) | UXB §7.2 |
-| 4 | `ModelPickerScreen` | Tap **Download** on one card | Deterministic resumable download (REQ-DL-01..03, BS §6.3 `.part`/`.meta`) | UXB §7.2.3–7.2.4 |
+| 4 | `ModelPickerScreen` | Tap **Download** on one card | Deterministic resumable download (REQ-DL-01..03, BS §6.3 `.partial`) | UXB §7.2.3–7.2.4 |
 | 5 | `VerificationScreen` | (auto) | Three-phase verification: SHA-256 integrity → on-device asset extraction → SQLCipher unlock (REQ-DL-09, REQ-SEC-01) | UXB §7.3 |
 | 6 | `EmptyChatScreen` | (auto) | Default conversation row created lazily; three editorial prompt cards rendered (UXB §7.4.3) | UXB §7.4 |
 | 7 | `EmptyChatScreen` | Type *or* tap a prompt card | **Fill-only** by default (v0.7.5 P2-05); user retains control of Send | UXB §7.4.3, AF §6.6 |
@@ -551,15 +553,16 @@ Post-Parse Tool Validator  (TRD §13.3 + REQ-AGT-08)
 [A] tokens stream into ChatScreen
 [B] LLM emits GBNF `"name":"web_search","args":{"q":"..."}`
 [C] Rust posts a ToolCall row + UI ToolCallPill (UXB §4.7)
-[D] Executor(O):
-    ├── DDG HEAD + Brave HEAD, parallel
-    ├── Merge on URL + title dedupe
-    └── Format_for_llm  →  XML  <external_data trust="untrusted" action="READ_ONLY">
+[D] Executor:
+    ├── SearchPlanner classifies the query / task shape
+    ├── selects Brave and/or Tavily under per-engine timeouts
+    ├── merges / ranks results through the planner policy
+    └── wraps returned text as `<external_data trust="untrusted" action="READ_ONLY">`
 [E] Tokens continue; LLM summarises results
 [F] tool_audit_log row appended (BS §2.6)
 ```
 
-**Network-fail** → executor yields empty list + structured error code 503; LLM informed.
+**Network-fail** → executor returns a structured tool error envelope; no DuckDuckGo fallback exists in the current implementation.
 
 #### 10.2.2 `read_file` (TRD §5.2)
 
@@ -691,7 +694,7 @@ match io::read_file_via_saf(uri) {
 **UX contract:**
 - The toast copy lives in `i18n/rag.en.json` key `safe.permission_revoked`.
 - Tap target of the toast: reopen `SAFFilePickerSheet` (§18.1) for the *same* file type — already granted files are not affected.
-- The crash dump (`files/crash.dump`) MUST NOT contain any URI fragment or absolute display path; only `display_name`, `saf_token` (opaque), and the error class.
+- Any local crash record (`files/crashes/<fingerprint>.json`) MUST NOT contain any URI fragment or absolute display path; only `display_name`, `saf_token` (opaque), and the error class are allowed in derived diagnostics.
 
 **FMEA:**
 
@@ -711,27 +714,26 @@ match io::read_file_via_saf(uri) {
 | Layer | Lives in | Source of truth |
 |-------|----------|-----------------|
 | Rust generator | llama.cpp token worker | TRD §3.1 |
-| Rust guard | `CallbackGuard` | TRD §1.3.1 (v0.7.2 ABI-stable) |
-| CXX-Qt / cxx bridge | channel `chunkGenerated(batch)` | TRD §1.2 |
+| Rust guard | opaque guard + generation + `instance_id` | TRD §1.3 |
+| CXX-Qt / cxx bridge | signals like `chunk_generated`, `stream_finalized`, `download_progress` | TRD §1.2 |
 | QML MessageBus | `Q_PROPERTY` model | UXB §3.2 |
 
 ### 12.2 Generation Guard (TRD §1.3.1)
 
-Every `mukei_send_message` call increments the `generation: u64` counter on the Source QObject. Every emitted token references the generation it was generated under. If the QObject is re-bound (e.g. rotation), tokens stamped with the **previous** generation are dropped silently before reaching QML.
+Every manual-shim `mukei_send_message` call binds callback delivery to an opaque guard object plus a `generation: u64`. The guard also exposes a process-unique `instance_id`, so even allocator address reuse after release/acquire cannot revive a stale callback. Late tokens are dropped before they reach QML.
 
 ```rust
-// pseudo
-fn on_token(token: &str, generation: u64) {
-    if guard.generation().load() != generation { return; /* drop late token */ }
-    let _ = qml_channel_token_generated(qobject, token);
-}
+// conceptual shape
+if !mukei_callback_guard_matches(guard_ptr, generation) { return; }
+if mukei_callback_guard_instance_id(guard_ptr) != bound_instance_id { return; }
+callback_with_guard!(guard_ptr, generation, { callback(ctx, generation, token_ptr); Ok(()) })?;
 ```
 
-(REQ-ARCH-05; TRD §1.3.1.)
+(REQ-ARCH-05; TRD §1.3.)
 
 ### 12.3 Why a Counter Is Not Optional
 
-Because CXX-Qt's `Qt::ConnectionType` and `catch_unwind` interact, **a non-ABI-stable wrap can cause a use-after-free on QML side when the underlying Rust value drops the QObject pointer mid-emission.** Generation guard + `unsafe fn guard_atomic<'a>(...)` fix. (TRD §1.3, §1.4.)
+Because queued UI delivery alone does not solve lifetime races. The current fix is the combination of opaque guard pointer, generation token, process-unique `instance_id`, and `catch_unwind`-wrapped callback dispatch. A plain counter without ABA defence is not sufficient once heap addresses can be re-used. (TRD §1.3, §1.4.)
 
 ### 12.4 Throttle / Coalesce
 
@@ -749,13 +751,14 @@ QML receives tokens at ~12–50 Hz. A coalescer buffers 1 token / frame max; nev
 ### 13.1 User Abort (mid-stream)
 
 ```
-User taps "Stop" → QML emits stop(current_generation)
+User taps "Stop" → QML calls MukeiAgent.stop_generation()
        │
        ▼
-Rust::abort(current_generation)  →  AtomicU64 CAS sets aborted id
+bridge cancels the dedicated chat `CancellationToken`
        │
        ▼
-Worker thread checks CAS, drops next token, emits stream_finalized(Aborted)
+AgentLoop / stream worker observes cancellation, stops generation,
+and the bridge emits the terminal stream signals
 ```
 
 ### 13.2 Validator Reject (post-parse, pre-execute)
@@ -791,54 +794,48 @@ If a `stream_finalized` signal arrives twice, second is ignored. If a `token_gen
 
 ## 14. Crash Detection & Safe-Mode Escalation
 
-### 14.1 Crash Sources
+### 14.1 Crash sources
 
 | Source | Detection |
 |--------|-----------|
-| Rust panic | `catch_unwind` registers panic counter (TRD §1.4) |
-| Android JVM crash | `Thread.setDefaultUncaughtExceptionHandler`, counter +1 |
-| OOM-killed (LMK) | Foreground service exits `onTaskRemoved` → counter +1 |
-| SIGSEGV in FFI | Generation mismatches surge → guarded abort + counter +1 |
+| Rust panic | `diagnostics::panic_hook` computes fingerprint + appends `CrashRecord` |
+| Manual FFI callback panic | `callback_with_guard!` returns `GuardError`, no unwind across C ABI |
+| Crash-sink path violation | `CrashSink::open()` rejects banned storage roots at boot |
+| Downloader task panic | bridge re-emits `error:ERR_FFI_PANIC:...` through `download_progress` |
 
-### 14.2 Safe-Mode Trigger
+### 14.2 Current recovery trigger surface
 
-```
-crash_count >= 2 AND window = 24h → SafeModeScreen, last_crash_class = ...
-Reset button is fully local; user confirmed twice before destructive wipe.
-```
+The codebase currently persists local crash records and exposes them to
+boot-time recovery logic; it does **not** implement the older numeric
+`crash_count >= 2` safe-mode contract described in prior drafts.
 
-### 14.3 Safe-Mode Function
+### 14.3 Recovery UX contract
 
-`SafeModeScreen.qml` (UXB §4.6):
+Current source guarantees the diagnostics artifact path, not a specific
+QML safe-mode screen. Higher-level UX may inspect the most recent crash
+record and offer retry / reset / export, but those decisions are above
+what the current Rust implementation hard-codes.
 
-```
-┌─────────────────────────────┐
-│ SafeMode                     │
-│ "We've had a few crashes."  │
-│ [Continue Anyway] [Reset]   │
-└─────────────────────────────┘
-```
+### 14.4 Local-only persistence rules
 
-- **Continue Anyway:** counter cleared, but only last 50 messages kept; vector store dropped.
-- **Reset:** full local wipe (DB, K/V cache, user files via SAF abandon).
+- crash records are written as `files/crashes/<fingerprint>.json`
+- sink path must be app-internal on Android (`Context.getFilesDir()/crashes`)
+- `/sdcard/...`, `/storage/emulated/...`, `/storage/self/...`, and
+  `content://media/...` are rejected
+- no remote crash exporter exists
 
-### 14.4 What Reset Does NOT Touch
+### 14.5 Reclaiming the panic hook
 
-- Keystore master entry: kept (so DB stays encrypted).
-- App-allocated storage: wiped.
-- Temporary sandbox on disk: wiped.
+Because `std::panic::set_hook` is process-global, downstream frameworks
+may overwrite the Mukei hook after boot. `reinstall_panic_hook()` exists
+specifically so the embedder can reclaim crash logging and bridge
+notification.
 
-### 14.5 What Reset Does Touch
+### 14.6 Tests (TRD §11.1)
 
-- `conversations` table TRUNCATE
-- `chunks`/HNSW index DELETED
-- `saf_tokens` — `ACTION_OPEN_DOCUMENT_TREE` is asked again later
-- `crash_counter` RESET 0
-- `recovery_state` RESET
-
-### 14.6 Test (TRD §11.1)
-
-`test_safe_mode_triggers_after_two_crashes`: simulate 2 consecutive boot failures via mocked panic handler, assert SafeModeScreen emits.
+Relevant current coverage includes `write_then_read_roundtrips`,
+`scoped_storage_violation_is_refused`, `fingerprint_is_stable_within_call`,
+and `c_header_lists_every_exported_symbol`.
 
 ---
 
@@ -893,7 +890,7 @@ Before any `download`/write, `free_space_bytes >= expected_bytes + 64 MB`. Else 
 
 ### 16.4 Mid-Download Storage Full
 
-→ tool stops, partial SHA256 of `.part` recorded, .meta updated to `paused_low_storage`. No automatic garbage collection of `.part` until user reclaims.
+→ tool stops with a typed error, leaving any existing `.partial` as the resume candidate unless the downloader chooses a clean restart on the next attempt. There is no `.meta` sidecar in the current implementation.
 
 ---
 
@@ -903,13 +900,25 @@ Before any `download`/write, `free_space_bytes >= expected_bytes + 64 MB`. Else 
 
 `config.toml` parsed strictly via `config_validate::validate_for_boot`. Any unknown field fails boot (TRD §12.5, REQ-CON-04). See BS §7 for full schema.
 
-### 17.2 Hot Path (settings change)
+### 17.2 Hot Path (runtime mutation)
 
-Quick fields (`theme`, `temperature`, `max_tokens`) hot-reload via QML signal. Heavy fields (`model_path`, `default_index`, `brave_key_blob`) require restart.
+The current runtime has only a small dynamic surface:
 
-### 17.3 Invalid Hot Patch
+- `set_brave_api_key()` and `set_tavily_api_key()` mutate wrapped-secret
+  plaintext slots and rebuild the shared `ToolRegistry` / `AgentLoop`
+- `note_thermal_status()` updates the bridge-visible thermal value
+- `set_model_dir()` rewrites the download destination root
 
-User changes `temperature = "frosty"` → validator rejects → UI shows inline error, no restart.
+`update_setting()` in the bridge is currently a stub, so prior prose
+about hot-reloading generic UI/model parameters is not implementation
+truth.
+
+### 17.3 Invalid runtime mutation
+
+If a dynamic bridge input is malformed — for example a wrapped-secret
+setter receives unusable data or a model download request carries a bad
+SHA-256 — the bridge surfaces a typed `ERR_*` error and leaves the
+existing runtime state intact.
 
 ---
 
@@ -1014,70 +1023,62 @@ KV-Cache is a single contiguous `Vec<u8>` so that `madvise(MADV_WILLNEED)` is me
 
 Without a generation guard, an in-flight token from a previous QObject owner can land in the new QObject's `chatModel`, corrupting the UI. (PRD REQ-ARCH-05, TRD §1.3.)
 
-### 21.2 ABI Contract (v0.7.2 / TRD §1.3.1)
+### 21.2 ABI Contract (current shim / TRD §1.3)
 
 ```rust
-#[repr(C)]
-pub struct CallbackGuard { generation: u64 }
-
-#[repr(C)]
-pub struct MukeiFFIExport {
-    pub token_callback: TokenCallback,   /* Option<extern "C" fn(...)> */
-    pub guard: *const CallbackGuard,
-}
+const MukeiCallbackGuardInner* mukei_acquire_callback_guard(void);
+uint64_t mukei_callback_guard_bump_generation(const MukeiCallbackGuardInner* guard_ptr);
+bool mukei_callback_guard_matches(const MukeiCallbackGuardInner* guard_ptr, uint64_t generation);
+uint64_t mukei_callback_guard_instance_id(const MukeiCallbackGuardInner* guard_ptr);
+uint64_t mukei_send_message(const char* input, void* context_ptr, const MukeiCallbackGuardInner* guard_ptr, MukeiTokenCallback callback);
 ```
 
 Two invariants:
-1. `guard` outlives any token the callback can emit.
-2. The QObject reads `guard.generation` **at the FFI boundary**, comparing against what was stamped on the token.
+1. the opaque guard pointer outlives any callback bound to it
+2. liveness is the pair `(generation, instance_id)`, not generation alone
 
-### 21.3 Generation Increment Site
+### 21.3 Bind / rebind site
 
-Every `mukei_send_message` call does:
-```rust
-let new_gen = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
-```
-Tokens are stamped with the generation they started under. Dropping the old QObject's tokens = early-mismatch detection.
+Every manual-FFI send binds against a freshly bumped generation and the
+current `instance_id`; callback dispatch re-checks both before entering
+user code.
 
-### 21.4 Test (Confirmed in TRD §11.1)
+### 21.4 Tests (Confirmed in TRD §11.1)
 
-`test_callbackguard_layout_is_abi_stable`: assert `Layout::for_value::<CallbackGuard>().size() == 8`.
-`test_callbackguard_drops_late_tokens`: simulate QObject GC, assert zero tokens cross.
+`generation_round_trip_via_canonical_guard`,
+`null_arguments_are_rejected`,
+`c_header_lists_every_exported_symbol`, and
+`instance_id_is_unique_per_construction`.
 
 ---
 
 ## 22. Error Taxonomy & Recovery Matrix
 
-### 22.1 Numeric Range
+### 22.1 Stable string codes
 
-| Code range | Class | User-facing |
-|------------|-------|-------------|
-| 0xx | System | — |
-| 1xx | Boot | Recovery screens |
-| 2xx | Permission/SAF | Re-prompt |
-| 3xx | Tool | Injected |
-| 4xx | Streaming | Cancelled or hard fail |
-| 5xx | Resources | Inline hint |
-| 6xx | DB / Encryption | SafeMode |
-| 7xx | Network | Inline banner |
+The current error surface is string-coded through `MukeiError::error_code()`,
+not numeric ranges.
 
-### 22.2 Specific Codes
+| Class | Example stable codes | User-facing |
+|------|----------------------|-------------|
+| FFI / bridge | `ERR_FFI_PANIC`, `ERR_BRIDGE_BUSY`, `ERR_DOWNLOAD_BUSY` | inline bridge error / retry guidance |
+| Config | `ERR_CONFIG_MISSING`, `ERR_CONFIG_INVALID`, `ERR_CONFIG_UNKNOWN` | boot/config dialog |
+| Storage | `ERR_DB_INIT`, `ERR_DB_CORRUPTION`, `ERR_MIGRATION_ORDER` | recovery / repair path |
+| Agent / tools | `ERR_TOOL_PARSE`, `ERR_TOOL_ARGS`, `ERR_TOOL_EXEC`, `ERR_WEB_SEARCH` | injected envelope / inline tool state |
+| Permission | `ERR_PERMISSION_DENIED`, `ERR_SAF_REVOKED`, `ERR_SAF_REQUIRED` | re-prompt |
+| Network / download | `ERR_NETWORK`, `ERR_IO`, `ERR_DOWNLOAD_HASH` | retry / re-download |
+| Device / watchdog | `ERR_THERMAL`, `ERR_WATCHDOG`, `ERR_CRASH_LOOP` | degrade / abort / recovery |
+
+### 22.2 Recovery examples
 
 | Code | Meaning | App reaction |
 |------|---------|--------------|
-| 101 | DB unlock fail | SafeModeCrypto |
-| 102 | Config schema bad | SafeModeSchema |
-| 103 | Memory preflight fail | SafeModeMemory |
-| 104 | Model SHA256 mismatch | ModelManagerSheet (re-download) |
-| 202 | SAF token expired/lost | Re-picker |
-| 301 | Tool call parse fail | Injected error |
-| 302 | Tool call schema reject | Injected error |
-| 303 | Tool exec denied | Injected error |
-| 401 | User abort | UI updates |
-| 402 | Generation mismatch | Silent drop (still tracked) |
-| 506 | Storage full | ModelManagerSheet hint |
-| 603 | Migration fail mid-batch | SafeModeDB |
-| 702 | Web search offline | ToolCallPill "No network" |
+| `ERR_BRIDGE_BUSY` | second `send_message` while stream active | ask user to wait or stop current stream |
+| `ERR_DOWNLOAD_BUSY` | second download to same destination path | keep existing download, reject duplicate |
+| `ERR_DOWNLOAD_HASH` | downloaded GGUF failed final SHA-256 | force re-download from clean state |
+| `ERR_SAF_REVOKED` | persisted SAF grant no longer valid | reopen picker |
+| `ERR_CONFIG_UNKNOWN` | strict config validator rejected unknown field | refuse boot until config fixed |
+| `ERR_FFI_PANIC` | bridge/download worker panicked | emit terminal error signal, preserve process if possible |
 
 ### 22.3 Recovery Decision Tree
 
@@ -1112,12 +1113,12 @@ Tokens are stamped with the generation they started under. Dropping the old QObj
 - User pastes: local.
 - SAF files: stay local; SAF persist is fine.
 - Conversation history: SQLite-encrypted, never exported.
-- Crash counters: device-only.
+- Crash records: device-only, app-internal JSON sink.
 - Tool audit log: device-only.
 
 ### 23.2 What MAY Leave the Device
 
-- Web search queries through HTTPS to DDG / Brave (anonymous, no user identity leaked).
+- Web search queries through HTTPS to Brave and/or Tavily, selected by the planner.
 - Model file downloads from public GGUF catalog URLs over HTTPS.
 - Updates: optional auto-check.
 
@@ -1139,15 +1140,15 @@ Tokens are stamped with the generation they started under. Dropping the old QObj
 | Test | TRD § | Asserts |
 |------|-------|---------|
 | `test_no_explicit_secretkey_encoded_in_source` | §12.3 | grep-regression |
-| `test_callbackguard_layout_is_abi_stable` | §1.3.1 | `size == 8` constant |
-| `test_format_for_llm_does_not_import_agent_loop` | §13.3 | import-domain sanity |
+| `c_header_lists_every_exported_symbol` | §1.3 | committed C header stays in sync with manual shim exports |
+| `generation_round_trip_via_canonical_guard` | §1.3 | guard generation API is stable |
+| `instance_id_is_unique_per_construction` | §1.3 | ABA defence cannot reuse identity |
 | `test_migrations_tracked_after_run` | §6.1 | `user_version` + `migrations_applied` |
-| `test_kv_cache_contig` | §8.2 | single `Vec<u8>` shape |
-| `test_model_resume_after_network_drop` | §5.3 | Range header; SHA preserved |
-| `test_saf_token_kept_persistable` | §5.4 | uri permission persisted |
-| `test_injection_against_web_search` | §12.2 | wrapping does not regress |
-| `test_safe_mode_triggers_after_two_crashes` | §36.1 | counter path |
-| `test_tool_loop_detection` | §2.6 | watchdog 3-call |
+| `http_416_on_resume_triggers_restart_and_succeeds` | §8.1 | stale ranged resume restarts from byte 0 |
+| `chat_and_download_cancel_tokens_are_independent` | bridge follow-up | stop chat does not cancel download |
+| `per_destination_slot_rejects_concurrent_same_dest` | bridge follow-up | duplicate destination download is blocked |
+| `scoped_storage_violation_is_refused` | §36.1 | crash sink rejects banned Android storage roots |
+| `fingerprint_is_stable_within_call` | §36.1 | crash fingerprint deterministic |
 | `test_context_budget_manager` | §2.4 | ctx_len ≤ 4096 |
 
 ### 24.2 Visual / UI Tests (TRD §11.2)
@@ -1160,7 +1161,7 @@ Tokens are stamped with the generation they started under. Dropping the old QObj
 1. **First-run (online):** install → choose model → chat → close → reopen (verify resume).
 2. **Offline run:** airplane mode → safe to chat, no web_search tool available.
 3. **Large message death test:** send 200KB input → watch KV-Cache use.
-4. **Crash loop test:** inject `panic!("test")` via flag → recover via SafeMode.
+4. **Diagnostics test:** inject `panic!("test")` via flag → verify local crash record emission and next-boot recovery messaging.
 
 ---
 
