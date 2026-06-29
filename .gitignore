@@ -1,0 +1,3 @@
+# Working notes from the documentation refresh sweep.
+# These files are intentionally per-checkout and must never be committed.
+.docs-refresh-notes.md

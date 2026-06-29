@@ -896,78 +896,128 @@ pub mod ffi {
 
 ### 1.5 Error Propagation (Rust → QML)
 
+> **Authoritative source**: `rust/crates/mukei-core/src/error.rs`.
+> The variant list below mirrors that file; the doctest
+> `error::tests::codes_are_stable_ascii` enforces the `ERR_*` naming
+> contract and `classification_is_consistent` covers the
+> `ErrorClass` mapping. **Do not duplicate the enum here — add new
+> variants in source and update this table in the same commit.**
+
 #### 1.5.1 Error Code Registry
+
+`MukeiError` is the *single* error enum crossing the FFI boundary.
+Each variant maps to a stable `ERR_*` code that QML can localise
+and render through the editorial-luxury component library. Variant
+payloads are intentionally thin — nothing that could carry a
+plaintext secret. Adding a new variant requires updating
+`error_code()` AND `classification()`; the latter is exhaustive
+(no `_ =>` wildcard) so a missing arm fails `cargo build` via E0004.
+
+All variants present in source as of the codex review branch:
+
+| Category | Variant | Code | `ErrorClass` |
+|---|---|---|---|
+| FFI / Bridge | `FFIPanic` | `ERR_FFI_PANIC` | Resource |
+| FFI / Bridge | `CallbackGuardExpired` | `ERR_CALLBACK_GUARD_EXPIRED` | Resource |
+| FFI / Bridge | `BlockingJoinFailed(String)` | `ERR_BLOCKING_JOIN` | Resource |
+| FFI / Bridge | `BridgeBusy` | `ERR_BRIDGE_BUSY` | Agent |
+| FFI / Bridge | `DownloadBusy { dest: String }` | `ERR_DOWNLOAD_BUSY` | Agent |
+| Resource | `OOM` | `ERR_OOM` | Resource |
+| Resource | `MemoryPreflightRejected(String)` | `ERR_MEM_PREFLIGHT` | Resource |
+| Resource | `ThermalThrottle` | `ERR_THERMAL` | Device |
+| Inference | `ModelLoadFailed(String)` | `ERR_MODEL_LOAD` | Inference |
+| Inference | `ModelCorrupted` | `ERR_MODEL_CORRUPTED` | Inference |
+| Inference | `ContextCreationFailed(String)` | `ERR_CONTEXT_CREATE` | Inference |
+| Inference | `ContextOverflow(usize)` | `ERR_CONTEXT_OVERFLOW` | Inference |
+| Inference | `GrammarLoadFailed(String)` | `ERR_GRAMMAR_LOAD` | Inference |
+| Storage | `DatabaseInitFailed(String)` | `ERR_DB_INIT` | Storage |
+| Storage | `DatabaseCorruption` | `ERR_DB_CORRUPTION` | Storage |
+| Storage | `MigrationFailed(u32, String)` | `ERR_MIGRATION` | Storage |
+| Storage | `MigrationOrderConflict { expected, applied }` | `ERR_MIGRATION_ORDER` | Storage |
+| Config | `ConfigMissingField(String)` | `ERR_CONFIG_MISSING` | Config |
+| Config | `ConfigInvalid { field, reason }` | `ERR_CONFIG_INVALID` | Config |
+| Config | `ConfigUnknownField(String)` | `ERR_CONFIG_UNKNOWN` | Config |
+| Config | `SafeStorageUnavailable(String)` | `ERR_SAFE_STORAGE` | Security |
+| Crypto | `WrappedKeyMalformed(String)` | `ERR_WRAPPED_KEY` | Security |
+| Crypto | `UnwrapFailed` | `ERR_UNWRAP_FAILED` | Security |
+| Crypto | `SecretLeaked(usize)` — redacted byte length only | `ERR_SECRET_LEAKED` | Security |
+| Agent | `ToolLoopDetected(usize)` | `ERR_TOOL_LOOP` | Agent |
+| Agent | `ToolTimeout(Option<Duration>)` | `ERR_TOOL_TIMEOUT` | Agent |
+| Agent | `UnknownTool { tool_name }` | `ERR_TOOL_UNKNOWN` | Agent |
+| Agent | `ToolArgsRejected { tool_name, reason }` | `ERR_TOOL_ARGS` | Agent |
+| Agent | `ToolAbuseBlocked { tool_name }` | `ERR_TOOL_ABUSE` | Agent |
+| Agent | `ToolPermanentlyDisabled { tool_name }` | `ERR_TOOL_DISABLED` | Agent |
+| Agent | `ToolParseFailed(String)` | `ERR_TOOL_PARSE` | Agent |
+| Agent | `ToolArgumentInvalid { field, reason }` | `ERR_TOOL_ARGUMENT` | Agent |
+| Agent | `ToolExecutionFailed(String)` | `ERR_TOOL_EXEC` | Agent |
+| Agent | `WebSearchFailed(String)` | `ERR_WEB_SEARCH` | Agent |
+| Agent | `HttpClientFailed(String)` | `ERR_HTTP_CLIENT` | Agent |
+| Agent | `FileReadFailed(String)` | `ERR_FILE_READ` | Agent |
+| Agent | `BinaryFile` | `ERR_BINARY_FILE` | Agent |
+| Agent | `SandboxViolation` | `ERR_SANDBOX` | Agent |
+| Permission | `PermissionDenied` | `ERR_PERMISSION_DENIED` | Permission |
+| Permission | `SafRevoked` | `ERR_SAF_REVOKED` | Permission |
+| Permission | `SafRequired` | `ERR_SAF_REQUIRED` | Permission |
+| Network | `NetworkError(String)` | `ERR_NETWORK` | Network |
+| Network | `Io(String)` | `ERR_IO` | Network |
+| Network | `DownloadHashMismatch` | `ERR_DOWNLOAD_HASH` | Network |
+| Domain | `PromptLeakage` | `ERR_PROMPT_LEAKAGE` | Security |
+| Domain | `WatchdogExceeded { kind }` | `ERR_WATCHDOG` | Device |
+| Domain | `CrashLoopDetected { fingerprint }` | `ERR_CRASH_LOOP` | Device |
+| Domain | `Cancelled` | `ERR_CANCELLED` | Unknown |
+| Domain | `Invariant(String)` | `ERR_INVARIANT` | Unknown |
+| Domain | `Internal(String)` | `ERR_INTERNAL` | Unknown |
+
+##### 1.5.1.1 `BridgeBusy` and `DownloadBusy` — single-shot entry-point guards
+
+These two variants are the only ones in the `Agent` class that
+are emitted by the **bridge** rather than the agent loop. They
+surface the RAII re-entrancy guards on `MukeiAgent::send_message`
+(see §1.3.6 below) and `MukeiAgent::download_model`. The QML
+side MUST localise both to interaction-layer dialogs ("Generation
+is still streaming. Stop or wait?" / "This model is already
+downloading. Cancel or wait?") — they are **not** error states
+in the failure-mode sense, just back-pressure signals.
+
+#### 1.5.2 `ErrorClass` (FMEA tracking)
+
 ```rust
-// rust/src/error.rs
-use thiserror::Error;
-
-#[derive(Error, Debug, Clone)]
-pub enum MukeiError {
-    #[error("FFI panic at bridge boundary")]
-    FFIPanic,
-    
-    #[error("Out of memory during inference")]
-    OOM,
-    
-    #[error("Thermal throttling triggered")]
-    ThermalThrottle,
-    
-    #[error("Tool execution timeout")]
-    ToolTimeout,
-    
-    #[error("Permission denied by user")]
-    PermissionDenied,
-    
-    #[error("Model file corrupted (SHA256 mismatch)")]
-    ModelCorrupted,
-    
-    #[error("Database corruption detected")]
-    DatabaseCorruption,
-    
-    #[error("Network request failed")]
-    NetworkError,
-    
-    #[error("Context window overflow")]
-    ContextOverflow,
-    
-    #[error("System prompt leakage detected")]
-    PromptLeakage,
-}
-
-impl MukeiError {
-    pub fn error_code(&self) -> &'static str {
-        match self {
-            MukeiError::FFIPanic => "ERR_FFI_PANIC",
-            MukeiError::OOM => "ERR_OOM",
-            MukeiError::ThermalThrottle => "ERR_THERMAL",
-            MukeiError::ToolTimeout => "ERR_TOOL_TIMEOUT",
-            MukeiError::PermissionDenied => "ERR_PERMISSION_DENIED",
-            MukeiError::ModelCorrupted => "ERR_MODEL_CORRUPTED",
-            MukeiError::DatabaseCorruption => "ERR_DB_CORRUPTION",
-            MukeiError::NetworkError => "ERR_NETWORK",
-            MukeiError::ContextOverflow => "ERR_CONTEXT_OVERFLOW",
-            MukeiError::PromptLeakage => "ERR_PROMPT_LEAKAGE",
-        }
-    }
+pub enum ErrorClass {
+    Resource, Device, Inference, Storage, Config,
+    Agent, Permission, Network, Security, Unknown,
 }
 ```
 
-#### 1.5.2 Error Signal to QML
+Used by the failure-mode tracker (§2.5 / §36.1) and the
+crash-loop Bloom filter. The classifier is exhaustive at the
+compile level (architect review Issue #19); no future variant
+can silently land in `Unknown`.
+
+#### 1.5.3 Error Signal to QML
+
 ```rust
-// rust/src/ffi.rs
 impl MukeiAgentRust {
     pub fn handle_error(&mut self, error: MukeiError) {
         let error_code = QString::from(error.error_code());
         let error_message = QString::from(error.to_string());
-        
-        // Emit error signal to QML
         self.error_occurred(error_code, error_message);
-        
-        // Log to diagnostics
         crate::diagnostics::log_error(&error);
     }
 }
 ```
+
+The `error_message` is the `thiserror`-rendered `Display`. Variants
+that could carry secret material (`SecretLeaked`) only embed a
+redacted byte length, never the bytes themselves.
+
+#### 1.5.4 `secret_leaked` constructor (tripwire)
+
+`MukeiError::secret_leaked(String)` is the ONLY sanctioned way to
+construct the `SecretLeaked` variant. It zeroises the input bytes
+before drop and records only the redacted length, so the error
+itself cannot become an exfiltration channel even if it ends up
+in a panic-handler core dump. CI grep should reject any other
+construction site of `MukeiError::SecretLeaked(...)`.
 
 ---
 
@@ -1020,6 +1070,50 @@ rust/src/
 ```
 
 ### 2.2 Tokio Runtime Configuration
+
+> **Authoritative source**: `rust/crates/mukei-core/src/runtime.rs`.
+> The constants below are mirrored, but the source carries a
+> `const _: () = assert!(TOOL_BLOCKING_SLOTS < MAX_BLOCKING_THREADS, …)`
+> tripwire that fails `cargo check` if a future refactor inverts the
+> ordering (architect review GH #33).
+
+#### Bounded runtime constants
+
+```rust
+// Android-bounded blocking pool (TRD §2.2, v0.7.4 BUGFIX).
+#[cfg(target_os = "android")]
+pub const MAX_BLOCKING_THREADS: usize = 6;
+#[cfg(not(target_os = "android"))]
+pub const MAX_BLOCKING_THREADS: usize = 8;
+
+/// Number of concurrent `tool`-side `spawn_blocking` slots.
+pub const TOOL_BLOCKING_SLOTS: usize = 2;
+
+/// Async worker threads. 4 is the sweet-spot for mobile.
+const WORKER_THREADS: usize = 4;
+```
+
+- **Android cap = 6, desktop cap = 8.** Mid-range Android (4–6 core
+  SoCs) cannot tolerate the legacy 8-thread pool because the SQLite
+  writer + RAG indexer + tool executors starve the inference worker.
+- **`TOOL_BLOCKING_SLOTS = 2`.** Caps the number of concurrent
+  `tool::spawn_blocking` evaluations regardless of how many tools
+  the LLM parallel-emits. Inference is **never** counted against
+  this budget — it runs on a dedicated worker (see
+  `crate::engine::llama_wrapper`).
+- **Compile-time tripwire.** A `const _: () = assert!(…)` in
+  `crate::runtime` rejects any future change that violates
+  `TOOL_BLOCKING_SLOTS < MAX_BLOCKING_THREADS` so a saturated tool
+  semaphore can never starve every blocking-pool worker.
+- **`spawn_blocking_tool` trampoline.** Tools acquire a `TOOL_SLOTS`
+  permit *before* dispatching `tokio::task::spawn_blocking` — they
+  do not call the tokio API directly, so the cap cannot be
+  accidentally bypassed.
+
+The legacy section below documents the rationale and target
+values; the source above is the ground truth.
+
+#### Legacy v0.7.4 narrative (kept for archival rationale)
 
 > **🛡️ BUGFIX v0.7.4 — Android-Bounded Blocking Pool.** The v0.7.2 runtime allowed up to **8** blocking threads; that is still too generous on a 4-core mid-range Android device once SQLite writer + RAG indexer + tool executors compete. v0.7.4 lowers the cap to **6** on Android and adds a **bounded tool semaphore** that caps tool-side `spawn_blocking` at **2** concurrent in-flight evaluations (regardless of how many the LLM parallel-emits). The inference thread is *never* counted against this budget — it lives on a dedicated worker (see §3.1).
 

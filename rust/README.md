@@ -12,10 +12,10 @@ See also the [PRD v0.7.5](docs/PRD.md) and [UX Brief v2.1](docs/UXB.md).
 
 | Crate | Role |
 |---|---|
-| `mukei-core` | Pure-Rust agent / engine / RAG / storage / diagnostics kernel |
-| `mukei-bridge` | CXX-Qt bridge exposing `MukeiAgent`, `MukeiBridge`, `SafRegistry` + JNI helpers (Qt build only) |
-| `mukei-ffi-shim` | Manual `extern "C"` escape-hatch FFI paired with CXX-Qt |
-| `llama-cpp-stub` | Workspace placeholder until the `llama-cpp-prebuilt/CMakeLists.txt` one-shot build is wired |
+| `mukei-core` | Pure-Rust agent / engine / RAG / storage / diagnostics kernel. Never links Qt — testable on any host. |
+| `mukei-bridge` | CXX-Qt bridge exposing `MukeiAgent`, `MukeiBridge`, `SafRegistry` + JNI helpers (Qt build only). Owns the `BusyGuard` re-entrancy guard for `send_message` and the per-destination `DownloadSlotGuard` registry for `download_model`. |
+| `mukei-ffi-shim` | Manual `extern "C"` escape-hatch FFI. Hand-maintained `include/mukei_ffi_shim.h` is the canonical C ABI (drift-detector test enforces parity with `extern "C"` exports in `src/lib.rs`). |
+| `llama-cpp-stub` | Workspace placeholder while the `llama-cpp-prebuilt/CMakeLists.txt` one-shot static archive is the production link target. Has a release-hardening tripwire (`compile_error!`) so it cannot ship in a release build with the `llama_cpp` feature on. |
 
 ## Sandbox build (no Qt, no SQLite, no candle)
 
@@ -27,12 +27,13 @@ cargo check -p mukei-ffi-shim
 cargo test  -p mukei-ffi-shim
 ```
 
-## Full build (with SQLite + RAG)
+## Full build (with SQLite + RAG + on-device downloader)
 
 ```bash
 cd rust
 cargo check -p mukei-core --features "tokio,rusqlite"
 cargo check -p mukei-core --features "tokio,rusqlite,candle"
+cargo check -p mukei-core --features "tokio,network"   # enables real reqwest model downloader
 ```
 
 > Note: `usearch`, `candle`, and `llama-cpp-rs` need per-target setup.
@@ -40,39 +41,95 @@ cargo check -p mukei-core --features "tokio,rusqlite,candle"
 
 ## Test coverage
 
-Single source of truth (mirrors the root `README.md` badge):
+Mirror of `.github/workflows/sandbox-check.yml` — the CI gate runs this
+exact set on every push to the codex review branch and to `main`.
 
 ```
-mukei-core      167 unit + 12 integration + 4 proptest
-mukei-ffi-shim    2 unit
-                ──────────────────────────────
-                185 passed total
+mukei-core  (std,tokio)     203 unit + 12 integration + 6 proptest + 3 grammar
+                            + 4 sentinel proptest        ──► 228 passed
+mukei-ffi-shim                                                  3 passed
+                                                          ──────────────
+                                                          231 passed total
 ```
 
-The root `README.md` badge and the changelog in `README.md` §Tests must
-stay aligned with this number. CI gates on the exact count in
-`.github/workflows/sandbox-check.yml`.
+When the `rusqlite` feature is enabled the lib-test count rises to 217
+(SQLite-only suites unlock). The `network` feature additionally enables
+the 416-restart loopback integration test
+(`http_416_on_resume_triggers_restart_and_succeeds`). The
+`sandbox-check.yml` workflow runs the `(std,tokio)` matrix only.
 
-Verified invariants include:
-- `MAX_BLOCKING_THREADS=6` on Android, `TOOL_BLOCKING_SLOTS=2` (TRD §2.2)
-- `CallbackGuard` u64 ABI + `catch_unwind` (TRD §1.3)
-- Thinking-tag streaming detector with `TAG_WINDOW=64` (TRD §1.2.5)
-- Atomic-rename vector store save (TRD §4.4)
-- Sandboxed `math_eval` with whitelist + 8 s timeout (TRD §5.5)
-- Strict TOML config validator rejecting unknown fields (TRD §12.5)
-- Post-parse tool validator + SAF-token enforcement (TRD §5.2, §13.3)
-- Crash-loop fingerprint sink (TRD §36.1)
+Documentation index (under `docs/`):
+
+- [TRD v0.7.5](docs/TRD.md) — Technical Reference Document (build-this-exactly)
+- [PRD v0.7.5](docs/PRD.md) — Product Requirements Document
+- [Backend Schema v1.2](docs/BS.md) — SQL schema, migrations, retention policy
+- [Application Flow v1.2](docs/AF.md) — Boot, model acquisition, tool pipeline
+- [UX Brief v2.1](docs/UXB.md) — Editorial-luxury design system
+
+### Verified invariants
+
+- **Runtime (TRD §2.2).** `MAX_BLOCKING_THREADS = 6` on
+  `target_os = "android"`, `8` on every other target. `TOOL_BLOCKING_SLOTS = 2`.
+  A `const _: () = assert!(TOOL_BLOCKING_SLOTS < MAX_BLOCKING_THREADS, …)`
+  in `crate::runtime` makes any future refactor that violates the ordering
+  fail `cargo check`, not just CI (architect review GH #33).
+- **FFI generation guard (TRD §1.3, REQ-ARCH-05).** `CallbackGuard` is a
+  `#[repr(transparent)] u64`. `Inner` holds an `AtomicU64` generation
+  counter and a process-monotonic `instance_id` (architect review GH #53
+  ABA defence). The legacy `from_ptr(usize)` constructor is
+  `#[deprecated]`; new code uses `from_non_null(NonNull<Inner>)`
+  (architect review GH #10). Re-bind path is `Inner::bump()`; permanent
+  destroy is `Inner::tombstone()`; the previous blanket `invalidate()`
+  is retained as a deprecated alias (architect review GH #9).
+- **Re-entrancy guards (bridge crate).**
+  - `send_message` holds an `AtomicBool` flipped on entry; a second
+    call returns `MukeiError::BridgeBusy` (`ERR_BRIDGE_BUSY`). Release
+    is RAII via `BusyGuard::Drop` so a panic anywhere in the streaming
+    task still clears the flag (`panic = "unwind"` is a workspace
+    invariant — see §1.3 / PRD G1).
+  - `download_model` holds a per-destination slot in a global
+    `Arc<Mutex<HashSet<PathBuf>>>`. Two downloads of *different*
+    models run in parallel; two downloads of the *same* dest fail
+    fast with `MukeiError::DownloadBusy { dest }`
+    (`ERR_DOWNLOAD_BUSY`). Release is RAII via `DownloadSlotGuard::Drop`.
+- **Separate cancellation tokens.** `MukeiAgent` carries two independent
+  `CancellationToken`s — `cancel_token` (chat) and `download_cancel`
+  (downloads). `stop_generation()` rotates only the chat token;
+  `stop_download()` rotates only the download token. The chat Stop
+  button no longer silently kills a model download.
+- **Thinking-tag streaming (TRD §1.2.5).** `TagsStreaming` is a 64-byte
+  sliding-window detector with multi-transition support (open → close →
+  open in the same chunk).
+- **Vector store atomic-rename save (TRD §4.4).** Never blocks the async
+  runtime.
+- **Sandboxed `math_eval` (TRD §5.5).** Identifier whitelist + 8 s timeout
+  with `JoinHandle::abort` on overrun so the tool semaphore is reaped.
+- **Strict TOML config (TRD §12.5).** Unknown root keys are rejected on
+  boot.
+- **Post-parse tool validator + SAF (TRD §5.2 / §13.3).** `read_file`
+  refuses every non-SAF URI scheme.
+- **Crash-loop fingerprint sink (TRD §36.1).** Stable SHA-256 of the
+  panic site keyed against a Bloom filter.
+- **Model integrity (REQ-SEC-01).** Every GGUF artifact is streamed
+  through a SHA-256 hasher *before* mmap; the model registry pins both
+  the upstream commit-sha and the digest. See
+  [`crate::engine::model_registry`].
+- **Downloader 416-restart.** If the upstream file shrinks between
+  resume attempts a stale `.partial` produces a `416 Range Not
+  Satisfiable`; the downloader wipes `.partial` and restarts from byte
+  0 (`http_416_on_resume_triggers_restart_and_succeeds` covers it).
 
 ## Directory layout
 
 ```
 rust/
-├── Cargo.toml
+├── Cargo.toml                         (panic = "unwind" pinned, MSRV 1.78)
 ├── crates/
-│   ├── mukei-core/        (lib)
-│   ├── mukei-bridge/      (cdylib + staticlib)
-│   ├── mukei-ffi-shim/    (staticlib)
-│   └── llama-cpp-stub/    (lib)
+│   ├── mukei-core/        (lib)       (pure-Rust, no Qt)
+│   ├── mukei-bridge/      (cdylib + staticlib)  (CXX-Qt + JNI; Qt host only)
+│   └── mukei-ffi-shim/    (staticlib) (manual extern "C" escape hatch)
+├── llama-cpp-stub/        (lib)       (release-hardened placeholder)
+├── llama-cpp-prebuilt/                (one-shot libllama.a per ABI, CMake)
 ├── migrations/
 │   ├── 000_default_config.toml
 │   ├── V001__schema.sql           (conversations, messages, chunks)
@@ -81,6 +138,42 @@ rust/
 │   └── V004__branching.sql        (branch graph)
 ├── grammars/
 │   └── tool_calling.gbnf
-└── llama-cpp-prebuilt/
-    └── CMakeLists.txt
+└── docs/
+    ├── PRD.md   (v0.7.5)
+    ├── TRD.md   (v0.7.5)
+    ├── BS.md    (v1.2)
+    ├── AF.md    (v1.2)
+    └── UXB.md   (v2.1)
 ```
+
+## Error taxonomy (excerpt)
+
+`MukeiError` is the single enum crossing the FFI boundary; every
+variant maps to a stable `ERR_*` code that QML can localise.
+
+| Category | Variants (codes) |
+|---|---|
+| FFI / Bridge | `FFIPanic` (`ERR_FFI_PANIC`), `CallbackGuardExpired` (`ERR_CALLBACK_GUARD_EXPIRED`), `BlockingJoinFailed` (`ERR_BLOCKING_JOIN`), `BridgeBusy` (`ERR_BRIDGE_BUSY`), `DownloadBusy { dest }` (`ERR_DOWNLOAD_BUSY`) |
+| Resource | `OOM`, `MemoryPreflightRejected`, `ThermalThrottle` |
+| Inference | `ModelLoadFailed`, `ModelCorrupted`, `ContextCreationFailed`, `ContextOverflow`, `GrammarLoadFailed` |
+| Storage | `DatabaseInitFailed`, `DatabaseCorruption`, `MigrationFailed`, `MigrationOrderConflict` |
+| Config | `ConfigMissingField`, `ConfigInvalid { field, reason }`, `ConfigUnknownField`, `SafeStorageUnavailable` |
+| Crypto | `WrappedKeyMalformed`, `UnwrapFailed`, `SecretLeaked(redacted_len)` |
+| Agent | `ToolLoopDetected`, `ToolTimeout`, `UnknownTool`, `ToolArgsRejected`, `ToolAbuseBlocked`, `ToolPermanentlyDisabled`, `ToolParseFailed`, `ToolArgumentInvalid`, `ToolExecutionFailed`, `WebSearchFailed`, `HttpClientFailed`, `FileReadFailed`, `BinaryFile`, `SandboxViolation` |
+| Permission | `PermissionDenied`, `SafRevoked`, `SafRequired` |
+| Network | `NetworkError`, `Io`, `DownloadHashMismatch` |
+| Domain | `PromptLeakage`, `WatchdogExceeded { kind }`, `CrashLoopDetected { fingerprint }`, `Cancelled`, `Invariant`, `Internal` |
+
+Every variant is mapped to an `ErrorClass` bucket
+(`Resource | Device | Inference | Storage | Config | Agent | Permission | Network | Security | Unknown`)
+for telemetry-free FMEA tracking (§36.1). The match in
+`MukeiError::classification` is exhaustive — adding a new variant
+without choosing a class fails `cargo build` via E0004.
+
+## Doc-comment policy
+
+`crate::lib.rs` carries `#![warn(missing_docs)]`. Three modules enforce
+it strictly: `error`, `ffi`, `guard`. Every other module is `#[allow(missing_docs)]`
+pending the per-item documentation sweep, but **adding a new module
+without doc-comments on every `pub` item is disallowed** — only the
+existing modules are grandfathered.

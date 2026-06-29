@@ -5,7 +5,7 @@
 **A zero-telemetry, fault-tolerant, on-device AI agent.**
 Built in Rust, fronted by Qt 6 + QML, accelerated by llama.cpp.
 
-[![tests](https://img.shields.io/badge/tests-185%20passing-success)](#tests)
+[![tests](https://img.shields.io/badge/tests-231%20passing-success)](#tests)
 [![rust](https://img.shields.io/badge/rust-1.78%2B-orange)](#requirements)
 [![license](https://img.shields.io/badge/license-Proprietary-lightgrey)](#license)
 [![status](https://img.shields.io/badge/status-architecture%20pass-blue)](#project-status)
@@ -24,6 +24,7 @@ Mukei is a privacy-first AI agent designed to run **entirely on the user's devic
 | 🛡️ **Privacy** | Zero telemetry. Local inference via `llama.cpp`. All secrets wrapped with Android Keystore. |
 | 🧱 **Architecture** | Rust core (`mukei-core`) + CXX-Qt bridge (`mukei-bridge`) + manual C-FFI fallback (`mukei-ffi-shim`). |
 | 🪪 **Provenance** | Every requirement traces to the [TRD](rust/docs/TRD.md), [PRD](rust/docs/PRD.md), [Backend Schema](rust/docs/BS.md), [Application Flow](rust/docs/AF.md), or [UX Brief](rust/docs/UXB.md). |
+| 🤖 **Models** | Gemma 4 E2B (3.46 GB Q4_K_M) for 4-6 GB devices, Gemma 4 E4B (5.41 GB Q4_K_M) for 8 GB+ devices, downloaded on-device and SHA-256 verified before mmap. |
 
 ---
 
@@ -37,7 +38,8 @@ Mukei is a privacy-first AI agent designed to run **entirely on the user's devic
 ┌──────────────▼──────────────────┐   ┌─────────────────────────────┐
 │        mukei-bridge             │   │      mukei-ffi-shim         │
 │  MukeiAgent · MukeiBridge       │   │  callback_with_guard!       │
-│  SafRegistry · JNI hooks        │   │  generation counter ABI     │
+│  SafRegistry · JNI hooks        │   │  generation + instance_id   │
+│  BusyGuard · DownloadSlotGuard  │   │  ABI drift-detector test    │
 └──────────────┬──────────────────┘   └──────────────┬──────────────┘
                │                                     │
                └─────────────────┬───────────────────┘
@@ -66,12 +68,13 @@ Three crates, one direction of dependency. `mukei-core` never links Qt — that 
 
 | Area | Status | Notes |
 |---|---|---|
-| **Rust kernel** | ✅ Stable scaffold | 68 unit tests, zero failures |
-| **C-FFI shim** | ✅ Stable scaffold | 2 unit tests, zero failures |
-| **CXX-Qt bridge** | 🟡 Compiles under Qt | Requires a Qt 6.5+ install on the host |
+| **Rust kernel** | ✅ Stable scaffold | 228 sandbox tests passing (203 unit + 12 integration + 6+3+4 proptest/grammar/sentinel) |
+| **C-FFI shim** | ✅ Stable scaffold | 3 unit tests; checked-in C header with drift-detector test |
+| **CXX-Qt bridge** | 🟡 Compiles under Qt | Qt 6.5+ required on the host; sandbox CI skips this crate |
 | **Migrations V001–V004** | ✅ Authored | Conversations, messages, chunks, recovery, audit, SAF tokens, branches |
 | **GBNF tool grammar** | ✅ Per-tool schema | `grammars/tool_calling.gbnf` |
 | **llama.cpp integration** | 🟡 Stubbed in core | Real load lives in the bridge; prebuilt `libllama.a` per ABI |
+| **Gemma 4 downloader** | ✅ Wired | Commit-pinned HF URLs, full-file SHA-256 verify, resumable, 416-restart safe |
 | **Candle MiniLM embedder** | 🟡 Behind feature flag | Default build uses a deterministic mock embedder |
 | **QML editorial-luxury UI** | ⏳ Out of scope for this repo | Tracked in the UX Brief |
 
@@ -81,21 +84,67 @@ Three crates, one direction of dependency. `mukei-core` never links Qt — that 
 
 ```bash
 cd rust
-cargo test -p mukei-core      --no-default-features --features "std,tokio" --lib
-cargo test -p mukei-ffi-shim  --lib
+cargo test -p mukei-core      --no-default-features --features "std,tokio"
+cargo test -p mukei-ffi-shim
 ```
 
-Current run:
+Current run on the **codex review branch**:
 
 ```
-mukei-core      167 unit + 12 integration + 4 proptest
-mukei-ffi-shim    2 unit
-                ──────────────────────────────
-                185 passed total
+mukei-core  (std,tokio)     203 unit + 12 integration + 6 proptest
+                            + 3 grammar + 4 sentinel proptest
+                                                       ──► 228 passed
+mukei-ffi-shim                                                3 passed
+                                                          ──────────
+                                                          231 passed total
 ```
 
-Verified invariants:
+### Verified invariants
 
+- **Re-entrancy guards.** `MukeiAgent::send_message` flips an
+  `AtomicBool` on entry; a second call returns `MukeiError::BridgeBusy`
+  (`ERR_BRIDGE_BUSY`). Release is RAII via `BusyGuard::Drop` so even a
+  panic in the streaming task clears the flag. `MukeiAgent::download_model`
+  keys a global `Arc<Mutex<HashSet<PathBuf>>>` by destination path; a
+  second download targeting the same dest is rejected with
+  `MukeiError::DownloadBusy { dest }` (`ERR_DOWNLOAD_BUSY`) before any
+  I/O happens, so the SHA-256 integrity check cannot be defeated by
+  interleaved writes on a single `.partial` file. Two downloads of
+  *different* models still run in parallel.
+- **Independent cancellation tokens.** `MukeiAgent` carries
+  `cancel_token` (chat) and `download_cancel` (downloads). The chat
+  Stop button never kills a model download running in the background,
+  and vice-versa.
+- **Commit-pinned model catalogue.** `engine::model_registry` pins
+  `download_url` to a Hugging Face `/resolve/<40-char-sha>/` revision,
+  *not* `/resolve/main/`. A CI test
+  (`manifest_urls_pin_a_commit_sha_not_a_branch`) fails the build if
+  anyone re-introduces a bare branch ref.
+- **416-restart resumable downloader.** When the upstream file shrinks
+  between resume attempts, a stale `.partial` produces `416 Range Not
+  Satisfiable`; the downloader wipes `.partial` and restarts from byte
+  0, just like the existing `200 OK` ignored-`Range` path. Backed by
+  an integration test that hand-rolls a `tokio::net::TcpListener`
+  HTTP/1.1 responder so CI runs without external network.
+- **FFI generation guard with ABA defence (TRD §1.3, REQ-ARCH-05).**
+  `CallbackGuard` is a `#[repr(transparent)] u64`. `Inner` carries an
+  `AtomicU64` generation counter *and* a process-monotonic `instance_id`
+  assigned at construction time (architect review GH #53). Heap-address
+  reuse across release/acquire cycles is detected because the new
+  `Inner`'s `instance_id` does not match the snapshot the caller
+  captured. `from_ptr(usize)` is `#[deprecated]`; new code uses
+  `from_non_null(NonNull<Inner>)` (architect review GH #10). Re-bind is
+  `Inner::bump()`; permanent destroy is `Inner::tombstone()`
+  (architect review GH #9).
+- **Bounded runtime (TRD §2.2).** `MAX_BLOCKING_THREADS = 6` on
+  `target_os = "android"`, `8` elsewhere. `TOOL_BLOCKING_SLOTS = 2`. A
+  module-level `const _: () = assert!(TOOL_BLOCKING_SLOTS < MAX_BLOCKING_THREADS, …)`
+  fails `cargo check` if a future refactor inverts the ordering
+  (architect review GH #33).
+- **Storage audit-log hash chain.** `AuditLogWriter` serialises every
+  append under a writer mutex so the SHA-256 chain that links
+  consecutive rows cannot be torn by concurrent writers (codex
+  follow-up — fix on this branch).
 - **Issue #1 (REQ-SEC-04 strengthened).** Every untrusted string interpolated into a `<external_data>` wrapper is passed through [`crate::tools::sentinel::escape_untrusted`](rust/crates/mukei-core/src/tools/sentinel.rs). A hostile web page / file / RAG snippet cannot forge a closing tag and impersonate a `trust="trusted"` block.
 - **Issue #9 / #10 (REQ-AGT-04 strengthened).** The agent loop never hard-aborts on tool-call parse / validation errors. Malformed calls become structured `tool_error` envelopes; valid calls in a mixed batch still execute. Abuse-blocked fingerprints are caught BEFORE dispatch so a maxed-out tool never burns network / disk again.
 - **Issues #4 / #5 / #6 / #7 (per-turn reset).** `AgentLoop::run` rearms the wall-clock watchdog, clears the failure tracker + same-output ring, and resets `HardwareTool` cache generation at the top of every invocation. State no longer leaks across turns / conversations.
@@ -115,11 +164,9 @@ Verified invariants:
 - **PRD REQ-RAG-01 / -02 / -03.** Real candle-backed MiniLM embedder, optional usearch HNSW backend, embedder-swap detection (`StoreHeader`), shred / forget functionality.
 - **PRD REQ-SEC-01.** Full-file SHA-256 verification of GGUF models BEFORE `mmap`.
 - **PRD REQ-SEC-19.** SQLCipher key handling with `PRAGMA key` + zeroisation.
-- **PRD REQ-AGT-04** — Tool Execution Policy with configurable threshold (default 5), failure-kind classification (`Transient` / `Validation` / `Cancelled` / `Timeout` / `Permanent` / `Abuse`), structured feedback envelopes, and no-progress detection (see [`crates/mukei-core/src/agent/tools/`](rust/crates/mukei-core/src/agent/tools/)).
-- **TRD §1.3 / REQ-ARCH-05** — `CallbackGuard` + `catch_unwind` wrap for every FFI callback.
+- **PRD REQ-AGT-04** — Tool Execution Policy with configurable threshold (default 5), failure-kind classification (`Transient` / `Validation` / `Cancelled` / `Timeout` / `Permanent` / `Abuse`), structured feedback envelopes, and no-progress detection.
 - **TRD §1.2.5** — Thinking-tag streaming detector with 64-byte sliding window, multi-transition per push.
-- **TRD §2.2** — Bounded tokio runtime: `MAX_BLOCKING_THREADS=6` on Android, `TOOL_BLOCKING_SLOTS=2`.
-- **TRD §2.4** — Spawn-blocking enforced for every SQLite/disk path (the “Golden Rule”).
+- **TRD §2.4** — Spawn-blocking enforced for every SQLite/disk path (the "Golden Rule").
 - **TRD §4.4** — Vector store atomic-rename save; never blocks the async runtime.
 - **TRD §5.5** — Sandboxed `math_eval` with identifier whitelist + 8 s timeout.
 - **TRD §12.5** — Strict TOML config rejecting unknown root fields.
@@ -135,10 +182,10 @@ Verified invariants:
 | `std`, `tokio` | Always-on. Bounded runtime + types. | ✅ |
 | `rusqlite` | SQLite + r2d2 pool (TRD §6). | ✅ (with SQLite installed) |
 | `sqlcipher` | Encrypted backend; superset of `rusqlite`. | ⚠️ host setup |
-| `network` | `reqwest` + `scraper` for web search. | ⚠️ rustc ≥ 1.86 (icu deps) |
+| `network` | `reqwest`-backed model downloader + web search engines. | ⚠️ rustc ≥ 1.86 (icu deps) |
 | `candle` | Local MiniLM embedder. | ⚠️ host setup |
 | `usearch_hnsw` | usearch-backed vector store. | ⚠️ host setup |
-| `llama_cpp` | Real `llama-cpp-rs` binding. | ❌ needs Qt + prebuilt libllama |
+| `llama_cpp` | Real `llama-cpp-rs` binding via the prebuilt static archive. | ❌ needs Qt + prebuilt libllama |
 | `android_keystore` | Wrapped-key secrets path. | ❌ Android only |
 
 A single typical sandbox check:
@@ -158,14 +205,14 @@ Mukei/
 │   ├── Cargo.toml               ← panic = "unwind" pinned on every profile
 │   ├── README.md                ← engineering README
 │   ├── crates/
-│   │   ├── mukei-core/          ← pure-Rust kernel · 160 unit + 12 integration tests
+│   │   ├── mukei-core/          ← pure-Rust kernel · 228 tests sandbox-passing
 │   │   ├── mukei-bridge/        ← CXX-Qt + JNI surface (Qt host required)
-│   │   ├── mukei-ffi-shim/      ← manual extern "C" escape hatch · 2 tests
-│   │   └── llama-cpp-stub/      ← workspace placeholder for the vendor build
+│   │   └── mukei-ffi-shim/      ← manual extern "C" escape hatch · 3 tests
+│   ├── llama-cpp-stub/          ← workspace placeholder (release-hardened)
+│   ├── llama-cpp-prebuilt/      ← one-shot libllama.a per ABI (CMake)
 │   ├── migrations/              ← V001–V004 · 000_default_config.toml
 │   ├── grammars/                ← tool_calling.gbnf (strict per-tool)
-│   └── llama-cpp-prebuilt/      ← one-shot libllama.a per ABI (CMake)
-└── rust/docs/                   ← TRD / PRD / BS / AF / UXB design pass v0.7.5
+│   └── docs/                    ← TRD / PRD / BS / AF / UXB design pass v0.7.5
 ```
 
 The full design pass — TRD v0.7.5 (≈6,400 lines), PRD v0.7.5, Backend Schema v1.2, Application Flow v1.2, UX Brief v2.1 — lives under [`rust/docs/`](rust/docs/). They are intentionally large; the engineering README in [`rust/README.md`](rust/README.md) is the right entry point for contributors.
@@ -174,11 +221,11 @@ The full design pass — TRD v0.7.5 (≈6,400 lines), PRD v0.7.5, Backend Schema
 
 ## Requirements
 
-- **Rust 1.78+** (workspace MSRV). Pinned via `rust-toolchain` semantics.
+- **Rust 1.78+** (workspace MSRV). Pinned via `rust-toolchain.toml`.
 - **Qt 6.5+** for the `mukei-bridge` build only.
 - **SQLite 3.40+** with WAL support (bundled when `rusqlite` feature is on).
 - **Android NDK r26+** for on-device builds (target `aarch64-linux-android`).
-- A vendored `llama.cpp` checkout under `rust/llama-cpp-prebuilt/vendor/llama.cpp` for real inference builds; the workspace falls back to a stub crate otherwise.
+- A vendored `llama.cpp` checkout under `rust/llama-cpp-prebuilt/vendor/llama.cpp` for real inference builds; the workspace falls back to the release-hardened stub crate otherwise.
 
 ---
 
@@ -189,11 +236,14 @@ git clone https://github.com/MUKEI-lab/Mukei.git
 cd Mukei/rust
 
 # Pure-Rust kernel (no Qt, no llama.cpp)
-cargo test -p mukei-core --no-default-features --features "std,tokio" --lib
-cargo test -p mukei-ffi-shim --lib
+cargo test -p mukei-core --no-default-features --features "std,tokio"
+cargo test -p mukei-ffi-shim
 
 # With SQLite-backed storage
 cargo check -p mukei-core --features "tokio,rusqlite"
+
+# With on-device downloader (reqwest) for Gemma 4 GGUF artifacts
+cargo check -p mukei-core --features "tokio,network"
 ```
 
 For the Qt-integrated bridge build, follow the dedicated guide in [`rust/README.md`](rust/README.md).
