@@ -452,58 +452,118 @@ This applies to `db_key.enc`, `brave_key.enc`, `hnsw.bin`, `.meta`, `crash.dump`
 
 ## 7. Configuration Schema (`config.toml`)
 
+> **Authoritative source**: `rust/crates/mukei-core/src/config/mod.rs`
+> + the on-disk seed `rust/migrations/000_default_config.toml`.
+> The schema documented here is the strict-validator surface enforced
+> at boot.
+
 ### 7.1 Location
 
-`files/config.toml`. Loaded at boot via `config_validate::validate_for_boot` (TRD §12.5). Strict: unknown fields fail boot.
+`files/config.toml` on Android (app-private storage); `~/.config/mukei/config.toml`
+or an explicit override on desktop. Loaded at boot via
+`MukeiConfig::load_and_validate(&Path)` (TRD §12.5). The validator is
+**strict**: any top-level key not on `MukeiConfig::known_keys()` is
+rejected with `MukeiError::ConfigUnknownField` and boot refuses to
+start.
 
-### 7.2 Schema
+### 7.2 Strict TOML schema
+
+All required (non-`#[serde(default)]`) fields must be present. The
+listed keys are the canonical names; nested tables use the standard
+TOML `[table]` / `[[array_of_tables]]` syntax.
 
 ```toml
-# ─── Model ───
-model_path             = "files/llama-3.2-3b-instruct-q4km.gguf"  # required
-model_context_size     = 4096                                      # > 256
-gpu_layers             = 0                                         # 0..=64
+models_dir         = "/var/mukei/models"
+vectors_dir        = "/var/mukei/vectors"
+database_path      = "/var/mukei/db/mukei.db"
+saf_tokens_db      = "/var/mukei/db/saf_tokens.db"
+crashes_dir        = "/var/mukei/crashes"
+logs_dir           = "/var/mukei/logs"
 
-# ─── Inference defaults ───
-temperature_default    = 0.7                                       # 0.0..=2.0
-max_tokens_default     = 1024                                      # 1..=32768
-top_p_default          = 0.95                                      # 0.0..=1.0
-seed                   = null                                      # null = auto
+gpu_layers         = 32     # i32, ≥ 0 (0 = CPU-only)
+n_ctx              = 4096   # u32, range [256, 32768]
+n_threads          = 4      # u32, range [1, 32]
 
-# ─── Web ───
-brave_key_blob         = "files/brave_key.enc"                      # optional, MUST be <path>.enc or null
-web_search_enabled     = true
-web_search_max_results = 6                                         # 1..=20
-web_search_timeout_ms  = 5000                                      # 500..=30000
+[max_blocking]
+max_blocking_threads_android = 6   # §2.2 — bounded Android pool
+max_blocking_threads_desktop = 8   # desktop / CI
+tool_slots                   = 2   # TOOL_BLOCKING_SLOTS
 
-# ─── Storage ───
-auto_download_models   = false
-cache_max_bytes        = 5368709120                                # 5 GiB
+[watchdog]
+max_iterations     = 8       # ≥ 1 (REQ-AGT-04)
+max_token_budget   = 8192    # u64
+max_wall_seconds   = 600     # u64
 
-# ─── UI ───
-theme                  = "auto"                                     # "auto"|"light"|"dark"
-haptics_enabled        = true
-font_size_px           = 16                                         # 14..=22
+[storage]
+sqlcipher_kdf_iter        = 256000
+wal_autocheckpoint_pages  = 1000
 
-# ─── Privacy (defaults locked) ───
-telemetry_enabled      = false                                      # release-build invariant (must remain false)
-network_online         = true                                       # user-controllable
+[saf]
+persist_grants_to_db = true
+prompt_on_first_use  = true
 
-# ─── Debug ───
-verbose_logs           = false                                      # dev build only
+[agent]
+max_failures_per_tool       = 5     # threshold per architect review GH #14
+recovered_history_window    = 12
+repeat_output_window        = 2     # default if omitted
+repeat_output_backoff_secs  = 10    # default if omitted
+max_concurrent_tools        = 4     # tokio::spawn semaphore (GH #13)
+
+[defaults]
+prompt_card_auto_send = false
+thermal_autopause     = true
+first_run_completed   = false
+
+[search]                     # optional; defaults below (GH #34)
+brave_timeout_secs   = 3
+tavily_timeout_secs  = 5
+max_parallel_engines = 2
+enable_cache         = true
+
+[[wrapped_secrets]]          # optional, zero or more entries
+slot       = "brave_api_key"
+blob_path  = "/var/mukei/secrets/brave_key.enc"
+created    = 2026-06-29T00:00:00Z
 ```
 
-### 7.3 Validator
+### 7.3 Validator semantics
 
-`validate_for_boot` (TRD §12.5) checks:
+`MukeiConfig::load_and_validate` runs a **two-pass** check:
 
-- All required fields present.
-- All values in plausible ranges.
-- `telemetry_enabled = false` (reject `true` even if set; the only way to "enable" is via upload-only debug build).
-- `brave_key_blob` if present, ends with `.enc` and exists on disk; otherwise absent.
-- No unknown top-level keys.
+1. **`validate_toml_keys`** — every root key MUST be in
+   `MukeiConfig::known_keys()`. Unknown root keys yield
+   `ConfigUnknownField(<key>)` and boot halts. Unknown nested keys
+   are caught by `serde`'s `deny_unknown_fields` posture (every
+   struct in the schema is strict).
+2. **`logical_validate`** — typed range checks:
+   - `gpu_layers ≥ 0`
+   - `n_ctx ∈ [256, 32768]`
+   - `n_threads ∈ [1, 32]`
+   - `watchdog.max_iterations ≥ 1`
 
-Failure details include field name + offending value; boot halts → SafeModeSchema (REQ-CON-04).
+Failure is surfaced as `MukeiError::ConfigInvalid { field, reason }`;
+the bridge crate renders both fields verbatim in the QML error
+dialog so a first-run misconfig is human-readable.
+
+The agent runtime wires `AgentCfg` → `ToolExecutionPolicy` via the
+`From<&AgentCfg>` impl so the on-disk settings are not cosmetic
+(Issue #13 fix). Adding a new field to `AgentCfg` requires updating
+the conversion AND the `config_round_trips_into_policy` regression
+test.
+
+### 7.4 Defaults & forward compatibility
+
+Three fields use `#[serde(default = …)]` so v0.7.4 configs that
+predate them still load:
+
+- `repeat_output_window` defaults to `2`
+- `repeat_output_backoff_secs` defaults to `10`
+- `max_concurrent_tools` defaults to `4`
+- `[search]` is entirely defaulted (Brave 3 s / Tavily 5 s / parallel 2 / cache on)
+- `[[wrapped_secrets]]` is defaulted to an empty list
+
+No other field is defaulted — the strict-config posture is
+deliberate so silent regressions cannot accumulate.
 
 ### 7.4 i18n String Storage 🌐 (NEW in v0.7.4)
 

@@ -1730,21 +1730,74 @@ pub enum FailureKind {
 }
 ```
 
-The threshold is configurable via
+Classification is exhaustive and lives in
+`FailureKind::classify(&MukeiError)`. The threshold is configurable via
 `config.toml::[agent]::max_failures_per_tool`
 (`ToolExecutionPolicy::DEFAULT_MAX_FAILURES = 5`). The fingerprint
 used to key the tracker is **JSON-object-key-canonical**: a tool
 emitting `{a:1,b:2}` and `{b:2,a:1}` collides on the same
 fingerprint so re-ordering arguments cannot evade the blocker.
 
+**Threshold semantics (architect review GH #14 — canonical).** With
+default `max_failures_per_tool = 5`:
+
+- Calls 1..=5: counted, tool NOT yet blocked. Each surfaces a
+  `<external_data source="tool_error" attempt="N/5">` envelope.
+- Call 6: tool becomes abuse-blocked for the rest of the turn.
+
+Wire contract enforced in two places:
+
+- `FailureTracker::record_failure` returns `true` when
+  post-increment `count > threshold` (6th hit at default 5).
+- `ToolExecutor::execute_parallel` pre-dispatch check blocks when
+  `pre_count > threshold` (same comparator). Identical predicate by
+  design so a `cargo grep` audit cannot find a drift between
+  blocker-fire and blocker-respect.
+
+The legacy PRD §8.2 wording ("fails twice consecutively") predates
+the v0.7.5 raise to 5 and is superseded by `ToolExecutionPolicy`’s
+docstring.
+
 #### 2.5.3 Output-repeat backoff (no-progress detection)
 
-`OutputRepeatTracker` keeps a small ring per `(tool, fingerprint)`
-pair. When `repeat_output_window` consecutive byte-identical outputs
-are seen, the executor injects a
-`render_repeat_output_envelope(…)` with an explicit
-`repeat_output_backoff_secs` hint so the LLM cannot tight-loop the
-same call.
+`OutputRepeatTracker` keeps a bounded ring per `(tool, fingerprint)`
+pair holding SHA-256 hashes of recent outputs. The detector fires
+only when the ring is **full AND every entry hashes to the same
+value** — a single repeat with one differing intermediate does not
+trigger it. The detector then escalates to `FailureKind::Abuse`,
+`OutputRepeatTracker::forget()` clears the ring for that pair, and
+the executor injects a `render_repeat_output_envelope(…)` with an
+explicit `repeat_output_backoff_secs` hint so the LLM cannot
+tight-loop the same call. The executor itself never sleeps.
+
+`OutputRepeatTracker::clear()` is called by
+`ToolExecutor::reset_for_new_turn` at the top of every
+`AgentLoop::run` so stuck-state from a previous turn does not leak
+forward.
+
+#### 2.5.3.1 Concurrency cap (architect review GH #13)
+
+The executor holds a `tokio::sync::Semaphore` sized to
+`policy.max_concurrent_tools` (default 4, configurable via
+`config.toml::[agent]::max_concurrent_tools`). Each spawned tool
+task `acquire_owned()`s a permit *before* doing any work; a 50-call
+LLM batch therefore queues at the semaphore instead of saturating
+sockets / FDs / the runtime queue. The cap is intentionally
+aligned with `TOOL_BLOCKING_SLOTS = 2` (TRD §2.2): more concurrent
+*tasks* than blocking slots is fine because every blocking call
+goes through `spawn_blocking_tool`, which itself serialises on the
+slot semaphore.
+
+#### 2.5.3.2 Audit-log write policy (architect review GH #3)
+
+When the `rusqlite` feature is on, every outcome is mirrored to the
+hash-chained `tool_audit_log` via
+`AuditLogWriter::record(&pool, entry)`. **Audit-log write failures
+MUST NOT abort the user's tool call.** Each `audit_outcome(…)` call
+is wrapped in an `if let Err(audit_err) = … { tracing::error!(…);
+continue; }` so a transient SQLite issue is diagnostic-only — the
+graceful-degrade contract from REQ-AGT-04 owns this path. The
+corrupt-chain detector handles the storage-side response.
 
 #### 2.5.4 Structured feedback envelopes
 
