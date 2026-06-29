@@ -97,6 +97,29 @@ Documentation index (under `docs/`):
   (downloads). `stop_generation()` rotates only the chat token;
   `stop_download()` rotates only the download token. The chat Stop
   button no longer silently kills a model download.
+- **Adaptive Search Planner (TRD §5.1).** `SearchEngineKind` is the
+  closed set `{ Brave, Tavily }`; a compile-time `compile_error!` in
+  `search/engines/mod.rs` rejects DDG re-introduction. `SearchSelector`
+  is pure: Fact/News/Local/Shopping → `[Brave]`,
+  Research/Compare/Academic/MultiStep → `[Tavily, Brave]`. Defaults
+  follow `PlannerPolicy` — Brave 3 s, Tavily 5 s,
+  `max_parallel_engines = 2`, `hits_per_engine = 5`,
+  `enable_cache = true`. A per-engine timeout surfaces as an empty hit
+  set, not an error, so the planner keeps whatever the faster engine
+  produced. Trust-gated sources (`SourceTrust::Unsafe`) are dropped
+  before ranking; citations are enforced in the response builder.
+- **Tool validator (TRD §13.3).** `tools::validator::validate` returns
+  `Vec<TypedToolCall { id: ToolCallId, name, arguments }>` and rolls
+  rejections into `MukeiError::ToolArgsRejected { tool_name: "validator",
+  reason: format_for_llm(errors) }`. Whitelist:
+  `web_search.query`, `read_file.path` (must be `saf://...`),
+  `get_hardware_info` (no args), `math_eval.expression`. The agent
+  executor never sees raw LLM JSON.
+- **Thinking-tag detector (TRD §1.2.5).** `ffi::tags::TagsStreaming`
+  uses a `TAG_WINDOW = 64`-byte sliding window with `truncate_safe`
+  (asserts UTF-8 char boundaries) so multi-byte localised tags never
+  trip the detector. `push()` returns a `TagEvents` bitflag the bridge
+  forwards as `thinking_started` / `thinking_completed` qsignals.
 - **Engine contract (TRD §3).** `LlamaEngine::load_model` streams the
   full-file SHA-256 in 1 MiB windows through `spawn_blocking` *before*
   mmap whenever `EngineConfig::expected_sha256` is set (REQ-SEC-01).

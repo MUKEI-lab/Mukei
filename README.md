@@ -140,6 +140,27 @@ mukei-ffi-shim                                                3 passed
   `from_non_null(NonNull<Inner>)` (architect review GH #10). Re-bind is
   `Inner::bump()`; permanent destroy is `Inner::tombstone()`
   (architect review GH #9).
+- **Adaptive Search Planner (TRD §5.1).** `SearchEngineKind` is
+  closed at `{ Brave, Tavily }` and a compile-time `compile_error!`
+  blocks DDG re-introduction. `SearchSelector::select(kind)` is a
+  pure matrix: Fact/News/Local/Shopping → `[Brave]`, Research /
+  Compare / Academic / MultiStep → `[Tavily, Brave]`. `PlannerPolicy`
+  defaults: Brave 3 s, Tavily 5 s, `max_parallel_engines = 2`,
+  `hits_per_engine = 5`, `enable_cache = true`. Per-engine timeouts
+  surface as empty hit sets so the planner returns whatever the
+  faster engine produced; `SourceTrust::Unsafe` is dropped before
+  ranking; citations are required in the response builder.
+- **Tool validator (TRD §13.3).** `tools::validator::validate` returns
+  `Vec<TypedToolCall { id, name, arguments }>` and aggregates
+  rejections into a single structured
+  `MukeiError::ToolArgsRejected { tool_name: "validator", reason: … }`
+  envelope so a mixed batch still re-prompts the LLM cleanly.
+  Whitelist: `web_search.query`, `read_file.path` (must be
+  `saf://...`), `get_hardware_info` (no args), `math_eval.expression`.
+- **Thinking-tag streaming (TRD §1.2.5).** `ffi::tags::TagsStreaming`
+  uses a 64-byte sliding window with `truncate_safe` UTF-8 boundary
+  asserts; `push()` returns `TagEvents` flags the bridge forwards as
+  `thinking_started` / `thinking_completed` qsignals.
 - **Engine contract (TRD §3).** `LlamaEngine::load_model` streams the
   full-file SHA-256 in 1 MiB windows through `spawn_blocking` *before*
   mmap whenever `EngineConfig::expected_sha256` is set (REQ-SEC-01).

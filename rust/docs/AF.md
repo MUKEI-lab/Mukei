@@ -554,10 +554,15 @@ Post-Parse Tool Validator  (TRD §13.3 + REQ-AGT-08)
 [B] LLM emits GBNF `"name":"web_search","args":{"q":"..."}`
 [C] Rust posts a ToolCall row + UI ToolCallPill (UXB §4.7)
 [D] Executor:
-    ├── SearchPlanner classifies the query / task shape
-    ├── selects Brave and/or Tavily under per-engine timeouts
-    ├── merges / ranks results through the planner policy
+    ├── IntentAnalyzer + TaskSplitter + TaskClassifier produce PlannedTasks
+    ├── SearchSelector maps TaskKind -> ordered engines
+    │     (Fact/News/Local/Shopping -> [Brave],
+    │      Research/Compare/Academic/MultiStep -> [Tavily, Brave])
+    ├── PlannerPolicy enforces per-engine timeout (Brave 3 s, Tavily 5 s);
+    │     a timeout returns an empty hit set, not an error
+    ├── SearchResultRanker drops SourceTrust::Unsafe + ranks survivors
     └── wraps returned text as `<external_data trust="untrusted" action="READ_ONLY">`
+       (sentinel-escaped via `tools::sentinel::escape_untrusted`)
 [E] Tokens continue; LLM summarises results
 [F] tool_audit_log row appended (BS §2.6)
 ```

@@ -2621,13 +2621,50 @@ impl Drop for IndexingTransaction<'_> {
 
 ## 5. Tool Implementations
 
-### 5.1 Web Search — Adaptive Search Planner (v0.7.5)
+### 5.1 Web Search — Adaptive Search Planner (current implementation)
+
+**Authoritative source:** `rust/crates/mukei-core/src/search/{mod,planner,intent,selector,policy,ranker,trust,cache}.rs`
+and `search/engines/{mod,brave,tavily}.rs`.
 
 > **v0.7.5 amendment supersedes the "DDG + Brave parallel scraper" design.**
 > DuckDuckGo is permanently removed; `tokio::join!`-style unconditional
 > fan-out is replaced by a selector matrix that decides 1- vs 2-engine
 > dispatch per task class. The legacy code block lower in this section
 > is preserved for historical context only.
+
+Current invariants the planner enforces (matched to source):
+
+- `SearchEngineKind` is a **closed** enum `{ Brave, Tavily }`. A
+  compile-time `compile_error!` in `search/engines/mod.rs` rejects any
+  DDG re-introduction.
+- `IntentAnalyzer::analyze` → `TaskSplitter::split` → `TaskClassifier::classify`
+  produces a vector of `PlannedTask { query, kind, engines }`.
+  `TaskKind` is closed: `Fact | Research | Compare | News | Academic | Shopping | Local | MultiStep`,
+  each with a stable `as_tag()` ASCII id.
+- `SearchSelector::select(kind)` is **pure** and deterministic:
+  Fact / News / Local / Shopping → `[Brave]`;
+  Research / Compare / Academic / MultiStep → `[Tavily, Brave]`.
+  The selector's output is truncated by
+  `PlannerPolicy::max_parallel_engines` (default `2`).
+- `PlannerPolicy` defaults: `timeouts.brave = 3 s`, `timeouts.tavily = 5 s`,
+  `max_parallel_engines = 2`, `hits_per_engine = 5`, `enable_cache = true`,
+  `min_results_floor = 1`. Wired from `config.toml` `[search]` via GH #34.
+- The executor reports a per-engine timeout as an **empty hit set**
+  rather than an error, so the planner returns whatever the faster
+  engine produced.
+- `SearchHit { title, url, snippet, engine, published?, engine_score? }`
+  is the normalised wire type across engines; `engine` records the
+  origin so the ranker can down-weight noisier sources.
+- The ranker drops `SourceTrust::Unsafe` hits BEFORE ranking and
+  enforces citation presence in the response builder.
+- API keys flow from the wrapped-secrets registry directly into
+  `ToolRegistry::with_web_search_keys(brave, tavily)`; the registry is
+  rebuilt whenever a key arrives, so the next dispatch sees the new
+  credential without restarting the agent loop. No process env vars
+  (REQ-TOOL-WEB-03 / Issue #3).
+- Every untrusted field flowing into the `<external_data>` envelope is
+  passed through `crate::tools::sentinel::escape_untrusted`
+  (REQ-TOOL-WEB-04 / Issue #1).
 
 **Canonical contract:**
 
@@ -5350,7 +5387,36 @@ pub fn load_tool_grammar() -> Result<GbnfGrammar, MukeiError> {
 }
 ```
 
-### 13.3 Post-Parse Tool Schema Validator (BUGFIX v0.6)
+### 13.3 Post-Parse Tool Schema Validator (current implementation)
+
+**Authoritative source:** `rust/crates/mukei-core/src/tools/validator.rs`.
+
+The live validator:
+
+- Parses GBNF output into `Vec<RawToolCall { name, arguments: serde_json::Value }>`.
+- Whitelists tool names via `ALLOWED_FIELDS_PER_TOOL`:
+  `web_search.query`, `read_file.path`, `get_hardware_info` (no args),
+  `math_eval.expression` (note the v0.7.2 addition; the historical
+  sketch below pre-dates it).
+- Returns a typed `TypedToolCall { id: ToolCallId, name, arguments }`
+  per accepted call, and aggregates rejections into
+  `MukeiError::ToolArgsRejected { tool_name: "validator", reason: format_for_llm(errors) }`
+  so a mixed batch still injects a structured envelope back to the LLM.
+- `ValidationError` variants are
+  `MismatchedArgs | UnknownTool | MissingRequiredField | WrongFieldType | ConstraintViolation`.
+- The agent loop's executor never sees raw LLM JSON — it consumes
+  `TypedToolCall` only. Adding a new tool requires touching the
+  validator (this file), the GBNF grammar, AND the `ToolRegistry`
+  (`tools/mod.rs`) at the same time; `ALLOWED_TOOLS` in
+  `tools/mod.rs` is the second whitelist that gets asserted against
+  the validator's `ALLOWED_FIELDS_PER_TOOL` keys.
+
+The code block below is the **v0.6 historical sketch**; it omits
+`math_eval`, the typed `ToolCallId`, and the `ToolArgsRejected`
+aggregation. Keep it for diffability; do not rely on it as the live
+contract.
+
+#### 13.3.legacy Post-Parse Tool Schema Validator (BUGFIX v0.6)
 
 GBNF can enforce *syntactic* JSON shape but cannot enforce the *context-sensitive* rule that an LLM-supplied tool name must have arguments that match that tool's schema. The grammar currently accepts any `tool_call` whose `arguments` matches `web_search_args | read_file_args | hardware_args`, so a hallucinated `{"name":"web_search","arguments":{"path":"x.txt"}}` is parseable JSON. The validator below is the second line of defense. It **runs on the Rust side after `serde_json::from_str` succeeds**, drops mismatched calls, and returns a structured error back to the LLM so it can self-correct.
 
