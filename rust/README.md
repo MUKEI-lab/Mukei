@@ -36,6 +36,8 @@ cargo check -p mukei-core --features "tokio,rusqlite,candle"
 cargo check -p mukei-core --features "tokio,network"   # enables real reqwest model downloader
 ```
 
+> **Verification note (2026-06-29):** `cargo test -p mukei-core` passes on the default `(std,tokio)` matrix, but `cargo check -p mukei-core --all-features` currently fails inside the upstream candle stack because `candle-core 0.7.2` expects `rand 0.8` while `half 2.7.1` also pulls `rand 0.9`, breaking `SampleUniform` for `f16` / `bf16`. Treat this as an external dependency issue until the candle/half/rand graph is repinned.
+>
 > Note: `usearch`, `candle`, and `llama-cpp-rs` need per-target setup.
 > `llama-cpp-prebuilt/CMakeLists.txt` produces a one-shot `libllama.a` per ABI.
 
@@ -196,7 +198,12 @@ Documentation index (under `docs/`):
 - **Sandboxed `math_eval` (TRD §5.5).** Identifier whitelist + 8 s timeout
   with `JoinHandle::abort` on overrun so the tool semaphore is reaped.
 - **Strict TOML config (TRD §12.5).** Unknown root keys are rejected on
-  boot.
+  boot. Batch-9 verification also found that `MukeiConfig` declares a
+  defaulted `search: SearchCfg`, but `MukeiConfig::known_keys()` does
+  not yet whitelist the root `search` table. Result: shipping configs
+  must currently omit `[search]` and rely on the compiled defaults
+  (Brave 3 s / Tavily 5 s / parallel 2 / cache on) until the source
+  whitelist is patched.
 - **Post-parse tool validator + SAF (TRD §5.2 / §13.3).** `read_file`
   refuses every non-SAF URI scheme.
 - **Crash diagnostics sink (TRD §36.1).** The panic hook computes a

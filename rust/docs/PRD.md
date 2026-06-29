@@ -8,10 +8,12 @@
 | **Date** | June 2026 (rev. v0.7.5) |
 | **Architecture** | Qt 6 (QML UI) + CXX-Qt (Bridge) + Rust (Agent Core) + llama.cpp (Inference) |
 | **Methodology** | FMEA (Failure Modes), STRIDE (Security), Concurrency-First |
-| **Status** | 🟢 Approved for Deep Engineering |
+| **Status** | 🟢 Approved for Deep Engineering — Batch-9 verification sync (2026-06-29) |
 | **Companion docs** | [TRD v0.7.5](TRD.md) · [Application Flow v1.2](AF.md) · [UI/UX Brief v2.1](UXB.md) · [Backend Schema v1.2](BS.md) |
 
 > **v0.7.5 — Convergence & Contract-Alignment Pass.** No new product requirements are added in this revision. The v0.7.5 PRD is a **truth-synchronisation pass**: it adopts the canonical version graph (PRD ↔ TRD ↔ AF ↔ BS ↔ UXB all aligned on 0.7.5 / 1.2 / 1.2 / 2.1), realigns the first-run journey to the UXB canonical sequence, and freezes the screen contract so engineering samples cannot drift from the design brief. All v0.7.2 / v0.7.3 / v0.7.4 requirements remain in force; none are removed or weakened.
+>
+> **Batch-9 verification sync (2026-06-29).** The canonical graph remains unchanged, but the docs now record two source-grounded findings from the verification pass: (1) the live `web_search` selector routes `Research`, `Compare`, `Academic`, and `MultiStep` tasks through **Tavily first with Brave as the second leg**, not "Tavily only"; and (2) the all-features Rust matrix is presently blocked by an upstream candle/half/rand dependency conflict rather than a Mukei product-rule failure.
 
 > **v0.6 Changelog — Defects Closed during Architecture Review:**
 >
@@ -369,10 +371,10 @@ the user has not granted `Internet`.
 | News        | Brave only (max_age_days set) |
 | Local       | Brave only |
 | Shopping    | Brave only |
-| Research    | Tavily only |
-| Compare     | Tavily preferred |
-| Academic    | Tavily only |
-| MultiStep   | Split per sub-task; each sub-task routes independently |
+| Research    | Tavily first, then Brave |
+| Compare     | Tavily first, then Brave |
+| Academic    | Tavily first, then Brave |
+| MultiStep   | Split per sub-task; each sub-task routes independently, and research-classified sub-tasks use `Tavily → Brave` |
 
 **Cache (per task class):**
 
@@ -380,7 +382,9 @@ the user has not granted `Internet`.
 |------------|-----|
 | Fact / Shopping / Local | 24 h |
 | News | 10 min |
-| Research / Compare / Academic | 1 h |
+| Research / Compare / Academic / MultiStep | 1 h |
+
+The cache is **process-local only** (never persisted to disk) and is hard-capped at **512 entries**; once full, expired entries are swept and then the oldest-by-insertion entries are evicted.
 
 **Per-engine timeout:** Brave 3 s, Tavily 5 s. On timeout the planner
 continues with whichever engines have replied; an empty result set

@@ -75,7 +75,7 @@ Three crates, one direction of dependency. `mukei-core` never links Qt — that 
 | **GBNF tool grammar** | ✅ Per-tool schema | `grammars/tool_calling.gbnf` |
 | **llama.cpp integration** | 🟡 Stubbed in core | Real load lives in the bridge; prebuilt `libllama.a` per ABI |
 | **Gemma 4 downloader** | ✅ Wired | Commit-pinned HF URLs, full-file SHA-256 verify, resumable, 416-restart safe |
-| **Candle MiniLM embedder** | 🟡 Behind feature flag | Default build uses a deterministic mock embedder |
+| **Candle MiniLM embedder** | 🟡 Behind feature flag | Default build uses a deterministic mock embedder; 2026-06-29 verification found the `--all-features` matrix currently blocked by an upstream `candle-core 0.7.2` ↔ `half 2.7.1` / `rand` 0.8 vs 0.9 trait mismatch |
 | **QML editorial-luxury UI** | ⏳ Out of scope for this repo | Tracked in the UX Brief |
 
 ---
@@ -89,6 +89,9 @@ cargo test -p mukei-ffi-shim
 ```
 
 Current run on the **codex review branch**:
+
+> **Verification Pass — 2026-06-29.** `cargo test -p mukei-core` passed (`203` unit + `12` integration + `6` fingerprint proptest + `3` grammar + `4` sentinel proptest = `228` passing tests). `cargo check -p mukei-core --all-features` is currently **blocked by an upstream dependency conflict**: `candle-core 0.7.2` depends on `rand 0.8`, while `half 2.7.1` pulls `rand 0.9`, which breaks `SampleUniform` for `f16` / `bf16` during the candle build. This is a verification finding, not a Mukei logic regression.
+
 
 ```
 mukei-core  (std,tokio)     203 unit + 12 integration + 6 proptest

@@ -4,13 +4,15 @@
 |-------|-------|
 | **Document ID** | MUKEI-BS-v1.2 |
 | **Supersedes** | BS v1.0 (2026-06-19, first pass) · BS v1.1 (2026-06-19, v0.7.4 i18n schema) |
-| **Status** | 🟢 AI-Architect Pass — Cross-Locked against PRD v0.7.5 + TRD v0.7.5 + AF v1.2 + UXB v2.1 |
+| **Status** | 🟢 AI-Architect Pass — Cross-Locked against PRD v0.7.5 + TRD v0.7.5 + AF v1.2 + UXB v2.1, Batch-9 verification sync (2026-06-29) |
 | **Audience** | Database / Rust engineers, Security review, Forensic engineers |
 | **Companion docs** | [PRD v0.7.5](PRD.md) · [TRD v0.7.5](TRD.md) · [Application Flow v1.2](AF.md) · [UI/UX Brief v2.1](UXB.md) |
 | **Out of scope** | UI behaviour — see [UI/UX Brief v2.1](UXB.md) |
 | **Notation** | Diagrams use ASCII. SQL is the current schema; **never** edit by hand — only via migrations (TRD §6). |
 
 > **Hard rule:** No schema change without a `V0xx__name.sql` migration in `migrations/` and an entry in `migrations_applied`. Direct edits are checked by a pre-commit test (TRD §11.1 `test_no_direct_schema_edit`).
+>
+> **Batch-9 verification note (2026-06-29):** the live `config/mod.rs` source still exposes a small schema/validator mismatch: `SearchCfg` exists and is fully defaulted, but the strict root whitelist in `MukeiConfig::known_keys()` does **not** yet admit the `search` table. This BS revision documents the current shipped behaviour rather than the intended future shape.
 
 ---
 
@@ -534,7 +536,7 @@ prompt_card_auto_send = false
 thermal_autopause     = true
 first_run_completed   = false
 
-[search]                     # optional; defaults below (GH #34)
+[search]                     # SOURCE-DECLARED ONLY as of 2026-06-29; explicit table currently rejected by known_keys()
 brave_timeout_secs   = 3
 tavily_timeout_secs  = 5
 max_parallel_engines = 2
@@ -554,7 +556,10 @@ created    = 2026-06-29T00:00:00Z
    `MukeiConfig::known_keys()`. Unknown root keys yield
    `ConfigUnknownField(<key>)` and boot halts. Unknown nested keys
    are caught by `serde`'s `deny_unknown_fields` posture (every
-   struct in the schema is strict).
+   struct in the schema is strict). **Current caveat:** the source
+   whitelist still omits `search`, so an explicit root `[search]`
+   table is treated as unknown even though `MukeiConfig` carries a
+   defaulted `SearchCfg` field.
 2. **`logical_validate`** — typed range checks:
    - `gpu_layers ≥ 0`
    - `n_ctx ∈ [256, 32768]`
@@ -579,7 +584,7 @@ predate them still load:
 - `repeat_output_window` defaults to `2`
 - `repeat_output_backoff_secs` defaults to `10`
 - `max_concurrent_tools` defaults to `4`
-- `[search]` is entirely defaulted (Brave 3 s / Tavily 5 s / parallel 2 / cache on)
+- `SearchCfg` is entirely defaulted (Brave 3 s / Tavily 5 s / parallel 2 / cache on), but the root `[search]` table is not yet admitted by `known_keys()` and therefore must currently be omitted from shipping `config.toml`
 - `[[wrapped_secrets]]` is defaulted to an empty list
 
 No other field is defaulted — the strict-config posture is

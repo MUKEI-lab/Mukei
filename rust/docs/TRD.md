@@ -8,11 +8,13 @@
 | **Version** | 0.7.5 — Convergence & Contract-Alignment Pass (cumulative over v0.7.2 / v0.7.3 / v0.7.4) |
 | **Date** | June 2026 |
 | **Architecture** | Qt 6 (QML) + CXX-Qt (Bridge) + Rust (Agent Core) + llama.cpp (Inference) |
-| **Status** | 🟢 Approved for Deep Engineering |
+| **Status** | 🟢 Approved for Deep Engineering — Batch-9 verification sync (2026-06-29) |
 | **Purpose** | Implementation guide for engineers. Contains actual code structures, build configs, and technical specifications. |
 | **Companion docs** | [PRD v0.7.5](PRD.md) · [Application Flow v1.2](AF.md) · [UI/UX Brief v2.1](UXB.md) · [Backend Schema v1.2](BS.md) |
 
 > **v0.7.5 — Convergence & Contract-Alignment Pass Changelog.** This revision adds NO new low-level behaviour; it locks the screen contract, canonical first-run journey, and tool-pill-as-timeline-event interaction grammar (§7.0 NEW), and synchronises every cross-reference to the v0.7.5 graph. All v0.7.2 / v0.7.3 / v0.7.4 fixes remain in force; none are removed or weakened. The convergence patches are tracked in §7.0 and the v0.7.5 row of the Revision History (§39).
+>
+> **Batch-9 verification sync (2026-06-29).** The source pass over `ffi/agent.rs`, `ffi/callback.rs`, `config/mod.rs`, `search/cache.rs`, and `search/ranker.rs` found no new product-level contract changes, but it did tighten three implementation notes: `FfiAgentSnapshot` / `LoadingStage` remain the stable QML-routing enums, `FfiCallbackRegistration` keeps `queued_only` as the cross-thread safety bit, and the current `MukeiConfig::known_keys()` root whitelist still omits `search`, so explicit `[search]` tables are rejected at boot even though `SearchCfg` itself is defaulted.
 >
 > | # | Severity | Defect (≤ v0.7.4) | Fix (v0.7.5) | Section |
 > |---|---|---|---|---|
@@ -918,8 +920,8 @@ rust/crates/mukei-core/src/
 │
 ├── ffi/                         # `ffi` is `#![warn(missing_docs)]` strict
 │   ├── mod.rs
-│   ├── agent.rs                 # FfiAgentSnapshot type + adapters
-│   ├── callback.rs              # callback_with_guard! macro consumers
+│   ├── agent.rs                 # FfiAgentSnapshot + LoadingStage (stable QML routing snapshot)
+│   ├── callback.rs              # FfiBoundaryId / FfiStateChange / FfiCallbackRegistration
 │   └── tags.rs                  # TagsStreaming sliding-window detector
 │
 ├── agent/
@@ -934,7 +936,7 @@ rust/crates/mukei-core/src/
 │       ├── executor.rs          # ToolExecutor + parallel dispatch + FailureTracker
 │       └── watchdog.rs          # OutputRepeatTracker (no-progress backoff)
 │
-├── config/mod.rs                # MukeiConfig (strict TOML, §12.5)
+├── config/mod.rs                # MukeiConfig + SearchCfg + wrapped-secrets whitelist (§12.5)
 │
 ├── diagnostics/
 │   ├── mod.rs
@@ -960,12 +962,12 @@ rust/crates/mukei-core/src/
 │
 ├── search/                       # Adaptive Search Planner (TRD §5.1)
 │   ├── mod.rs
-│   ├── cache.rs                 # bounded LRU cache
+│   ├── cache.rs                 # process-local TTL cache (MAX_ENTRIES = 512, oldest-first eviction)
 │   ├── engines/                 # mod.rs + brave.rs + tavily.rs (NO DDG)
 │   ├── intent.rs                # task split + IntentClassifier
 │   ├── planner.rs               # selector → ranker → cache orchestration
 │   ├── policy.rs                # per-engine timeouts + parallelism caps
-│   ├── ranker.rs                # trust- and freshness-aware reranking
+│   ├── ranker.rs                # relevance/freshness/authority/citation/quality reranker
 │   ├── selector.rs              # engine-per-task selector
 │   └── trust.rs                 # trusted / semi / untrusted / blocked
 │
@@ -2648,7 +2650,10 @@ Current invariants the planner enforces (matched to source):
   `PlannerPolicy::max_parallel_engines` (default `2`).
 - `PlannerPolicy` defaults: `timeouts.brave = 3 s`, `timeouts.tavily = 5 s`,
   `max_parallel_engines = 2`, `hits_per_engine = 5`, `enable_cache = true`,
-  `min_results_floor = 1`. Wired from `config.toml` `[search]` via GH #34.
+  `min_results_floor = 1`. `SearchCfg` carries these values in source, but
+  the current strict root-key whitelist in `MukeiConfig::known_keys()` still
+  omits `search`, so shipping configs must presently rely on the compiled
+  defaults rather than an explicit `[search]` table until the whitelist is patched.
 - The executor reports a per-engine timeout as an **empty hit set**
   rather than an error, so the planner returns whatever the faster
   engine produced.
@@ -2656,7 +2661,14 @@ Current invariants the planner enforces (matched to source):
   is the normalised wire type across engines; `engine` records the
   origin so the ranker can down-weight noisier sources.
 - The ranker drops `SourceTrust::Unsafe` hits BEFORE ranking and
-  enforces citation presence in the response builder.
+  enforces citation presence in the response builder. The weighted
+  formula in `search/ranker.rs` is `0.40 relevance + 0.15 freshness +
+  0.25 authority + 0.10 citation + 0.10 quality`, with every component
+  clamped into `[0.0, 1.0]` before composition.
+- `SearchCache` is process-local only (never persisted to disk), keyed by
+  `SHA-256(task_kind || 0x00 || engine || 0x00 || query)`, and capped at
+  `MAX_ENTRIES = 512`; once full it first sweeps expired entries and then
+  evicts the oldest-by-insertion survivors.
 - API keys flow from the wrapped-secrets registry directly into
   `ToolRegistry::with_web_search_keys(brave, tavily)`; the registry is
   rebuilt whenever a key arrives, so the next dispatch sees the new

@@ -4,7 +4,7 @@
 |-------|-------|
 | **Document ID** | MUKEI-AF-v1.2 |
 | **Supersedes** | AF v1.0 (2026-06-19, first pass) · AF v1.1 (2026-06-19, v0.7.4 hardening) |
-| **Status** | 🟢 AI-Architect Pass — Cross-Locked against PRD v0.7.5 + TRD v0.7.5 + UXB v2.1 + BS v1.2 |
+| **Status** | 🟢 AI-Architect Pass — Cross-Locked against PRD v0.7.5 + TRD v0.7.5 + UXB v2.1 + BS v1.2, Batch-9 verification sync (2026-06-29) |
 | **Audience** | Mobile engineers (Rust + Kotlin + QML), QA, Security review, Product reviewers |
 | **Companion docs** | [PRD v0.7.5](PRD.md) · [TRD v0.7.5](TRD.md) · [UI/UX Brief v2.1](UXB.md) · [Backend Schema v1.2](BS.md) |
 | **Out of scope** | Visual styling — see [UI/UX Brief v2.1](UXB.md); data persistence details — see [Backend Schema v1.2](BS.md) |
@@ -587,7 +587,12 @@ Post-Parse Tool Validator  (TRD §13.3 + REQ-AGT-08)
     │      Research/Compare/Academic/MultiStep -> [Tavily, Brave])
     ├── PlannerPolicy enforces per-engine timeout (Brave 3 s, Tavily 5 s);
     │     a timeout returns an empty hit set, not an error
-    ├── SearchResultRanker drops SourceTrust::Unsafe + ranks survivors
+    ├── SearchResultRanker drops SourceTrust::Unsafe and scores survivors with
+    │     relevance + freshness + authority + citation + quality weighting
+    ├── SearchCache writes the process-local result set with task-class TTL
+    │     (24 h fact/local/shopping, 10 min news, 1 h research-class tasks),
+    │     never persists to disk, and evicts oldest-by-insertion once
+    │     MAX_ENTRIES = 512 is exceeded
     └── wraps returned text as `<external_data trust="untrusted" action="READ_ONLY">`
        (sentinel-escaped via `tools::sentinel::escape_untrusted`)
 [E] Tokens continue; LLM summarises results
@@ -595,6 +600,8 @@ Post-Parse Tool Validator  (TRD §13.3 + REQ-AGT-08)
 ```
 
 **Network-fail** → executor returns a structured tool error envelope; no DuckDuckGo fallback exists in the current implementation.
+
+**State-routing note (Batch-9 verification sync):** UI screen routing continues to consume the stable `FfiAgentSnapshot` enum (`Uninitialized`, `ModelMissing`, `Downloading`, `Loading`, `IdleReady`, `Inferring`, `ToolExecuting`, `Recovering`, `ThermalThrottled`, `FatalError`). Cross-thread callback registrations remain queued-only via `FfiCallbackRegistration { queued_only: true }`; AF does not redefine that ABI, it only consumes it.
 
 #### 10.2.2 `read_file` (TRD §5.2)
 
