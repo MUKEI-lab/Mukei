@@ -130,7 +130,7 @@ impl CallbackGuard {
             // is freed. The generation counter is no longer reachable
             // from QML, so every pending callback observes
             // `GuardError::Released` on its next call.
-            drop(Arc::from_raw(ptr_to_inner));
+            drop(unsafe { Arc::from_raw(ptr_to_inner) });
         }
     }
 }

@@ -209,6 +209,7 @@ impl MukeiConfig {
             "saf",
             "agent",
             "defaults",
+            "search",
             "wrapped_secrets",
         ]
     }

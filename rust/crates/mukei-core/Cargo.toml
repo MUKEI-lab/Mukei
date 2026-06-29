@@ -39,10 +39,7 @@ sqlcipher          = ["rusqlite"]  # SQLCipher == rusqlite + encrypted backend
 # current search engines use JSON-only APIs and `scraper` pulls in
 # MPL-2.0 transitives that violate the Apache/MIT-only license policy.
 network            = ["dep:reqwest", "dep:url"]
-candle             = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers"]
-# Declared so the `#[cfg(feature = "ddg")] compile_error!(...)` anti-regression
-# tripwire is recognized by check-cfg rather than surfacing as a warning.
-ddg                = []
+candle             = ["dep:half", "dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers"]
 android_keystore   = []
 release-hardening  = []
 
@@ -84,6 +81,7 @@ usearch     = { workspace = true, optional = true }
 reqwest     = { workspace = true, optional = true }
 url         = { workspace = true, optional = true }
 tokenizers  = { workspace = true, optional = true }
+half        = { workspace = true, optional = true }
 candle-core = { workspace = true, optional = true }
 candle-nn   = { workspace = true, optional = true }
 candle-transformers = { workspace = true, optional = true }

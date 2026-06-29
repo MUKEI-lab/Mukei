@@ -44,6 +44,11 @@ cxx-qt-lib  = "0.6"
 llama-cpp-rs = { path = "llama-cpp-stub" }
 
 # ----- RAG / Embeddings (TRD §4.1) --------------------------------------
+# `half` is pinned below the newest 2.x line because candle 0.7.x still
+# compiles against the rand-0.8-backed trait impls; newer `half` releases
+# also pull rand 0.9, which breaks `SampleUniform` for f16/bf16 in the
+# `--all-features` matrix.
+half                = "=2.4.1"
 candle-core         = "0.7"
 candle-nn           = "0.7"
 candle-transformers = "0.7"

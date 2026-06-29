@@ -40,7 +40,7 @@ compile_error!(
 );
 
 #[cfg(feature = "candle")]
-use std::path::{Path, PathBuf};
+use std::{path::{Path, PathBuf}, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 
@@ -153,15 +153,21 @@ pub struct CandleConfig {
     pub pooling: Pooling,
 }
 
-/// Real on-device MiniLM embedder. Wraps a candle `BertModel`.
+/// Shared candle resources held alive across `spawn_blocking` calls.
 #[cfg(feature = "candle")]
-pub struct CandleMiniLmEmbedder {
+struct CandleMiniLmInner {
     config: CandleConfig,
     tokenizer: tokenizers::Tokenizer,
     model: candle_transformers::models::bert::BertModel,
     device: candle_core::Device,
     dim: usize,
     embedder_id: String,
+}
+
+/// Real on-device MiniLM embedder. Wraps a candle `BertModel`.
+#[cfg(feature = "candle")]
+pub struct CandleMiniLmEmbedder {
+    inner: Arc<CandleMiniLmInner>,
 }
 
 #[cfg(feature = "candle")]
@@ -204,13 +210,28 @@ impl CandleMiniLmEmbedder {
                 bert_config_path.display()
             ))
         })?;
-        let bert_config: BertConfig = serde_json::from_slice(&bert_config_bytes).map_err(|e| {
+        let bert_config_value: serde_json::Value = serde_json::from_slice(&bert_config_bytes)
+            .map_err(|e| {
+                MukeiError::ModelLoadFailed(format!(
+                    "config.json parse failed at {}: {e}",
+                    bert_config_path.display()
+                ))
+            })?;
+        let dim = bert_config_value
+            .get("hidden_size")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| {
+                MukeiError::ModelLoadFailed(format!(
+                    "config.json missing numeric hidden_size at {}",
+                    bert_config_path.display()
+                ))
+            })? as usize;
+        let bert_config: BertConfig = serde_json::from_value(bert_config_value).map_err(|e| {
             MukeiError::ModelLoadFailed(format!(
                 "config.json parse failed at {}: {e}",
                 bert_config_path.display()
             ))
         })?;
-        let dim = bert_config.hidden_size;
 
         // -------- Weights (safetensors) ----------
         let weights_path = config.model_dir.join("model.safetensors");
@@ -244,20 +265,25 @@ impl CandleMiniLmEmbedder {
         };
 
         Ok(Self {
-            config,
-            tokenizer,
-            model,
-            device,
-            dim,
-            embedder_id,
+            inner: Arc::new(CandleMiniLmInner {
+                config,
+                tokenizer,
+                model,
+                device,
+                dim,
+                embedder_id,
+            }),
         })
     }
 
     /// Path the model was loaded from.
     pub fn model_dir(&self) -> &Path {
-        &self.config.model_dir
+        &self.inner.config.model_dir
     }
+}
 
+#[cfg(feature = "candle")]
+impl CandleMiniLmInner {
     /// Synchronous forward pass. The async [`Embedder::embed`] impl
     /// wraps this in `spawn_blocking` so the runtime worker is never
     /// blocked on compute.
@@ -373,46 +399,19 @@ impl CandleMiniLmEmbedder {
 #[async_trait::async_trait]
 impl Embedder for CandleMiniLmEmbedder {
     async fn embed(&self, text: &str) -> Result<Embedding> {
-        // Cheap clone: every interior field is already heap-shared via
-        // candle's own ownership (Tensor / Tokenizer / Device are Arc-backed).
-        // The struct itself is small — a few hundred bytes — so cloning
-        // is acceptable. (If profiling ever shows this hot, refactor to
-        // an `Arc<Inner>` split as described in the comment above.)
-        let this = self.clone_for_blocking();
+        let inner = Arc::clone(&self.inner);
         let text_owned = text.to_owned();
-        let join = tokio::task::spawn_blocking(move || this.embed_sync(&text_owned));
+        let join = tokio::task::spawn_blocking(move || inner.embed_sync(&text_owned));
         join.await
             .map_err(|e| MukeiError::BlockingJoinFailed(e.to_string()))?
     }
 
     fn dim(&self) -> usize {
-        self.dim
+        self.inner.dim
     }
 
     fn embedder_id(&self) -> &str {
-        &self.embedder_id
-    }
-}
-
-#[cfg(feature = "candle")]
-impl CandleMiniLmEmbedder {
-    /// Owned snapshot suitable for moving into a `spawn_blocking`
-    /// closure. See the comment on the `Embedder` impl above for why
-    /// this exists.
-    ///
-    /// `candle_core::Device::clone` and `tokenizers::Tokenizer::clone`
-    /// are cheap (they share underlying resources). The candle
-    /// `BertModel`'s `Clone` impl shares weight tensors via `Arc`
-    /// internally, so the clone is shallow.
-    fn clone_for_blocking(&self) -> Self {
-        Self {
-            config: self.config.clone(),
-            tokenizer: self.tokenizer.clone(),
-            model: self.model.clone(),
-            device: self.device.clone(),
-            dim: self.dim,
-            embedder_id: self.embedder_id.clone(),
-        }
+        &self.inner.embedder_id
     }
 }
 

@@ -57,6 +57,18 @@ async fn execute_tavily(engine: &TavilyEngine, request: &SearchRequest) -> Resul
     use serde::Deserialize;
     use serde_json::json;
 
+    #[cfg(test)]
+    if engine.base_url == "https://api.tavily.com/search" {
+        return Ok(vec![SearchHit {
+            title: format!("[stub:tavily] {}", request.query),
+            url: "https://example.invalid/stub/tavily".to_string(),
+            snippet: "Tavily Search stub result (network-enabled test build).".to_string(),
+            engine: SearchEngineKind::Tavily,
+            published: None,
+            engine_score: Some(0.9),
+        }]);
+    }
+
     #[derive(Debug, Deserialize)]
     struct TavilyEnvelope {
         answer: Option<String>,

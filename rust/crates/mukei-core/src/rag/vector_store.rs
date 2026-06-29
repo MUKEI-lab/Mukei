@@ -390,7 +390,7 @@ impl VectorStore {
         {
             if let Some(index) = self.hnsw.lock().as_ref() {
                 if let Ok(matches) = index.search(q, k) {
-                    return matches
+                    let scored: Vec<(u64, f32)> = matches
                         .keys
                         .into_iter()
                         .zip(matches.distances.into_iter())
@@ -399,6 +399,9 @@ impl VectorStore {
                         // that previously relied on cosine.
                         .map(|(id, d)| (id, 1.0 - d))
                         .collect();
+                    if !scored.is_empty() {
+                        return scored;
+                    }
                 }
             }
         }

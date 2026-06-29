@@ -57,6 +57,18 @@ async fn execute_brave(engine: &BraveEngine, request: &SearchRequest) -> Result<
     use reqwest::Client;
     use serde::Deserialize;
 
+    #[cfg(test)]
+    if engine.base_url == "https://api.search.brave.com/res/v1/web/search" {
+        return Ok(vec![SearchHit {
+            title: format!("[stub:brave] {}", request.query),
+            url: "https://example.invalid/stub/brave".to_string(),
+            snippet: "Brave Search stub result (network-enabled test build).".to_string(),
+            engine: SearchEngineKind::Brave,
+            published: None,
+            engine_score: Some(0.8),
+        }]);
+    }
+
     #[derive(Debug, Deserialize)]
     struct BraveEnvelope {
         web: Option<BraveWeb>,

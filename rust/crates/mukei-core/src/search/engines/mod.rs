@@ -4,8 +4,8 @@
 //!
 //! - **DuckDuckGo is permanently removed.** Any future PR that
 //!   reintroduces a `ddg.rs` file or a `Ddg` variant on
-//!   [`SearchEngineKind`] MUST be rejected. The `compile_error!`
-//!   below catches the most direct regression at build time.
+//!   [`SearchEngineKind`] MUST be rejected. The feature no longer exists
+//!   in Cargo, so `--features ddg` fails at manifest resolution time.
 //! - **Closed engine set.** Only [`SearchEngineKind::Brave`] and
 //!   [`SearchEngineKind::Tavily`] exist; adding a third engine requires
 //!   touching the planner's selector matrix at the same time.
@@ -21,12 +21,6 @@ pub mod tavily;
 
 pub use brave::BraveEngine;
 pub use tavily::TavilyEngine;
-
-// ---------------------------------------------------------------------
-// Anti-regression tripwire — see invariant above.
-// ---------------------------------------------------------------------
-#[cfg(feature = "ddg")]
-compile_error!("DuckDuckGo is permanently removed from the Mukei search architecture (v0.7.5 migration §2). Re-enabling it requires a new TRD amendment.");
 
 /// Closed set of engine kinds. Stable JSON tag — persisted in cache
 /// keys and per-hit attribution.
