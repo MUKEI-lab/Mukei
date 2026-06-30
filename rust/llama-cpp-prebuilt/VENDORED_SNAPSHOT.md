@@ -27,7 +27,7 @@ These paths are omitted because `rust/llama-cpp-prebuilt/CMakeLists.txt` builds 
 | `.clang-format`, `.clang-tidy`, `.editorconfig`, `.flake8`, `.pre-commit-config.yaml`, `.ecrc`, `.dockerignore`, `mypy.ini`, `pyrightconfig.json`, `ty.toml` | Upstream formatting/lint/development configuration; not used by the embedded library build. |
 | `.devops/`, `.github/`, `.gemini/`, `.pi/`, `ci/` | Upstream CI, automation, and agent metadata; not used by Mukei's vendored build. |
 | `.git/`, `.gitignore`, `.gitmodules` | Git repository/submodule metadata must not be vendored; this package is intentionally self-contained without gitlinks. |
-| `AGENTS.md`, `AUTHORS`, `CLAUDE.md`, `CODEOWNERS`, `CONTRIBUTING.md`, `README.md`, `SECURITY.md` equivalents not needed by the build | Upstream repository governance or broad documentation; Mukei records vendoring details here instead. |
+| `AGENTS.md`, `AUTHORS`, `CLAUDE.md`, `CODEOWNERS`, `CONTRIBUTING.md`, `README.md` equivalents not needed by the build | Upstream repository governance or broad documentation; Mukei records vendoring details here instead. |
 | `Makefile`, `build-xcframework.sh` | Standalone upstream build entry points not used by the CMake library fallback. |
 | `app/`, `examples/`, `pocs/`, `tools/` | Standalone applications, demos, tools, and proof-of-concepts; wrapper disables these targets. |
 | `benches/` | Upstream benchmarks; not part of the library target. |
