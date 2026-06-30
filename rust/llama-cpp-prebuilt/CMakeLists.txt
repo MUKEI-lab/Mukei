@@ -37,13 +37,25 @@ if(NOT EXISTS "${MUKEI_VENDOR_DIR}/CMakeLists.txt")
 endif()
 
 file(MAKE_DIRECTORY "${MUKEI_PREBUILT_ROOT}/${MUKEI_TARGET_ABI}")
-add_subdirectory("${MUKEI_VENDOR_DIR}" "${CMAKE_BINARY_DIR}/llama-build")
 
-add_custom_command(TARGET llama POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          $<TARGET_FILE:llama>
-          "${MUKEI_PREBUILT_LIB}"
-  COMMENT "Persisting one-shot llama build to ${MUKEI_PREBUILT_LIB}"
-)
+# Keep the fallback self-contained and library-only.  The vendored snapshot
+# intentionally omits upstream apps, tools, examples, and tests, and the
+# prebuilt cache expects a static archive at prebuilt/<abi>/libllama.a.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build llama.cpp as static libraries" FORCE)
+set(LLAMA_BUILD_COMMON OFF CACHE BOOL "Do not build upstream common utilities" FORCE)
+set(LLAMA_BUILD_TESTS OFF CACHE BOOL "Do not build upstream tests" FORCE)
+set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "Do not build upstream tools" FORCE)
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "Do not build upstream examples" FORCE)
+set(LLAMA_BUILD_SERVER OFF CACHE BOOL "Do not build upstream server" FORCE)
+set(LLAMA_BUILD_APP OFF CACHE BOOL "Do not build upstream app" FORCE)
+set(GGML_BUILD_TESTS OFF CACHE BOOL "Do not build upstream ggml tests" FORCE)
+set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "Do not build upstream ggml examples" FORCE)
+
+# Persist the static fallback directly at the prebuilt cache path.  CMake
+# does not allow attaching a POST_BUILD command to a target created by
+# add_subdirectory() from this parent directory.
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${MUKEI_PREBUILT_ROOT}/${MUKEI_TARGET_ABI}")
+
+add_subdirectory("${MUKEI_VENDOR_DIR}" "${CMAKE_BINARY_DIR}/llama-build")
 
 add_library(mukei_llama ALIAS llama)
