@@ -71,7 +71,7 @@ Three crates, one direction of dependency. `mukei-core` never links Qt — that 
 | **Rust kernel** | ✅ Verified on main | All-features verification restored: 248 `mukei-core` tests passing (219 unit + 12 integration + 6 + 3 + 3 + 4 suites + 1 doc-test) |
 | **C-FFI shim** | ✅ Stable scaffold | 3 unit tests; checked-in C header with drift-detector test |
 | **CXX-Qt bridge** | 🟡 Compiles under Qt | Qt 6.5+ required on the host; sandbox CI skips this crate |
-| **Migrations V001–V004** | ✅ Authored | Conversations, messages, chunks, recovery, audit, SAF tokens, branches |
+| **Migrations V001–V005** | ✅ Authored | Conversations, messages, chunks, recovery, audit, SAF tokens, branches, audit-chain checks |
 | **GBNF tool grammar** | ✅ Per-tool schema | `grammars/tool_calling.gbnf` |
 | **llama.cpp integration** | ✅ Prebuilt path merged | Real load lives in the bridge; the vendored/prebuilt `libllama.a` per-ABI pipeline is now merged into `main` |
 | **Gemma 4 downloader** | ✅ Wired | Commit-pinned HF URLs, full-file SHA-256 verify, resumable, 416-restart safe |
@@ -298,12 +298,12 @@ Mukei/
 │   ├── Cargo.toml               ← panic = "unwind" pinned on every profile
 │   ├── README.md                ← engineering README
 │   ├── crates/
-│   │   ├── mukei-core/          ← pure-Rust kernel · 228 tests sandbox-passing
+│   │   ├── mukei-core/          ← pure-Rust kernel · 248 tests passing on `main` (--all-features)
 │   │   ├── mukei-bridge/        ← CXX-Qt + JNI surface (Qt host required)
 │   │   └── mukei-ffi-shim/      ← manual extern "C" escape hatch · 3 tests
 │   ├── llama-cpp-stub/          ← workspace placeholder (release-hardened)
 │   ├── llama-cpp-prebuilt/      ← one-shot libllama.a per ABI (CMake)
-│   ├── migrations/              ← V001–V004 · 000_default_config.toml
+│   ├── migrations/              ← V001–V005 · 000_default_config.toml
 │   ├── grammars/                ← tool_calling.gbnf (strict per-tool)
 │   └── docs/                    ← TRD / PRD / BS / AF / UXB design pass v0.7.5
 ```

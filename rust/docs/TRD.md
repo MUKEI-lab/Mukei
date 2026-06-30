@@ -793,7 +793,7 @@ plaintext secret. Adding a new variant requires updating
 `error_code()` AND `classification()`; the latter is exhaustive
 (no `_ =>` wildcard) so a missing arm fails `cargo build` via E0004.
 
-All variants present in source as of the codex review branch:
+All variants present in source as of `main` (2026-06-30 sync):
 
 | Category | Variant | Code | `ErrorClass` |
 |---|---|---|---|
@@ -906,7 +906,7 @@ construction site of `MukeiError::SecretLeaked(...)`.
 
 ### 2.1 Module Structure
 
-> **Authoritative layout** (codex review branch). The legacy box
+> **Authoritative layout** (as of `main`, 2026-06-30). The legacy box
 > below this code block is preserved for archival rationale; the
 > current tree mirrors what `cargo check` actually compiles.
 
@@ -974,7 +974,7 @@ rust/crates/mukei-core/src/
 ├── storage/                      # rusqlite-gated (§6, BS v1.2)
 │   ├── mod.rs
 │   ├── pool.rs                  # r2d2 SQLite + with_conn spawn_blocking wrapper
-│   ├── migrations.rs            # V001–V004 strict ordering + verify_order
+│   ├── migrations.rs            # V001–V005 strict ordering + verify_order
 │   ├── audit_log.rs             # hash-chained tool_audit_log writer (codex fix)
 │   ├── saf.rs                   # SafRegistry (SAF URI grants)
 │   ├── recovery.rs              # RecoveryStore + RecoveryState
@@ -1181,7 +1181,7 @@ pub fn initialize() -> Result<(), MukeiError> {
 > **Authoritative source**: `rust/crates/mukei-core/src/agent/loop_.rs`.
 > The narrative below is the design contract; the source enforces it.
 
-#### 2.3.0 Public surface (codex review branch)
+#### 2.3.0 Public surface (as of `main`, 2026-06-30)
 
 ```rust
 pub struct AgentLoop {
@@ -1344,7 +1344,7 @@ impl AgentLoop {
 > The narrative below is the design contract; the trait shape and the
 > ground-truth constants live in source.
 
-#### 2.4.0 Public surface (codex review branch)
+#### 2.4.0 Public surface (as of `main`, 2026-06-30)
 
 ```rust
 #[async_trait::async_trait]
