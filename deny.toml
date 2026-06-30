@@ -133,13 +133,15 @@ skip = [
     # the same supply-chain pass that dropped `scraper`. Those crates
     # are no longer in the lockfile, so cargo-deny would (correctly)
     # raise `unmatched-skip` errors if we kept them.
-    # `candle-core`, `tokenizers`, `uuid` span the rand 0.8/0.9/0.10 lifecycle.
+    # `candle-core`, `tokenizers`, `uuid` span the rand 0.8 lifecycle. Once
+    # the workspace pinned `half = =2.4.1` to break the candle/rand-0.9
+    # SampleUniform conflict (see rust/Cargo.toml), the 0.9 line of
+    # `rand`/`rand_core` disappeared from the lockfile. The duplicate-
+    # version risk that motivated the skip list is therefore narrower:
+    # only `rand@0.8` + `rand_core@0.6` are still multi-version pinned by
+    # upstreams we do not control.
     { crate = "rand@0.8.6",               reason = "candle/tokenizers transitive — pinned to 0.8 by upstream" },
-    { crate = "rand@0.9.4",               reason = "half 2.7 transitive — clears with candle 0.8" },
-    { crate = "rand_chacha@0.3.1",        reason = "rand 0.8 transitive" },
     { crate = "rand_core@0.6.4",          reason = "rand 0.8 + rustls 0.23 transitive" },
-    { crate = "rand_core@0.9.5",          reason = "rand 0.9 transitive (half 2.7)" },
-    { crate = "rand_distr@0.4.3",         reason = "candle-core 0.7 transitive" },
     # `toml` 0.8 still uses `toml_edit 0.22`/`toml_datetime 0.6`; cxx-build chain
     # is on the 1.x line.
     { crate = "toml_datetime@0.6.11",     reason = "toml 0.8 transitive — clears with toml 1.0 rollout" },

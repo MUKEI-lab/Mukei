@@ -40,7 +40,10 @@ compile_error!(
 );
 
 #[cfg(feature = "candle")]
-use std::{path::{Path, PathBuf}, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use serde::{Deserialize, Serialize};
 
