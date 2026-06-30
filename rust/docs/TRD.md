@@ -8,13 +8,13 @@
 | **Version** | 0.7.5 — Convergence & Contract-Alignment Pass (cumulative over v0.7.2 / v0.7.3 / v0.7.4) |
 | **Date** | June 2026 |
 | **Architecture** | Qt 6 (QML) + CXX-Qt (Bridge) + Rust (Agent Core) + llama.cpp (Inference) |
-| **Status** | 🟢 Approved for Deep Engineering — Batch-9 verification sync (2026-06-29) |
+| **Status** | 🟢 Approved for Deep Engineering — main sync after vendor/llama merge + CI green (2026-06-30) |
 | **Purpose** | Implementation guide for engineers. Contains actual code structures, build configs, and technical specifications. |
 | **Companion docs** | [PRD v0.7.5](PRD.md) · [Application Flow v1.2](AF.md) · [UI/UX Brief v2.1](UXB.md) · [Backend Schema v1.2](BS.md) |
 
 > **v0.7.5 — Convergence & Contract-Alignment Pass Changelog.** This revision adds NO new low-level behaviour; it locks the screen contract, canonical first-run journey, and tool-pill-as-timeline-event interaction grammar (§7.0 NEW), and synchronises every cross-reference to the v0.7.5 graph. All v0.7.2 / v0.7.3 / v0.7.4 fixes remain in force; none are removed or weakened. The convergence patches are tracked in §7.0 and the v0.7.5 row of the Revision History (§39).
 >
-> **Batch-9 verification sync (2026-06-29).** The source pass over `ffi/agent.rs`, `ffi/callback.rs`, `config/mod.rs`, `search/cache.rs`, and `search/ranker.rs` found no new product-level contract changes, but it did tighten three implementation notes: `FfiAgentSnapshot` / `LoadingStage` remain the stable QML-routing enums, `FfiCallbackRegistration` keeps `queued_only` as the cross-thread safety bit, and the current `MukeiConfig::known_keys()` root whitelist still omits `search`, so explicit `[search]` tables are rejected at boot even though `SearchCfg` itself is defaulted.
+> **2026-06-30 mainline sync.** The source pass after merging `vendor/llama-cpp-self-contained` into `main` found no new product-level contract changes, but it does close two previously documented implementation caveats: `FfiAgentSnapshot` / `LoadingStage` remain the stable QML-routing enums, `FfiCallbackRegistration` still keeps `queued_only` as the cross-thread safety bit, **and** `MukeiConfig::known_keys()` now admits the root `search` table so explicit `[search]` TOML is accepted at boot. The earlier candle/half/rand all-features verification blocker is also closed on `main`; `fmt`, the clippy matrix, sandbox tests, all-features tests, `cargo-deny`, and `cargo-audit` now pass together.
 >
 > | # | Severity | Defect (≤ v0.7.4) | Fix (v0.7.5) | Section |
 > |---|---|---|---|---|
@@ -2650,10 +2650,11 @@ Current invariants the planner enforces (matched to source):
   `PlannerPolicy::max_parallel_engines` (default `2`).
 - `PlannerPolicy` defaults: `timeouts.brave = 3 s`, `timeouts.tavily = 5 s`,
   `max_parallel_engines = 2`, `hits_per_engine = 5`, `enable_cache = true`,
-  `min_results_floor = 1`. `SearchCfg` carries these values in source, but
-  the current strict root-key whitelist in `MukeiConfig::known_keys()` still
-  omits `search`, so shipping configs must presently rely on the compiled
-  defaults rather than an explicit `[search]` table until the whitelist is patched.
+  `min_results_floor = 1`. `SearchCfg` carries these values in source and, as
+  of the 2026-06-30 mainline sync, the strict root-key whitelist in
+  `MukeiConfig::known_keys()` now admits `search`, so shipping configs may
+  either rely on the compiled defaults or provide an explicit `[search]`
+  table.
 - The executor reports a per-engine timeout as an **empty hit set**
   rather than an error, so the planner returns whatever the faster
   engine produced.
@@ -7081,3 +7082,4 @@ IconButton {
 | 2026-06-19 | 0.7.2 | AI-Architect | Added §1.2.5 (Thinking-Block detector), §4.4 (SAF revoke), §5.5 (`math_eval`). |
 | 2026-06-19 | 0.7.4 | AI-Architect | **Hardening pass.** §1.2.5 — anywhere-in-window match + UTF-8 char-boundary truncate + 80 ms QML close-debounce; §2.2 — `target_os="android"` bounded `MAX_BLOCKING_THREADS=6` + global `TOOL_BLOCKING_SLOTS` semaphore (size=2); §4.4 — `IndexingTransaction` with SQL `BEGIN IMMEDIATE` + staged HNSW rollback in `Drop`; §5.5 — `math_eval` acquires `TOOL_BLOCKING_SLOTS` before any `spawn_blocking`; 12 new acceptance tests across §11.1. No section content removed; all changes are additive or strict refinements. |
 | 2026-06-20 | 0.7.5 | AI-Architect | **Convergence & Contract-Alignment Pass.** Header, status block, and all companion links re-pointed to the v0.7.5 graph (PRD v0.7.5 / AF v1.2 / UXB v2.1 / BS v1.2). §7.0 NEW — **Canonical Screen Contract**: matrix locking layout, state, and interaction grammar across UXB ↔ AF ↔ TRD for the seven flagship screens; introduces `ChatTimelineEvent` (tool pills become inline timeline events); canonical multiline `ChatComposer.qml`; bubble-footer progressive-disclosure contract; 8 new acceptance tests including `tst_ScreenContractMatrix.qml`. §7.2 / §7.3 sample code retained as **legacy reference** only — §7.0 is the source of truth. No prior section removed; no requirement weakened. Closes audit P0-03 + P1-01..04. |
+| 2026-06-30 | 0.7.5+main | AI-Architect | **Mainline sync after vendor/llama merge + CI green.** Source-grounded notes updated to reflect `main`: root `[search]` TOML is now admitted by `MukeiConfig::known_keys()`, the vendored/prebuilt llama path is merged into `main`, and the verification surface is green across `fmt`, clippy feature matrix, sandbox tests, all-features tests, `cargo-deny`, and `cargo-audit`. No technical contract was weakened. |

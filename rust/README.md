@@ -36,29 +36,25 @@ cargo check -p mukei-core --features "tokio,rusqlite,candle"
 cargo check -p mukei-core --features "tokio,network"   # enables real reqwest model downloader
 ```
 
-> **Verification note (2026-06-29):** `cargo test -p mukei-core` passes on the default `(std,tokio)` matrix, but `cargo check -p mukei-core --all-features` currently fails inside the upstream candle stack because `candle-core 0.7.2` expects `rand 0.8` while `half 2.7.1` also pulls `rand 0.9`, breaking `SampleUniform` for `f16` / `bf16`. Treat this as an external dependency issue until the candle/half/rand graph is repinned.
+> **Verification note (2026-06-30):** `main` is green across the full Rust matrix. `cargo fmt --all -- --check`, the clippy feature matrix, the sandbox test workflow, `cargo test -p mukei-ffi-shim`, `cargo test -p mukei-core --all-features`, `cargo deny --all-features -D warnings`, and `cargo audit` all pass. The earlier candle/half/rand blocker is closed via the `half = =2.4.1` compatibility repin, and the vendored/prebuilt llama static-library path is now merged into `main`.
 >
-> Note: `usearch`, `candle`, and `llama-cpp-rs` need per-target setup.
+> Note: `usearch`, `candle`, and `llama-cpp-rs` still need per-target setup.
 > `llama-cpp-prebuilt/CMakeLists.txt` produces a one-shot `libllama.a` per ABI.
 
 ## Test coverage
 
-Mirror of `.github/workflows/sandbox-check.yml` — the CI gate runs this
-exact set on every push to the codex review branch and to `main`.
+Mirror of the currently-green GitHub Actions matrix on `main`.
 
 ```
-mukei-core  (std,tokio)     203 unit + 12 integration + 6 proptest + 3 grammar
-                            + 4 sentinel proptest        ──► 228 passed
-mukei-ffi-shim                                                  3 passed
-                                                          ──────────────
-                                                          231 passed total
+mukei-core  (--all-features) 219 unit + 12 integration + 6 fingerprint
+                             + 3 grammar + 3 migrator + 4 sentinel
+                             + 1 doc-test                 ──► 248 passed
+mukei-ffi-shim                                                 3 passed
+                                                           ─────────
+                                                           251 passed total
 ```
 
-When the `rusqlite` feature is enabled the lib-test count rises to 217
-(SQLite-only suites unlock). The `network` feature additionally enables
-the 416-restart loopback integration test
-(`http_416_on_resume_triggers_restart_and_succeeds`). The
-`sandbox-check.yml` workflow runs the `(std,tokio)` matrix only.
+The sandbox workflow still runs the narrower `(std,tokio)` matrix for fast feedback, while the broader verification pass additionally covers `std,tokio,rusqlite`, `std,tokio,network`, and `--all-features`. When the `rusqlite` feature is enabled the lib-test count rises to 218 (SQLite-only suites unlock). The `network` feature additionally enables the 416-restart loopback integration test (`http_416_on_resume_triggers_restart_and_succeeds`).
 
 Documentation index (under `docs/`):
 
@@ -198,12 +194,10 @@ Documentation index (under `docs/`):
 - **Sandboxed `math_eval` (TRD §5.5).** Identifier whitelist + 8 s timeout
   with `JoinHandle::abort` on overrun so the tool semaphore is reaped.
 - **Strict TOML config (TRD §12.5).** Unknown root keys are rejected on
-  boot. Batch-9 verification also found that `MukeiConfig` declares a
-  defaulted `search: SearchCfg`, but `MukeiConfig::known_keys()` does
-  not yet whitelist the root `search` table. Result: shipping configs
-  must currently omit `[search]` and rely on the compiled defaults
-  (Brave 3 s / Tavily 5 s / parallel 2 / cache on) until the source
-  whitelist is patched.
+  boot. As of the 2026-06-30 mainline sync, `MukeiConfig::known_keys()`
+  now **does** whitelist the root `search` table, so explicit `[search]`
+  overrides are accepted alongside the compiled defaults
+  (Brave 3 s / Tavily 5 s / parallel 2 / cache on).
 - **Post-parse tool validator + SAF (TRD §5.2 / §13.3).** `read_file`
   refuses every non-SAF URI scheme.
 - **Crash diagnostics sink (TRD §36.1).** The panic hook computes a

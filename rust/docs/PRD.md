@@ -8,12 +8,12 @@
 | **Date** | June 2026 (rev. v0.7.5) |
 | **Architecture** | Qt 6 (QML UI) + CXX-Qt (Bridge) + Rust (Agent Core) + llama.cpp (Inference) |
 | **Methodology** | FMEA (Failure Modes), STRIDE (Security), Concurrency-First |
-| **Status** | 🟢 Approved for Deep Engineering — Batch-9 verification sync (2026-06-29) |
+| **Status** | 🟢 Approved for Deep Engineering — main sync after vendor/llama merge + CI green (2026-06-30) |
 | **Companion docs** | [TRD v0.7.5](TRD.md) · [Application Flow v1.2](AF.md) · [UI/UX Brief v2.1](UXB.md) · [Backend Schema v1.2](BS.md) |
 
 > **v0.7.5 — Convergence & Contract-Alignment Pass.** No new product requirements are added in this revision. The v0.7.5 PRD is a **truth-synchronisation pass**: it adopts the canonical version graph (PRD ↔ TRD ↔ AF ↔ BS ↔ UXB all aligned on 0.7.5 / 1.2 / 1.2 / 2.1), realigns the first-run journey to the UXB canonical sequence, and freezes the screen contract so engineering samples cannot drift from the design brief. All v0.7.2 / v0.7.3 / v0.7.4 requirements remain in force; none are removed or weakened.
 >
-> **Batch-9 verification sync (2026-06-29).** The canonical graph remains unchanged, but the docs now record two source-grounded findings from the verification pass: (1) the live `web_search` selector routes `Research`, `Compare`, `Academic`, and `MultiStep` tasks through **Tavily first with Brave as the second leg**, not "Tavily only"; and (2) the all-features Rust matrix is presently blocked by an upstream candle/half/rand dependency conflict rather than a Mukei product-rule failure.
+> **2026-06-30 mainline sync.** The canonical graph remains unchanged and no product requirements are added or weakened in this pass. The docs are updated to reflect the current shipped state on `main`: (1) the live `web_search` selector still routes `Research`, `Compare`, `Academic`, and `MultiStep` tasks through **Tavily first with Brave as the second leg**; (2) the earlier candle/half/rand all-features blocker is now closed on `main`; (3) the strict config whitelist now admits the root `[search]` table; and (4) the vendored/prebuilt llama static-library path has been merged into `main` without changing the PRD surface.
 
 > **v0.6 Changelog — Defects Closed during Architecture Review:**
 >
@@ -712,6 +712,7 @@ User preferences (Theme, Font Size, Thinking Mode, Brave API integration setting
 | 2026-06-19 | 0.7.4 | AI-Architect | Filename-only bump (PRD untouched in the hardening pass; all v0.7.4 fixes landed in TRD / AF / BS / UXB). |
 | 2026-06-20 | 0.7.5 | AI-Architect | **Convergence & Contract-Alignment Pass.** Title heading and companion-doc row re-pointed to the v0.7.5 graph (TRD v0.7.5 / AF v1.2 / UXB v2.1 / BS v1.2). No product requirements added, modified, or weakened in this revision. |
 | 2026-06-29 | 0.7.5+codex | AI-Architect | **Codex Review Reconciliation — Risk Register Update.** Six new entries added to §21 reflecting the architect-review hardening that landed on the `codex/review-rust-storage-subsystem-for-stability-improvements` branch: bridge re-entrancy guard (`BridgeBusy`), downloader re-entrancy guard (`DownloadBusy`), independent chat/download cancellation tokens, commit-sha-pinned model catalogue, 416-restart resumable downloader, audit-log hash-chain serialisation, and `CallbackGuard` ABA defence via process-monotonic `instance_id`. No requirements removed; this is purely additive risk-register hardening. The error taxonomy table in TRD §1.5 was rewritten to mirror the source-of-truth enum in `mukei-core/src/error.rs`. |
+| 2026-06-30 | 0.7.5+main | AI-Architect | **Mainline sync after vendor/llama merge + CI green.** Documentation updated to match `main` after merging `vendor/llama-cpp-self-contained`: the all-features verification blocker is closed, the strict config whitelist now admits `[search]`, and the verification/tooling surface is green (`fmt`, clippy matrix, sandbox tests, all-features tests, `cargo-deny`, `cargo-audit`). No product requirement changed. |
 
 ## 32. Final PRD Sign-Off & Document Index
 

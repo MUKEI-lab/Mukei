@@ -5,10 +5,10 @@
 **A zero-telemetry, fault-tolerant, on-device AI agent.**
 Built in Rust, fronted by Qt 6 + QML, accelerated by llama.cpp.
 
-[![tests](https://img.shields.io/badge/tests-231%20passing-success)](#tests)
+[![tests](https://img.shields.io/badge/tests-251%20passing-success)](#tests)
 [![rust](https://img.shields.io/badge/rust-1.78%2B-orange)](#requirements)
 [![license](https://img.shields.io/badge/license-Proprietary-lightgrey)](#license)
-[![status](https://img.shields.io/badge/status-architecture%20pass-blue)](#project-status)
+[![status](https://img.shields.io/badge/status-main%20CI%20green-blue)](#project-status)
 
 </div>
 
@@ -68,14 +68,14 @@ Three crates, one direction of dependency. `mukei-core` never links Qt — that 
 
 | Area | Status | Notes |
 |---|---|---|
-| **Rust kernel** | ✅ Stable scaffold | 228 sandbox tests passing (203 unit + 12 integration + 6+3+4 proptest/grammar/sentinel) |
+| **Rust kernel** | ✅ Verified on main | All-features verification restored: 248 `mukei-core` tests passing (219 unit + 12 integration + 6 + 3 + 3 + 4 suites + 1 doc-test) |
 | **C-FFI shim** | ✅ Stable scaffold | 3 unit tests; checked-in C header with drift-detector test |
 | **CXX-Qt bridge** | 🟡 Compiles under Qt | Qt 6.5+ required on the host; sandbox CI skips this crate |
 | **Migrations V001–V004** | ✅ Authored | Conversations, messages, chunks, recovery, audit, SAF tokens, branches |
 | **GBNF tool grammar** | ✅ Per-tool schema | `grammars/tool_calling.gbnf` |
-| **llama.cpp integration** | 🟡 Stubbed in core | Real load lives in the bridge; prebuilt `libllama.a` per ABI |
+| **llama.cpp integration** | ✅ Prebuilt path merged | Real load lives in the bridge; the vendored/prebuilt `libllama.a` per-ABI pipeline is now merged into `main` |
 | **Gemma 4 downloader** | ✅ Wired | Commit-pinned HF URLs, full-file SHA-256 verify, resumable, 416-restart safe |
-| **Candle MiniLM embedder** | 🟡 Behind feature flag | Default build uses a deterministic mock embedder; 2026-06-29 verification found the `--all-features` matrix currently blocked by an upstream `candle-core 0.7.2` ↔ `half 2.7.1` / `rand` 0.8 vs 0.9 trait mismatch |
+| **Candle MiniLM embedder** | ✅ Verified on main | Default build still uses the deterministic mock embedder, but the real candle path now compiles and tests cleanly under `--all-features` after the `half = =2.4.1` compatibility repin |
 | **QML editorial-luxury UI** | ⏳ Out of scope for this repo | Tracked in the UX Brief |
 
 ---
@@ -88,18 +88,17 @@ cargo test -p mukei-core      --no-default-features --features "std,tokio"
 cargo test -p mukei-ffi-shim
 ```
 
-Current run on the **codex review branch**:
+Current run on **`main`**:
 
-> **Verification Pass — 2026-06-29.** `cargo test -p mukei-core` passed (`203` unit + `12` integration + `6` fingerprint proptest + `3` grammar + `4` sentinel proptest = `228` passing tests). `cargo check -p mukei-core --all-features` is currently **blocked by an upstream dependency conflict**: `candle-core 0.7.2` depends on `rand 0.8`, while `half 2.7.1` pulls `rand 0.9`, which breaks `SampleUniform` for `f16` / `bf16` during the candle build. This is a verification finding, not a Mukei logic regression.
-
+> **Verification Pass — 2026-06-30.** The post-merge mainline is green end-to-end: `cargo fmt --all -- --check`, the three-way clippy matrix (`std,tokio`, `std,tokio,rusqlite`, `std,tokio,network`), sandbox invariants, `cargo test -p mukei-core --no-default-features --features "std,tokio,rusqlite"`, `cargo test -p mukei-ffi-shim`, `cargo test -p mukei-core --all-features`, `cargo deny --all-features -D warnings`, and `cargo audit` all pass. The previous candle/half/rand verification blocker is closed on `main`; explicit root `[search]` config is now admitted by `MukeiConfig::known_keys()`.
 
 ```
-mukei-core  (std,tokio)     203 unit + 12 integration + 6 proptest
-                            + 3 grammar + 4 sentinel proptest
-                                                       ──► 228 passed
-mukei-ffi-shim                                                3 passed
-                                                          ──────────
-                                                          231 passed total
+mukei-core  (--all-features) 219 unit + 12 integration + 6 fingerprint
+                             + 3 grammar + 3 migrator + 4 sentinel
+                             + 1 doc-test                 ──► 248 passed
+mukei-ffi-shim                                                 3 passed
+                                                           ─────────
+                                                           251 passed total
 ```
 
 ### Verified invariants

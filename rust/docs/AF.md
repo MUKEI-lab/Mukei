@@ -4,13 +4,15 @@
 |-------|-------|
 | **Document ID** | MUKEI-AF-v1.2 |
 | **Supersedes** | AF v1.0 (2026-06-19, first pass) · AF v1.1 (2026-06-19, v0.7.4 hardening) |
-| **Status** | 🟢 AI-Architect Pass — Cross-Locked against PRD v0.7.5 + TRD v0.7.5 + UXB v2.1 + BS v1.2, Batch-9 verification sync (2026-06-29) |
+| **Status** | 🟢 AI-Architect Pass — Cross-Locked against PRD v0.7.5 + TRD v0.7.5 + UXB v2.1 + BS v1.2, main sync after vendor/llama merge + CI green (2026-06-30) |
 | **Audience** | Mobile engineers (Rust + Kotlin + QML), QA, Security review, Product reviewers |
 | **Companion docs** | [PRD v0.7.5](PRD.md) · [TRD v0.7.5](TRD.md) · [UI/UX Brief v2.1](UXB.md) · [Backend Schema v1.2](BS.md) |
 | **Out of scope** | Visual styling — see [UI/UX Brief v2.1](UXB.md); data persistence details — see [Backend Schema v1.2](BS.md) |
 | **Notation** | Every flow cites `§` (TRD section) and `REQ-*` (PRD requirement ids). State machines use ASCII boxes. |
 
 > **Reading rule:** Every flow MUST be read alongside its companion TRD § cross-reference. This document links to implementation, never duplicates it.
+>
+> **2026-06-30 mainline sync.** The merge of `vendor/llama-cpp-self-contained` into `main` and the CI-green verification pass do **not** change the user-visible AF contracts. First-run onboarding, tool execution, downloader/recovery, and QML-routing flows remain the same; this sync only updates companion-document status and implementation notes to match shipped `main`.
 
 ---
 
@@ -601,7 +603,7 @@ Post-Parse Tool Validator  (TRD §13.3 + REQ-AGT-08)
 
 **Network-fail** → executor returns a structured tool error envelope; no DuckDuckGo fallback exists in the current implementation.
 
-**State-routing note (Batch-9 verification sync):** UI screen routing continues to consume the stable `FfiAgentSnapshot` enum (`Uninitialized`, `ModelMissing`, `Downloading`, `Loading`, `IdleReady`, `Inferring`, `ToolExecuting`, `Recovering`, `ThermalThrottled`, `FatalError`). Cross-thread callback registrations remain queued-only via `FfiCallbackRegistration { queued_only: true }`; AF does not redefine that ABI, it only consumes it.
+**State-routing note (2026-06-30 mainline sync):** UI screen routing continues to consume the stable `FfiAgentSnapshot` enum (`Uninitialized`, `ModelMissing`, `Downloading`, `Loading`, `IdleReady`, `Inferring`, `ToolExecuting`, `Recovering`, `ThermalThrottled`, `FatalError`). Cross-thread callback registrations remain queued-only via `FfiCallbackRegistration { queued_only: true }`; AF does not redefine that ABI, it only consumes it.
 
 #### 10.2.2 `read_file` (TRD §5.2)
 
@@ -1249,3 +1251,4 @@ not numeric ranges.
 | 2026-06-19 | 1.0.1 | AI-Architect | v0.7.2: added §6.5 Web Search Setup (Brave Key Onboarding) and §11.5 SAF Permission Revoked Mid-Indexing. |
 | 2026-06-19 | 1.1 | AI-Architect | **v0.7.4 hardening:** §6.5 — Brave key paste validation (regex + live HTTP probe with Test-key button + four-state UX); §11.5 cross-links the new TRD `IndexingTransaction` atomic rollback. No content removed; only additions and clarifications. |
 | 2026-06-20 | 1.2 | AI-Architect | **v0.7.5 — Convergence & Contract-Alignment Pass.** Header, document-ID, status block, and companion links all re-pointed to the v0.7.5 graph (PRD v0.7.5 / TRD v0.7.5 / UXB v2.1 / BS v1.2). §6.2 rewritten as the **canonical first-run sequence** (Welcome → ModelPicker → Verification → EmptyChat → Chat) superseding the v0.7.4 EmptyChatScreen-first path; four new first-run invariants. §6.4 acceptance test rewritten for the canonical sequence (10 steps). §6.6 NEW — prompt-card fill-only-by-default contract with `prompt_card_auto_send` opt-in setting and three acceptance tests. No flows removed; no requirement weakened. |
+| 2026-06-30 | 1.2+main | AI-Architect | **Mainline sync after vendor/llama merge + CI green.** No application-flow transitions changed. Status blocks and state-routing notes were refreshed to match the shipped `main` implementation and green verification surface. |

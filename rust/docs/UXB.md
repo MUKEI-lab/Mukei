@@ -6,7 +6,7 @@
 |-------|-------|
 | **Document ID** | MUKEI-UXB-v2.1 |
 | **Supersedes** | UXB v1.0 (2026-06-19, first draft) · UXB v2.0 (2026-06-19, Editorial Luxury Manifesto) |
-| **Status** | 🟢 Locked Design System Pass — v0.7.5 Convergence-Alignment Revision |
+| **Status** | 🟢 Locked Design System Pass — v0.7.5 main sync after vendor/llama merge + CI green (2026-06-30) |
 | **Aesthetic** | Warm Luxury Editorial (70 % Minimalism · 20 % Editorial · 10 % Luxury Warm) |
 | **Companion docs** | [PRD v0.7.5](PRD.md) · [TRD v0.7.5](TRD.md) · [Application Flow v1.2](AF.md) · [Backend Schema v1.2](BS.md) |
 | **Audience** | Designers, Front-end (QML) engineers, A11y reviewers, Localization, QA, Product |
@@ -14,6 +14,8 @@
 | **Notation** | Every screen/component cross-references PRD `REQ-*`, TRD `§X.Y`, and (where applicable) AF/BS sections. Every section ends with an **FMEA table** where failure modes are non-trivial. |
 
 > **Reading rule:** *This document is a contract between Design and Engineering.* If a hex code, type token, or spacing value is not here, it does not exist in MUKEI. No drift. No improvisation. No "I thought it looked better."
+>
+> **2026-06-30 mainline sync.** No palette, typography, spacing, component, or interaction token changed in this pass. The update simply refreshes document-control metadata so UXB stays cross-locked with the shipped `main` branch after the vendor-llama merge and CI-green verification pass.
 
 ---
 
@@ -43,8 +45,8 @@
 
 | Item | Value |
 |------|-------|
-| Version | 2.0 |
-| Date | 2026-06-19 |
+| Version | 2.1 |
+| Date | 2026-06-30 |
 | Author | AI-Architect (Senior Design Systems Pass) |
 | Reviewers | Engineering Lead, Security Reviewer, Accessibility Reviewer |
 | Approval gates | (a) Color contrast WCAG 2.1 AA verified; (b) Type scale matches Figma library; (c) Cross-refs to PRD/TRD/AF/BS validated |
@@ -3325,4 +3327,5 @@ Visual examples (kept in `design/anti-patterns/` folder, NOT shipped):
 | 2026-06-19 | 1.0 | AI-Architect | First pass, cross-locked against PRD v0.7.2 + TRD v0.7.2 + AF v1.0 + BS v1.0. Brief outline of design system, screens, accessibility. |
 | 2026-06-19 | 2.0 | AI-Architect | **Locked-palette regeneration.** Adopted 70/20/10 rule, Dolce Vita / Espresso / Taupe palettes, editorial typography (Playfair / Merriweather / Inter / JetBrains Mono), CCCC principles (Calm, Capable, Confidential, Crafted), expanded screen flows with ASCII layouts, dedicated A11y, Qt/QML implementation strategy, consolidated FMEA, design QA checklist, Figma mirror spec, contrast audit, typography specimens, moodboard reference set. |
 | 2026-06-20 | 2.1 | AI-Architect | **v0.7.5 — Convergence & Contract-Alignment Pass.** Header, document ID, status block, and companion links all re-pointed to the v0.7.5 graph (PRD v0.7.5 / TRD v0.7.5 / AF v1.2 / BS v1.2). §6.4.2 — added the **long-answer reader-wash** rule (auto-applied `Theme.p.surfaceFaint` background when bubble height > 320 dp OR `fontScale > 1.5` OR contains a code block OR `summary_first = true`) closing P1-05 from the audit. §10.10.3 NEW — **Cognitive Load Controls** (summary-first, collapse tool traces, collapse thinking, low-stimulation aggregate mode) closing P2-01. No tokens removed, no palettes broken, no screen flows deleted; UXB §7.4.3 auto-submit clause is superseded by AF §6.6 (fill-only default). |
+| 2026-06-30 | 2.1+main | AI-Architect | **Mainline sync after vendor/llama merge + CI green.** No design token or interaction contract changed. Metadata and cross-lock notes were refreshed so UXB remains aligned with shipped `main`. |
 

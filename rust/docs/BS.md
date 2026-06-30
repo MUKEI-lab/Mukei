@@ -4,7 +4,7 @@
 |-------|-------|
 | **Document ID** | MUKEI-BS-v1.2 |
 | **Supersedes** | BS v1.0 (2026-06-19, first pass) · BS v1.1 (2026-06-19, v0.7.4 i18n schema) |
-| **Status** | 🟢 AI-Architect Pass — Cross-Locked against PRD v0.7.5 + TRD v0.7.5 + AF v1.2 + UXB v2.1, Batch-9 verification sync (2026-06-29) |
+| **Status** | 🟢 AI-Architect Pass — Cross-Locked against PRD v0.7.5 + TRD v0.7.5 + AF v1.2 + UXB v2.1, main sync after vendor/llama merge + CI green (2026-06-30) |
 | **Audience** | Database / Rust engineers, Security review, Forensic engineers |
 | **Companion docs** | [PRD v0.7.5](PRD.md) · [TRD v0.7.5](TRD.md) · [Application Flow v1.2](AF.md) · [UI/UX Brief v2.1](UXB.md) |
 | **Out of scope** | UI behaviour — see [UI/UX Brief v2.1](UXB.md) |
@@ -12,7 +12,7 @@
 
 > **Hard rule:** No schema change without a `V0xx__name.sql` migration in `migrations/` and an entry in `migrations_applied`. Direct edits are checked by a pre-commit test (TRD §11.1 `test_no_direct_schema_edit`).
 >
-> **Batch-9 verification note (2026-06-29):** the live `config/mod.rs` source still exposes a small schema/validator mismatch: `SearchCfg` exists and is fully defaulted, but the strict root whitelist in `MukeiConfig::known_keys()` does **not** yet admit the `search` table. This BS revision documents the current shipped behaviour rather than the intended future shape.
+> **2026-06-30 mainline sync note:** the earlier `SearchCfg` schema/validator mismatch is now closed on `main`. `SearchCfg` remains fully defaulted, **and** the strict root whitelist in `MukeiConfig::known_keys()` now admits the `search` table, so explicit `[search]` TOML is accepted at boot. No SQL table, index, encryption boundary, or FFI schema changed in this sync.
 
 ---
 
@@ -536,7 +536,7 @@ prompt_card_auto_send = false
 thermal_autopause     = true
 first_run_completed   = false
 
-[search]                     # SOURCE-DECLARED ONLY as of 2026-06-29; explicit table currently rejected by known_keys()
+[search]                     # optional explicit override; admitted by known_keys() as of 2026-06-30
 brave_timeout_secs   = 3
 tavily_timeout_secs  = 5
 max_parallel_engines = 2
@@ -545,7 +545,7 @@ enable_cache         = true
 [[wrapped_secrets]]          # optional, zero or more entries
 slot       = "brave_api_key"
 blob_path  = "/var/mukei/secrets/brave_key.enc"
-created    = 2026-06-29T00:00:00Z
+created    = 2026-06-30T00:00:00Z
 ```
 
 ### 7.3 Validator semantics
@@ -556,9 +556,9 @@ created    = 2026-06-29T00:00:00Z
    `MukeiConfig::known_keys()`. Unknown root keys yield
    `ConfigUnknownField(<key>)` and boot halts. Unknown nested keys
    are caught by `serde`'s `deny_unknown_fields` posture (every
-   struct in the schema is strict). **Current caveat:** the source
-   whitelist still omits `search`, so an explicit root `[search]`
-   table is treated as unknown even though `MukeiConfig` carries a
+   struct in the schema is strict). As of the 2026-06-30 mainline
+   sync, the root `search` table is part of the whitelist, so an
+   explicit `[search]` table is validated normally alongside the
    defaulted `SearchCfg` field.
 2. **`logical_validate`** — typed range checks:
    - `gpu_layers ≥ 0`
@@ -584,7 +584,7 @@ predate them still load:
 - `repeat_output_window` defaults to `2`
 - `repeat_output_backoff_secs` defaults to `10`
 - `max_concurrent_tools` defaults to `4`
-- `SearchCfg` is entirely defaulted (Brave 3 s / Tavily 5 s / parallel 2 / cache on), but the root `[search]` table is not yet admitted by `known_keys()` and therefore must currently be omitted from shipping `config.toml`
+- `SearchCfg` is entirely defaulted (Brave 3 s / Tavily 5 s / parallel 2 / cache on), and the root `[search]` table is now admitted by `known_keys()` so shipping `config.toml` may either omit it or override it explicitly
 - `[[wrapped_secrets]]` is defaulted to an empty list
 
 No other field is defaulted — the strict-config posture is
@@ -955,3 +955,4 @@ Format invariant: hashes always 64 hex chars (lower-case). Tests check this in T
 | 2026-06-19 | 1.0 | AI-Architect | First pass, cross-locked against PRD v0.7.2 + TRD v0.7.2. Full table-by-table specs with invariants, indexes, migrations, encryption layout, FFI ABI. |
 | 2026-06-19 | 1.1 | AI-Architect | **v0.7.4 hardening:** added §7.4 (i18n String Storage — flat-file `i18n/{feature}.{locale}.json` schema, fallback chain, FFI surface, OEM override path, acceptance tests); §8.2 lists `i18n/*.json` as non-encrypted by design. No tables, columns, encryption, or FFI contracts removed or weakened. |
 | 2026-06-20 | 1.2 | AI-Architect | **v0.7.5 — Convergence & Contract-Alignment Pass.** Header, document ID, status block, and companion links all re-pointed to the v0.7.5 graph (PRD v0.7.5 / TRD v0.7.5 / UXB v2.1 / AF v1.2). No table, column, index, migration, encryption boundary, or FFI contract was added, modified, or weakened in this revision — it is a strict truth-synchronisation pass for the backend schema document. |
+| 2026-06-30 | 1.2+main | AI-Architect | **Mainline sync after vendor/llama merge + CI green.** Updated the config-schema narrative to match shipped source: root `[search]` TOML is now accepted by `MukeiConfig::known_keys()`. No SQL schema, index, encryption boundary, migration, or FFI shape changed. |
