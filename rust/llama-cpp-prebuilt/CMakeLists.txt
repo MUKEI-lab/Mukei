@@ -51,13 +51,11 @@ set(LLAMA_BUILD_APP OFF CACHE BOOL "Do not build upstream app" FORCE)
 set(GGML_BUILD_TESTS OFF CACHE BOOL "Do not build upstream ggml tests" FORCE)
 set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "Do not build upstream ggml examples" FORCE)
 
-add_subdirectory("${MUKEI_VENDOR_DIR}" "${CMAKE_BINARY_DIR}/llama-build")
+# Persist the static fallback directly at the prebuilt cache path.  CMake
+# does not allow attaching a POST_BUILD command to a target created by
+# add_subdirectory() from this parent directory.
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${MUKEI_PREBUILT_ROOT}/${MUKEI_TARGET_ABI}")
 
-add_custom_command(TARGET llama POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          $<TARGET_FILE:llama>
-          "${MUKEI_PREBUILT_LIB}"
-  COMMENT "Persisting one-shot llama build to ${MUKEI_PREBUILT_LIB}"
-)
+add_subdirectory("${MUKEI_VENDOR_DIR}" "${CMAKE_BINARY_DIR}/llama-build")
 
 add_library(mukei_llama ALIAS llama)
