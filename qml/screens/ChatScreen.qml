@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import QtQml       // Connections
+import QtQml.Models // ListModel, ListElement
 import "../theme"
 import "../components"
 

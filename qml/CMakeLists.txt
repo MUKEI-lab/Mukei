@@ -6,9 +6,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(QT_QUICK_CONTROLS_STYLE "Basic")
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS
+# Prefer Qt 6.5+ so we get `qt_add_qml_module` + variable-font support,
+# but accept 6.4 (Ubuntu 24.04 ships 6.4.2) if that is all the host has —
+# variable fonts still render, only the `wght` axis is picked up as
+# discrete weights instead of interpolated. CI defends the 6.5 pathway
+# via the desktop-cache install; this softer bound keeps distro builds
+# working out of the box.
+find_package(Qt6 6.4 REQUIRED COMPONENTS
     Core Gui Quick Qml QuickControls2 Widgets Svg
 )
+if(Qt6_VERSION VERSION_LESS 6.5)
+    message(WARNING "Qt ${Qt6_VERSION} < 6.5 — variable-font axes fall back to nearest static weight; upgrade the host Qt for the full UXB v2.1 rendering.")
+endif()
 
 # Cargo build directory selection. Android builds still cross-compile to
 # `aarch64-linux-android/release`; every other host (Linux/macOS desktop
