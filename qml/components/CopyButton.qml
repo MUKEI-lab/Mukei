@@ -4,10 +4,9 @@ import QtQuick.Layouts
 import "../theme"
 
 // Copy-to-clipboard button. On tap: writes `textToCopy` to Qt's system
-// clipboard via a bridge-injected `mukeiClipboard.setText` invokable, then
+// clipboard via the C++ `mukeiClipboard.setText` invokable, then
 // flashes the icon `check.svg` for `Motion.caretDoneSwap` ms as visual
-// acknowledgement. Falls back to a no-op if the bridge is absent (bench
-// smoke-runs without the CXX-Qt layer).
+// acknowledgement.
 IconButton {
     id: root
     property string textToCopy: ""
@@ -17,11 +16,7 @@ IconButton {
     Accessible.description: qsTr("Copy text to the clipboard")
 
     onClicked: {
-        if (typeof mukeiClipboard !== "undefined" && mukeiClipboard && typeof mukeiClipboard.setText === "function") {
-            mukeiClipboard.setText(root.textToCopy);
-        } else {
-            console.warn("CopyButton: mukeiClipboard bridge unavailable, no-op");
-        }
+        mukeiClipboard.setText(root.textToCopy);
         root._acknowledging = true;
         _ackTimer.restart();
     }
