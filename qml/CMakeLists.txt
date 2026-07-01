@@ -109,7 +109,13 @@ endif()
 if(ANDROID)
     set_property(TARGET mukei PROPERTY QT_ANDROID_MIN_SDK_VERSION 29)
     set_property(TARGET mukei PROPERTY QT_ANDROID_TARGET_SDK_VERSION 35)
-    set_property(TARGET mukei PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
-        ${CMAKE_CURRENT_SOURCE_DIR}/android
-    )
+    # Only wire the package-source directory when it exists on disk. This
+    # lets the desktop CI configure without carrying the android/ payload
+    # and keeps `cmake -B build` a hard-error-free step for contributors
+    # who never touch the Android build.
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/android/AndroidManifest.xml)
+        set_property(TARGET mukei PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
+            ${CMAKE_CURRENT_SOURCE_DIR}/android
+        )
+    endif()
 endif()

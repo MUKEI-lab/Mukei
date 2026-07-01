@@ -1,8 +1,7 @@
 name: qml-check
 
 # QML-side gate. Only runs on the branch that ships the qml/ scaffold so
-# `main` (Rust-only) is not affected. Uses the Ubuntu-hosted Qt 6.6 the
-# `install-qt-action` provides. Kept separate from `lint.yml` /
+# `main` (Rust-only) is not affected. Kept separate from `lint.yml` /
 # `sandbox-check.yml` so a QML lint regression does not mask a Rust
 # regression (see architect review GH #22 / #23 for the analogous
 # rationale on the Rust side).
@@ -14,44 +13,15 @@ on:
   pull_request:
     paths:
       - "qml/**"
+      - ".github/workflows/qml-check.yml"
 
 jobs:
   # ---------------------------------------------------------------------
-  # Static QML lint. qmllint ships with the Qt SDK and catches missing
-  # imports, unused properties, type-mismatched bindings, and broken
-  # qrc:/ / file:/ resource paths.
-  # ---------------------------------------------------------------------
-  qmllint:
-    name: qmllint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install Qt 6.6
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: "6.6.3"
-          host: linux
-          target: desktop
-          modules: qtdeclarative qtsvg
-      - name: Run qmllint against every .qml file
-        working-directory: qml
-        run: |
-          set -e
-          fail=0
-          # Explicit -I entries teach qmllint where the singletons and
-          # component/screen modules live so ../theme / ../components
-          # imports resolve without a full build.
-          for f in $(find . -name '*.qml' -not -path './build*/*'); do
-            if ! qmllint -I . -I theme -I components -I screens "$f"; then
-              echo "::error file=$f::qmllint reported violations"
-              fail=1
-            fi
-          done
-          exit $fail
-
-  # ---------------------------------------------------------------------
   # SVG uniqueness gate. This branch previously shipped 27 byte-identical
   # placeholder icons; CI now defends against that regression.
+  #
+  # Kept dependency-free so it always runs even if the Qt install job
+  # goes offline.
   # ---------------------------------------------------------------------
   icon-uniqueness:
     name: SVG icons are semantically distinct
@@ -94,20 +64,127 @@ jobs:
           exit $fail
 
   # ---------------------------------------------------------------------
+  # QML resource cross-reference: every icon and font referenced in QML
+  # source must exist on disk. Catches typos in qrc:/... paths without
+  # needing a full Qt install.
+  # ---------------------------------------------------------------------
+  qrc-cross-reference:
+    name: qrc:/ paths resolve to real files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Every qrc:/icons/... reference resolves
+        run: |
+          set -e
+          cd qml
+          grep -rhE 'qrc:/icons/[a-z-]+\.svg' . 2>/dev/null | grep -oE 'icons/[a-z-]+\.svg' | sort -u > /tmp/refs.txt
+          ls assets/icons/*.svg | sed 's|.*/|icons/|' | sort -u > /tmp/present.txt
+          missing=$(comm -23 /tmp/refs.txt /tmp/present.txt || true)
+          if [ -n "$missing" ]; then
+            echo "::error::icon references missing on disk:"; echo "$missing"; exit 1
+          fi
+          echo "OK: $(wc -l < /tmp/refs.txt) unique qrc:/icons references, all resolved"
+      - name: Every qrc:/fonts/... reference resolves
+        run: |
+          set -e
+          cd qml
+          grep -rhE '(qrc:/|:/)fonts/[A-Za-z-]+\.ttf' main.cpp components/FontLoader.qml qml.qrc 2>/dev/null \
+            | grep -oE 'fonts/[A-Za-z-]+\.ttf' | sort -u > /tmp/fref.txt
+          ls assets/fonts/*.ttf | sed 's|.*/|fonts/|' | sort -u > /tmp/fpresent.txt
+          diff /tmp/fref.txt /tmp/fpresent.txt || { echo "::error::font references do not match on-disk fonts"; exit 1; }
+          echo "OK: font references match assets/fonts/ exactly"
+
+  # ---------------------------------------------------------------------
+  # DDG regression guard. QML must never contradict the Rust migration
+  # §2 stance (Brave + Tavily only, no DuckDuckGo).
+  # ---------------------------------------------------------------------
+  ddg-regression:
+    name: No DuckDuckGo references in QML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: grep guard
+        run: |
+          set -e
+          if grep -rni -e 'DuckDuckGo' -e 'duck-duck-go' qml/ 2>/dev/null; then
+            echo "::error::DDG string reintroduced (Migration §2 forbids)."; exit 1
+          fi
+          echo "OK: no DDG references in qml/"
+
+  # ---------------------------------------------------------------------
+  # Static QML lint via qmllint (part of Qt 6). We install Qt 6.6 from
+  # the Ubuntu APT stream instead of aqtinstall because the modules we
+  # need (qtdeclarative, qtsvg, qmllint) are packaged as first-class
+  # `qt6-declarative-dev` / `qt6-svg-dev` there. This avoids the aqt
+  # module-name churn and keeps CI fast (< 60 s).
+  # ---------------------------------------------------------------------
+  qmllint:
+    name: qmllint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Qt 6 dev packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            qt6-base-dev \
+            qt6-declarative-dev \
+            qt6-declarative-dev-tools \
+            qt6-svg-dev \
+            qml6-module-qtquick \
+            qml6-module-qtquick-controls \
+            qml6-module-qtquick-layouts \
+            qml6-module-qttest
+      - name: Locate qmllint
+        id: locate
+        run: |
+          set -e
+          # qmllint lives under /usr/lib/qt6/bin or /usr/bin depending on
+          # the Debian layout. Probe both.
+          if [ -x /usr/lib/qt6/bin/qmllint ]; then
+            echo "bin=/usr/lib/qt6/bin/qmllint" >> "$GITHUB_OUTPUT"
+          elif command -v qmllint6 >/dev/null; then
+            echo "bin=$(command -v qmllint6)" >> "$GITHUB_OUTPUT"
+          elif command -v qmllint >/dev/null; then
+            echo "bin=$(command -v qmllint)" >> "$GITHUB_OUTPUT"
+          else
+            find / -name 'qmllint*' 2>/dev/null | head -5
+            echo "::error::qmllint not found in the installed Qt packages"; exit 1
+          fi
+      - name: Run qmllint against every .qml file
+        run: |
+          set -e
+          fail=0
+          cd qml
+          # Explicit -I entries teach qmllint where the singletons and
+          # component/screen modules live so ../theme / ../components
+          # imports resolve without a full build.
+          for f in $(find . -name '*.qml' -not -path './build*/*'); do
+            if ! ${{ steps.locate.outputs.bin }} -I . -I theme -I components -I screens "$f"; then
+              echo "::error file=qml/$f::qmllint reported violations"
+              fail=1
+            fi
+          done
+          exit $fail
+
+  # ---------------------------------------------------------------------
   # Configure-only CMake pass. Proves qml/CMakeLists.txt still validates
   # without kicking off a full moc/qrc/link cycle.
   # ---------------------------------------------------------------------
   cmake-configure:
     name: cmake -S qml -B build (configure-only)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - name: Install Qt 6.6
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: "6.6.3"
-          host: linux
-          target: desktop
-          modules: qtdeclarative qtsvg
+      - name: Install Qt 6 dev packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            qt6-base-dev \
+            qt6-declarative-dev \
+            qt6-declarative-dev-tools \
+            qt6-svg-dev \
+            cmake \
+            ninja-build
       - name: Configure only
         run: cmake -S qml -B qml/build -G Ninja

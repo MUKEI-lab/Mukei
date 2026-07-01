@@ -1,7 +1,12 @@
 <RCC>
   <qresource prefix="/">
-    <!-- Root window -->
-    <file>MainWindow.qml</file>
+    <!--
+      Non-QML runtime assets only. QML files are declared to
+      `qt_add_qml_module` in CMakeLists.txt so they resolve through the
+      `com.mukei.app` URI (and QML tooling / qmlcachegen sees them). If
+      QML files were duplicated here they would collide with the URI-based
+      registrations, so this file is deliberately narrow.
+    -->
 
     <!-- ============================================================
          Fonts (SIL Open Font License 1.1, variable-axis)
@@ -52,81 +57,5 @@
     <file alias="icons/stop.svg">assets/icons/stop.svg</file>
     <file alias="icons/theme-auto.svg">assets/icons/theme-auto.svg</file>
     <file alias="icons/view.svg">assets/icons/view.svg</file>
-
-    <!-- ============================================================
-         Application code (theme + components + screens + tests)
-         These are also declared to qt_add_qml_module in CMakeLists.txt
-         so QML resolves them via the com.mukei.* URIs.
-    ============================================================ -->
-    <file>components/AIMessageBubble.qml</file>
-    <file>components/BranchSwitcherSheet.qml</file>
-    <file>components/ChatComposer.qml</file>
-    <file>components/ChatTimelineEvent.qml</file>
-    <file>components/CodeBlockComponent.qml</file>
-    <file>components/ConfirmationDialog.qml</file>
-    <file>components/ConversationList.qml</file>
-    <file>components/CopyButton.qml</file>
-    <file>components/DestructiveButton.qml</file>
-    <file>components/DestructiveConfirmDialog.qml</file>
-    <file>components/FontLoader.qml</file>
-    <file>components/FullScreenModal.qml</file>
-    <file>components/GhostButton.qml</file>
-    <file>components/HapticFeedback.qml</file>
-    <file>components/IconButton.qml</file>
-    <file>components/LeftDrawer.qml</file>
-    <file>components/MarkdownRenderer.qml</file>
-    <file>components/ModalSheet.qml</file>
-    <file>components/NetworkBanner.qml</file>
-    <file>components/PrimaryButton.qml</file>
-    <file>components/ProgressBar.qml</file>
-    <file>components/PromptCard.qml</file>
-    <file>components/RAGChunkCard.qml</file>
-    <file>components/SearchField.qml</file>
-    <file>components/SecondaryButton.qml</file>
-    <file>components/SettingsTextField.qml</file>
-    <file>components/SkeletonLoader.qml</file>
-    <file>components/Spinner.qml</file>
-    <file>components/StatusPill.qml</file>
-    <file>components/StreamingCaret.qml</file>
-    <file>components/ThinkingAccordion.qml</file>
-    <file>components/ToastNotification.qml</file>
-    <file>components/ToolResultCard.qml</file>
-    <file>components/UserMessageBubble.qml</file>
-    <file>components/qmldir</file>
-    <file>main.cpp</file>
-    <file>screens/ChatScreen.qml</file>
-    <file>screens/EmptyChatScreen.qml</file>
-    <file>screens/ModelManagerScreen.qml</file>
-    <file>screens/ModelPickerScreen.qml</file>
-    <file>screens/RagRebuildPromptScreen.qml</file>
-    <file>screens/SafeModeScreen.qml</file>
-    <file>screens/SettingsScreen.qml</file>
-    <file>screens/ToolResultExpandedScreen.qml</file>
-    <file>screens/VerificationScreen.qml</file>
-    <file>screens/WelcomeScreen.qml</file>
-    <file>screens/qmldir</file>
-    <file>tests/tst_AIBubbleReaderWash.qml</file>
-    <file>tests/tst_AccessibleNamesExist.qml</file>
-    <file>tests/tst_AnnouncementBatching.qml</file>
-    <file>tests/tst_BubbleFooterDensity.qml</file>
-    <file>tests/tst_ComposerMultiline.qml</file>
-    <file>tests/tst_DestructiveConfirmTwoTap.qml</file>
-    <file>tests/tst_DrawerSwipe.qml</file>
-    <file>tests/tst_FontScaleExtreme.qml</file>
-    <file>tests/tst_HeaderChromeCompact.qml</file>
-    <file>tests/tst_LowStimulationModeAggregate.qml</file>
-    <file>tests/tst_PromptCardFillOnly.qml</file>
-    <file>tests/tst_RTLMirror.qml</file>
-    <file>tests/tst_ScreenContractMatrix.qml</file>
-    <file>tests/tst_SummaryFirstRendering.qml</file>
-    <file>tests/tst_TabOrder.qml</file>
-    <file>tests/tst_ThemeHexLock.qml</file>
-    <file>tests/tst_ToolPillInTimeline.qml</file>
-    <file>tests/tst_TypeScale.qml</file>
-    <file>theme/Motion.qml</file>
-    <file>theme/Spacing.qml</file>
-    <file>theme/Theme.qml</file>
-    <file>theme/Type.qml</file>
-    <file>theme/qmldir</file>
   </qresource>
 </RCC>
