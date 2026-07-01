@@ -10,6 +10,7 @@ Page {
     background: Rectangle {
         color: Theme.p.background
     }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: Spacing.md
@@ -43,6 +44,11 @@ Page {
             text: qsTr("Everything runs on your device.")
             color: Theme.p.inkSecondary
             Component.onCompleted: Type.apply(this, Type.bodyUI)
+        }
+        StatusPill {
+            text: qsTr("Encrypted locally")
+            subtype: "Network-Offline"
+            iconSource: "qrc:/icons/lock.svg"
         }
         Text {
             text: qsTr("Try one of these to start:")
