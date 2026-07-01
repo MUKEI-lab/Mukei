@@ -1,13 +1,13 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import com.mukei.theme
+import "../theme"
 
 Control {
     id: root
 
     property string text: ""
-    signal clicked()
+    signal clicked
 
     Accessible.role: Accessible.Button
     Accessible.name: root.text
@@ -31,5 +31,7 @@ Control {
         Component.onCompleted: Type.apply(this, Type.bodyUI)
     }
 
-    TapHandler { onTapped: root.clicked() }
+    TapHandler {
+        onTapped: root.clicked()
+    }
 }

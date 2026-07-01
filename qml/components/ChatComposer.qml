@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import com.mukei.theme
+import "../theme"
 
 FocusScope {
     id: root
@@ -9,8 +9,8 @@ FocusScope {
     property alias text: textArea.text
     property bool isStreaming: false
     signal sendRequested(string text)
-    signal stopRequested()
-    signal attachRequested()
+    signal stopRequested
+    signal attachRequested
 
     Accessible.role: Accessible.EditableText
     Accessible.name: qsTr("Compose message")
@@ -30,7 +30,12 @@ FocusScope {
         anchors.margins: Spacing.md
         spacing: Spacing.sm
 
-        IconButton { iconSource: "qrc:/icons/attach.svg"; Accessible.name: qsTr("Attach file"); Accessible.description: qsTr("Add a local file to this chat"); onClicked: root.attachRequested() }
+        IconButton {
+            iconSource: "qrc:/icons/attach.svg"
+            Accessible.name: qsTr("Attach file")
+            Accessible.description: qsTr("Add a local file to this chat")
+            onClicked: root.attachRequested()
+        }
 
         TextArea {
             id: textArea
@@ -45,14 +50,20 @@ FocusScope {
             Accessible.name: qsTr("Message text")
             Accessible.description: qsTr("One to six line message editor")
             Component.onCompleted: Type.apply(this, Type.bodyUI)
-            Keys.onPressed: function(event) {
+            Keys.onPressed: function (event) {
                 if ((event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)) && event.key === Qt.Key_Return) {
-                    root.sendRequested(textArea.text)
-                    event.accepted = true
+                    root.sendRequested(textArea.text);
+                    event.accepted = true;
                 }
             }
         }
 
-        IconButton { iconSource: root.isStreaming ? "qrc:/icons/stop.svg" : "qrc:/icons/send.svg"; enabled: root.isStreaming || textArea.text.trim().length > 0; Accessible.name: root.isStreaming ? qsTr("Stop response") : qsTr("Send message"); Accessible.description: root.isStreaming ? qsTr("Stop the current model response") : qsTr("Send this message to Mukei"); onClicked: root.isStreaming ? root.stopRequested() : root.sendRequested(textArea.text) }
+        IconButton {
+            iconSource: root.isStreaming ? "qrc:/icons/stop.svg" : "qrc:/icons/send.svg"
+            enabled: root.isStreaming || textArea.text.trim().length > 0
+            Accessible.name: root.isStreaming ? qsTr("Stop response") : qsTr("Send message")
+            Accessible.description: root.isStreaming ? qsTr("Stop the current model response") : qsTr("Send this message to Mukei")
+            onClicked: root.isStreaming ? root.stopRequested() : root.sendRequested(textArea.text)
+        }
     }
 }

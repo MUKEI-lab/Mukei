@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import com.mukei.theme
+import "../theme"
 
 Rectangle {
     id: root
@@ -15,6 +15,16 @@ Rectangle {
     radius: Spacing.sm
     color: Theme.p.surface
     implicitHeight: promptText.implicitHeight + Spacing.lg
-    Text { id: promptText; anchors.fill: parent; anchors.margins: Spacing.md; text: root.prompt; color: Theme.p.inkPrimary; wrapMode: Text.Wrap; Component.onCompleted: Type.apply(this, Type.bodySmallItalic) }
-    TapHandler { onTapped: root.promptCardAutoSend ? root.sendRequested(root.prompt) : root.fillRequested(root.prompt) }
+    Text {
+        id: promptText
+        anchors.fill: parent
+        anchors.margins: Spacing.md
+        text: root.prompt
+        color: Theme.p.inkPrimary
+        wrapMode: Text.Wrap
+        Component.onCompleted: Type.apply(this, Type.bodySmallItalic)
+    }
+    TapHandler {
+        onTapped: root.promptCardAutoSend ? root.sendRequested(root.prompt) : root.fillRequested(root.prompt)
+    }
 }

@@ -1,14 +1,14 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import com.mukei.theme
+import "../theme"
 
 Control {
     id: root
 
     property string iconSource: ""
     property bool active: false
-    signal clicked()
+    signal clicked
 
     Accessible.role: Accessible.Button
     Accessible.name: qsTr("Activate icon")
@@ -31,5 +31,7 @@ Control {
         opacity: root.enabled ? 1 : 0.4
     }
 
-    TapHandler { onTapped: root.clicked() }
+    TapHandler {
+        onTapped: root.clicked()
+    }
 }

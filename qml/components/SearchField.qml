@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import com.mukei.theme
+import "../theme"
 
 Control {
     id: root
@@ -12,6 +12,30 @@ Control {
     Accessible.description: qsTr("Type to filter conversations")
     implicitHeight: Spacing.xxl
     implicitWidth: Spacing.huge * 3
-    contentItem: RowLayout { spacing: Spacing.xs; Image { source: "qrc:/icons/search.svg"; Layout.preferredWidth: Spacing.lg; Layout.preferredHeight: Spacing.lg } TextField { id: input; Layout.fillWidth: true; background: null; color: Theme.p.inkPrimary; onAccepted: root.accepted(text) } IconButton { iconSource: "qrc:/icons/error.svg"; Accessible.name: qsTr("Clear search"); onClicked: input.clear() } }
-    background: Rectangle { color: Theme.p.surface; radius: Spacing.xs; border.width: Theme.highContrast ? 1 : 0; border.color: Theme.p.divider }
+    contentItem: RowLayout {
+        spacing: Spacing.xs
+        Image {
+            source: "qrc:/icons/search.svg"
+            Layout.preferredWidth: Spacing.lg
+            Layout.preferredHeight: Spacing.lg
+        }
+        TextField {
+            id: input
+            Layout.fillWidth: true
+            background: null
+            color: Theme.p.inkPrimary
+            onAccepted: root.accepted(text)
+        }
+        IconButton {
+            iconSource: "qrc:/icons/error.svg"
+            Accessible.name: qsTr("Clear search")
+            onClicked: input.clear()
+        }
+    }
+    background: Rectangle {
+        color: Theme.p.surface
+        radius: Spacing.xs
+        border.width: Theme.highContrast ? 1 : 0
+        border.color: Theme.p.divider
+    }
 }

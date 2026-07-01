@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import com.mukei.theme
+import "../theme"
 
 Item {
     id: root
@@ -16,6 +16,40 @@ Item {
     Accessible.name: qsTr("Mukei response")
     Accessible.description: text
     implicitHeight: column.implicitHeight
-    ColumnLayout { id: column; width: parent ? parent.width : Spacing.huge * 4; spacing: Spacing.xs; Rectangle { id: body; Layout.fillWidth: true; implicitHeight: renderer.implicitHeight + Spacing.md * 2; radius: Spacing.sm; color: root.readerWash ? Theme.p.surfaceFaint : "transparent"; MarkdownRenderer { id: renderer; anchors.fill: parent; anchors.margins: Spacing.md; ast: root.ast; fallbackText: root.text } } RowLayout { spacing: Spacing.sm; Text { text: root.timestamp; color: Theme.p.inkFaint; Component.onCompleted: Type.apply(this, Type.caption) } StatusPill { visible: root.suggestedAction.length > 0; text: root.suggestedAction; subtype: "Action" } } }
-    TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.actionRequested("Copy text") }
+    ColumnLayout {
+        id: column
+        width: parent ? parent.width : Spacing.huge * 4
+        spacing: Spacing.xs
+        Rectangle {
+            id: body
+            Layout.fillWidth: true
+            implicitHeight: renderer.implicitHeight + Spacing.md * 2
+            radius: Spacing.sm
+            color: root.readerWash ? Theme.p.surfaceFaint : "transparent"
+            MarkdownRenderer {
+                id: renderer
+                anchors.fill: parent
+                anchors.margins: Spacing.md
+                ast: root.ast
+                fallbackText: root.text
+            }
+        }
+        RowLayout {
+            spacing: Spacing.sm
+            Text {
+                text: root.timestamp
+                color: Theme.p.inkFaint
+                Component.onCompleted: Type.apply(this, Type.caption)
+            }
+            StatusPill {
+                visible: root.suggestedAction.length > 0
+                text: root.suggestedAction
+                subtype: "Action"
+            }
+        }
+    }
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: root.actionRequested("Copy text")
+    }
 }

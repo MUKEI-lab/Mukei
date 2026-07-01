@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import com.mukei.theme
+import "../theme"
 
 Rectangle {
     id: root
@@ -12,5 +12,9 @@ Rectangle {
     color: Theme.p.surfaceVariant
     opacity: 0.05
     implicitHeight: Spacing.xxl
-    Timer { interval: Motion.skeletonMaxVisible; running: root.visible; onTriggered: root.visible = false }
+    Timer {
+        interval: Motion.skeletonMaxVisible
+        running: root.visible
+        onTriggered: root.visible = false
+    }
 }

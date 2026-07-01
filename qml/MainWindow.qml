@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import com.mukei.theme
+import "theme"
 import "components"
 import "screens"
 
@@ -16,7 +16,7 @@ ApplicationWindow {
     color: Theme.p.background
     title: qsTr("Mukei")
 
-    LayoutMirroring.enabled: Qt.locale().textDirection === Qt.RightToLeft
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
     LayoutMirroring.childrenInherit: true
 
     signal accessibilityAnnouncementRequested(string text)
@@ -24,7 +24,8 @@ ApplicationWindow {
     StackView {
         id: stack
         anchors.fill: parent
-        initialItem: ChatScreen {}
+        initialItem: ChatScreen {
+        }
     }
 
     Shortcut {
@@ -34,6 +35,7 @@ ApplicationWindow {
 
     Component {
         id: settingsComponent
-        SettingsScreen {}
+        SettingsScreen {
+        }
     }
 }

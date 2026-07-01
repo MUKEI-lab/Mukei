@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import com.mukei.theme
+import "../theme"
 
 Item {
     id: root
@@ -18,6 +18,15 @@ Item {
     Layout.fillWidth: true
     Layout.leftMargin: Spacing.sm
     Layout.rightMargin: Spacing.xl
-    StatusPill { id: pill; anchors.verticalCenter: parent.verticalCenter; iconSource: root.iconSource; text: root.label; subtype: root.phase === "failure" ? "Failure" : root.phase === "result" ? "Success" : "ActiveTool" }
-    TapHandler { enabled: root.kind === "tool" && root.phase === "result"; onTapped: root.expanded(root.toolId) }
+    StatusPill {
+        id: pill
+        anchors.verticalCenter: parent.verticalCenter
+        iconSource: root.iconSource
+        text: root.label
+        subtype: root.phase === "failure" ? "Failure" : root.phase === "result" ? "Success" : "ActiveTool"
+    }
+    TapHandler {
+        enabled: root.kind === "tool" && root.phase === "result"
+        onTapped: root.expanded(root.toolId)
+    }
 }

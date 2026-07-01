@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import com.mukei.theme
+import "../theme"
 
 Rectangle {
     id: root
@@ -17,5 +17,20 @@ Rectangle {
     border.color: Theme.p.accent
     implicitHeight: Spacing.xl
     implicitWidth: row.implicitWidth + Spacing.md
-    RowLayout { id: row; anchors.centerIn: parent; spacing: Spacing.xs; Image { visible: root.iconSource.length > 0; source: root.iconSource; Layout.preferredWidth: Spacing.md; Layout.preferredHeight: Spacing.md } Text { text: root.text; color: Theme.p.inkPrimary; Component.onCompleted: Type.apply(this, Type.caption) } }
+    RowLayout {
+        id: row
+        anchors.centerIn: parent
+        spacing: Spacing.xs
+        Image {
+            visible: root.iconSource.length > 0
+            source: root.iconSource
+            Layout.preferredWidth: Spacing.md
+            Layout.preferredHeight: Spacing.md
+        }
+        Text {
+            text: root.text
+            color: Theme.p.inkPrimary
+            Component.onCompleted: Type.apply(this, Type.caption)
+        }
+    }
 }

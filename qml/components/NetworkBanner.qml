@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import com.mukei.theme
+import "../theme"
 
 Rectangle {
     id: root
@@ -12,5 +12,22 @@ Rectangle {
     Accessible.description: text
     color: "transparent"
     implicitHeight: row.implicitHeight + Spacing.xs
-    RowLayout { id: row; anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: Spacing.xs; Image { source: root.online ? "qrc:/icons/network-on.svg" : "qrc:/icons/network-off.svg"; Layout.preferredWidth: Spacing.md; Layout.preferredHeight: Spacing.md } Text { text: root.text; color: root.online ? Theme.p.inkSecondary : Theme.success; wrapMode: Text.Wrap; Component.onCompleted: Type.apply(this, Type.caption) } }
+    RowLayout {
+        id: row
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Spacing.xs
+        Image {
+            source: root.online ? "qrc:/icons/network-on.svg" : "qrc:/icons/network-off.svg"
+            Layout.preferredWidth: Spacing.md
+            Layout.preferredHeight: Spacing.md
+        }
+        Text {
+            text: root.text
+            color: root.online ? Theme.p.inkSecondary : Theme.success
+            wrapMode: Text.Wrap
+            Component.onCompleted: Type.apply(this, Type.caption)
+        }
+    }
 }

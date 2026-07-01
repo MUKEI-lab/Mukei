@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import com.mukei.theme
+import "../theme"
 
 Control {
     id: root
@@ -10,6 +10,20 @@ Control {
     Accessible.name: qsTr("Progress")
     Accessible.description: qsTr("Progress value")
     implicitHeight: Spacing.xxs
-    background: Rectangle { color: Theme.p.surfaceVariant; radius: Spacing.xxs }
-    contentItem: Rectangle { width: parent.width * Math.max(0, Math.min(1, root.value)); height: parent.height; radius: Spacing.xxs; color: Theme.p.accent; Behavior on width { enabled: !Theme.reduceMotion; NumberAnimation { duration: Motion.progressValue } } }
+    background: Rectangle {
+        color: Theme.p.surfaceVariant
+        radius: Spacing.xxs
+    }
+    contentItem: Rectangle {
+        width: parent.width * Math.max(0, Math.min(1, root.value))
+        height: parent.height
+        radius: Spacing.xxs
+        color: Theme.p.accent
+        Behavior on width {
+            enabled: !Theme.reduceMotion
+            NumberAnimation {
+                duration: Motion.progressValue
+            }
+        }
+    }
 }

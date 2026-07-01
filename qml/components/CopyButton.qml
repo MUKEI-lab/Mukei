@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import com.mukei.theme
+import "../theme"
 
 IconButton {
     id: root
@@ -9,5 +9,5 @@ IconButton {
     iconSource: "qrc:/icons/copy.svg"
     Accessible.name: qsTr("Copy text")
     Accessible.description: qsTr("Copy text to the clipboard")
-    onClicked: Qt.callLater(function() {})
+    onClicked: Qt.callLater(function () {})
 }
