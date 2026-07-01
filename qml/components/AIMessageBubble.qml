@@ -26,6 +26,16 @@ Item {
             implicitHeight: renderer.implicitHeight + Spacing.md * 2
             radius: Spacing.sm
             color: root.readerWash ? Theme.p.surfaceFaint : "transparent"
+            Behavior on color {
+                enabled: !Theme.reduceMotion
+                ColorAnimation { duration: Motion.bubbleAppear; easing.type: Easing.OutCubic }
+            }
+            opacity: 0
+            Component.onCompleted: opacity = 1
+            Behavior on opacity {
+                enabled: !Theme.reduceMotion
+                NumberAnimation { duration: Motion.bubbleAppear; easing.type: Easing.OutCubic }
+            }
             MarkdownRenderer {
                 id: renderer
                 anchors.fill: parent

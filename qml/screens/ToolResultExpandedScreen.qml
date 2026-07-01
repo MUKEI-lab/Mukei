@@ -25,7 +25,7 @@ FullScreenModal {
         ToolResultCard {
             Layout.fillWidth: true
             title: qsTr("Results · read-only")
-            body: qsTr("Source: DuckDuckGo + Brave · trust: untrusted external data")
+            body: qsTr("Source: Brave + Tavily · trust: untrusted external data")
         }
         Text {
             text: qsTr("RAW")

@@ -1,0 +1,113 @@
+name: qml-check
+
+# QML-side gate. Only runs on the branch that ships the qml/ scaffold so
+# `main` (Rust-only) is not affected. Uses the Ubuntu-hosted Qt 6.6 the
+# `install-qt-action` provides. Kept separate from `lint.yml` /
+# `sandbox-check.yml` so a QML lint regression does not mask a Rust
+# regression (see architect review GH #22 / #23 for the analogous
+# rationale on the Rust side).
+
+on:
+  push:
+    branches:
+      - codex/create-qml-directory-structure-and-files
+  pull_request:
+    paths:
+      - "qml/**"
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Static QML lint. qmllint ships with the Qt SDK and catches missing
+  # imports, unused properties, type-mismatched bindings, and broken
+  # qrc:/ / file:/ resource paths.
+  # ---------------------------------------------------------------------
+  qmllint:
+    name: qmllint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Qt 6.6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.6.3"
+          host: linux
+          target: desktop
+          modules: qtdeclarative qtsvg
+      - name: Run qmllint against every .qml file
+        working-directory: qml
+        run: |
+          set -e
+          fail=0
+          # Explicit -I entries teach qmllint where the singletons and
+          # component/screen modules live so ../theme / ../components
+          # imports resolve without a full build.
+          for f in $(find . -name '*.qml' -not -path './build*/*'); do
+            if ! qmllint -I . -I theme -I components -I screens "$f"; then
+              echo "::error file=$f::qmllint reported violations"
+              fail=1
+            fi
+          done
+          exit $fail
+
+  # ---------------------------------------------------------------------
+  # SVG uniqueness gate. This branch previously shipped 27 byte-identical
+  # placeholder icons; CI now defends against that regression.
+  # ---------------------------------------------------------------------
+  icon-uniqueness:
+    name: SVG icons are semantically distinct
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify no two icon SVGs share an md5
+        run: |
+          set -e
+          cd qml/assets/icons
+          count=$(ls *.svg | wc -l)
+          unique=$(md5sum *.svg | awk '{print $1}' | sort -u | wc -l)
+          echo "svgs: $count, unique md5: $unique"
+          if [ "$count" -ne "$unique" ]; then
+            echo "::error::Duplicate SVG payload detected — every icon must be visually distinct."
+            md5sum *.svg | sort | awk '{print $1}' | uniq -c | sort -rn | head -5
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------
+  # Font-file sanity: TTF magic (0x00010000 / 0x4f54544f) must match, and
+  # no file may be an ASCII placeholder stub.
+  # ---------------------------------------------------------------------
+  fonts-are-real:
+    name: TTF magic bytes are valid
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify each font file starts with a TrueType/OpenType magic
+        run: |
+          set -e
+          fail=0
+          for f in qml/assets/fonts/*.ttf; do
+            magic=$(xxd -l 4 -p "$f")
+            case "$magic" in
+              00010000|4f54544f|74727565|74797031) : ;;
+              *) echo "::error file=$f::bad TTF magic '$magic' — possible placeholder stub"; fail=1 ;;
+            esac
+          done
+          exit $fail
+
+  # ---------------------------------------------------------------------
+  # Configure-only CMake pass. Proves qml/CMakeLists.txt still validates
+  # without kicking off a full moc/qrc/link cycle.
+  # ---------------------------------------------------------------------
+  cmake-configure:
+    name: cmake -S qml -B build (configure-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Qt 6.6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.6.3"
+          host: linux
+          target: desktop
+          modules: qtdeclarative qtsvg
+      - name: Configure only
+        run: cmake -S qml -B qml/build -G Ninja

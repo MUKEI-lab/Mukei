@@ -20,6 +20,15 @@ Control {
         color: root.enabled ? Theme.p.accent : Theme.p.surfaceVariant
         border.width: Theme.highContrast ? 1 : 0
         border.color: Theme.p.inkPrimary
+        Behavior on color {
+            enabled: !Theme.reduceMotion
+            ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
+        }
+        scale: tapHandler.pressed ? 0.97 : 1.0
+        Behavior on scale {
+            enabled: !Theme.reduceMotion
+            NumberAnimation { duration: Motion.buttonPressTint; easing.type: Easing.OutQuad }
+        }
     }
 
     contentItem: Text {
@@ -32,6 +41,7 @@ Control {
     }
 
     TapHandler {
+        id: tapHandler
         onTapped: root.clicked()
     }
 }

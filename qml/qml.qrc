@@ -1,21 +1,30 @@
 <RCC>
   <qresource prefix="/">
+    <!-- Root window -->
     <file>MainWindow.qml</file>
-    <file alias="fonts/Inter-Medium.ttf">assets/fonts/Inter-Medium.ttf</file>
-    <file alias="fonts/Inter-Regular.ttf">assets/fonts/Inter-Regular.ttf</file>
-    <file alias="fonts/Inter-SemiBold.ttf">assets/fonts/Inter-SemiBold.ttf</file>
-    <file alias="fonts/JetBrainsMono-Bold.ttf">assets/fonts/JetBrainsMono-Bold.ttf</file>
-    <file alias="fonts/JetBrainsMono-Medium.ttf">assets/fonts/JetBrainsMono-Medium.ttf</file>
-    <file alias="fonts/JetBrainsMono-Regular.ttf">assets/fonts/JetBrainsMono-Regular.ttf</file>
-    <file alias="fonts/Merriweather-Bold.ttf">assets/fonts/Merriweather-Bold.ttf</file>
-    <file alias="fonts/Merriweather-BoldItalic.ttf">assets/fonts/Merriweather-BoldItalic.ttf</file>
-    <file alias="fonts/Merriweather-Italic.ttf">assets/fonts/Merriweather-Italic.ttf</file>
-    <file alias="fonts/Merriweather-Regular.ttf">assets/fonts/Merriweather-Regular.ttf</file>
-    <file alias="fonts/PlayfairDisplay-Bold.ttf">assets/fonts/PlayfairDisplay-Bold.ttf</file>
-    <file alias="fonts/PlayfairDisplay-Medium.ttf">assets/fonts/PlayfairDisplay-Medium.ttf</file>
-    <file alias="fonts/PlayfairDisplay-Regular.ttf">assets/fonts/PlayfairDisplay-Regular.ttf</file>
-    <file alias="fonts/PlayfairDisplay-SemiBold.ttf">assets/fonts/PlayfairDisplay-SemiBold.ttf</file>
+
+    <!-- ============================================================
+         Fonts (SIL Open Font License 1.1, variable-axis)
+         Each family ships upright + italic; every weight the UX Brief
+         references is reachable through the `wght` variation axis.
+         See assets/fonts/README.md for attribution.
+    ============================================================ -->
+    <file alias="fonts/PlayfairDisplay-Variable.ttf">assets/fonts/PlayfairDisplay-Variable.ttf</file>
+    <file alias="fonts/PlayfairDisplay-Italic-Variable.ttf">assets/fonts/PlayfairDisplay-Italic-Variable.ttf</file>
+    <file alias="fonts/Merriweather-Variable.ttf">assets/fonts/Merriweather-Variable.ttf</file>
+    <file alias="fonts/Merriweather-Italic-Variable.ttf">assets/fonts/Merriweather-Italic-Variable.ttf</file>
+    <file alias="fonts/Inter-Variable.ttf">assets/fonts/Inter-Variable.ttf</file>
+    <file alias="fonts/Inter-Italic-Variable.ttf">assets/fonts/Inter-Italic-Variable.ttf</file>
+    <file alias="fonts/JetBrainsMono-Variable.ttf">assets/fonts/JetBrainsMono-Variable.ttf</file>
+    <file alias="fonts/JetBrainsMono-Italic-Variable.ttf">assets/fonts/JetBrainsMono-Italic-Variable.ttf</file>
     <file>assets/fonts/README.md</file>
+
+    <!-- ============================================================
+         Icons (Phosphor Icons v2.0.8, MIT license)
+         27 semantically unique glyphs, viewBox 0 0 256 256,
+         `fill="currentColor"` so they respect the QML palette.
+         Upstream: https://github.com/phosphor-icons/core
+    ============================================================ -->
     <file alias="icons/active-dot.svg">assets/icons/active-dot.svg</file>
     <file alias="icons/attach.svg">assets/icons/attach.svg</file>
     <file alias="icons/back.svg">assets/icons/back.svg</file>
@@ -43,6 +52,12 @@
     <file alias="icons/stop.svg">assets/icons/stop.svg</file>
     <file alias="icons/theme-auto.svg">assets/icons/theme-auto.svg</file>
     <file alias="icons/view.svg">assets/icons/view.svg</file>
+
+    <!-- ============================================================
+         Application code (theme + components + screens + tests)
+         These are also declared to qt_add_qml_module in CMakeLists.txt
+         so QML resolves them via the com.mukei.* URIs.
+    ============================================================ -->
     <file>components/AIMessageBubble.qml</file>
     <file>components/BranchSwitcherSheet.qml</file>
     <file>components/ChatComposer.qml</file>

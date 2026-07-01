@@ -27,7 +27,8 @@ Control {
             onAccepted: root.accepted(text)
         }
         IconButton {
-            iconSource: "qrc:/icons/error.svg"
+            iconSource: "qrc:/icons/delete.svg"
+            visible: input.text.length > 0
             Accessible.name: qsTr("Clear search")
             onClicked: input.clear()
         }

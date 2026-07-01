@@ -13,7 +13,10 @@ QtObject {
     property int mode: Theme.Mode.DolceVita
     property bool reduceMotion: false
     property bool highContrast: false
-    readonly property real scale: 1.0
+    // `scale` drives Type.fontScale (0.85–2.0). Bindable so Settings can
+    // wire it to a slider without swapping the singleton. `scaleClass`
+    // downstream toggles compact chrome (see Type.compact / AIMessageBubble.readerWash).
+    property real scale: 1.0
     readonly property string scaleClass: scale > 1.5 ? "large" : "regular"
 
     readonly property QtObject dv: QtObject {

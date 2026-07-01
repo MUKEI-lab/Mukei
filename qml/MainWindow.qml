@@ -16,6 +16,11 @@ ApplicationWindow {
     color: Theme.p.background
     title: qsTr("Mukei")
 
+    Behavior on color {
+        enabled: !Theme.reduceMotion
+        ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
+    }
+
     LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
     LayoutMirroring.childrenInherit: true
 

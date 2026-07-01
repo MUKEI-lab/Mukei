@@ -14,6 +14,14 @@ Rectangle {
     color: Theme.p.surface
     border.width: 1
     border.color: Theme.p.divider
+    Behavior on color {
+        enabled: !Theme.reduceMotion
+        ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
+    }
+    Behavior on border.color {
+        enabled: !Theme.reduceMotion
+        ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
+    }
     implicitHeight: column.implicitHeight + Spacing.md * 2
     ColumnLayout {
         id: column

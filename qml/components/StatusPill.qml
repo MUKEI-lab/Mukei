@@ -15,6 +15,10 @@ Rectangle {
     color: subtype === "Failure" ? Theme.error : subtype === "Success" || subtype === "Network-Offline" ? Theme.success : Theme.p.surface
     border.width: 1
     border.color: Theme.p.accent
+    Behavior on color {
+        enabled: !Theme.reduceMotion
+        ColorAnimation { duration: Motion.toolCrossFade; easing.type: Easing.OutCubic }
+    }
     implicitHeight: Spacing.xl
     implicitWidth: row.implicitWidth + Spacing.md
     RowLayout {

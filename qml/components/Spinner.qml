@@ -24,5 +24,6 @@ Item {
         from: 0
         to: 360
         duration: 1200
+        easing.type: Easing.InOutSine
     }
 }

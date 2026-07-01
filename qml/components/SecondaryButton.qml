@@ -14,9 +14,17 @@ Control {
     implicitHeight: Spacing.xxl
     background: Rectangle {
         radius: Spacing.xs
-        color: "transparent"
+        color: tapHandler.pressed ? Theme.p.surfaceFaint : "transparent"
         border.width: 1
         border.color: Theme.p.accent
+        Behavior on color {
+            enabled: !Theme.reduceMotion
+            ColorAnimation { duration: Motion.buttonPressTint; easing.type: Easing.OutCubic }
+        }
+        Behavior on border.color {
+            enabled: !Theme.reduceMotion
+            ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
+        }
     }
     contentItem: Text {
         id: label
@@ -27,6 +35,7 @@ Control {
         Component.onCompleted: Type.apply(this, Type.bodyUI)
     }
     TapHandler {
+        id: tapHandler
         onTapped: root.clicked()
     }
 }

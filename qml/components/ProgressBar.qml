@@ -23,6 +23,7 @@ Control {
             enabled: !Theme.reduceMotion
             NumberAnimation {
                 duration: Motion.progressValue
+                easing.type: Easing.OutCubic
             }
         }
     }

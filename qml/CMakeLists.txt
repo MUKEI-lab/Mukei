@@ -10,8 +10,24 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS
     Core Gui Quick Qml QuickControls2 Widgets Svg
 )
 
-set(MUKEI_BRIDGE_LIB
-    ${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/aarch64-linux-android/release/libmukei_bridge.so
+# Cargo build directory selection. Android builds still cross-compile to
+# `aarch64-linux-android/release`; every other host (Linux/macOS desktop
+# smoke-runs) uses the plain `release` directory. Both the .so and .dylib
+# suffixes are probed so a macOS build picks up libmukei_bridge.dylib.
+if(ANDROID)
+    set(_MUKEI_BRIDGE_DEFAULT
+        ${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/aarch64-linux-android/release/libmukei_bridge.so
+    )
+elseif(APPLE)
+    set(_MUKEI_BRIDGE_DEFAULT
+        ${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/release/libmukei_bridge.dylib
+    )
+else()
+    set(_MUKEI_BRIDGE_DEFAULT
+        ${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/release/libmukei_bridge.so
+    )
+endif()
+set(MUKEI_BRIDGE_LIB "${_MUKEI_BRIDGE_DEFAULT}"
     CACHE FILEPATH "Path to the Cargo-built mukei-bridge shared library"
 )
 

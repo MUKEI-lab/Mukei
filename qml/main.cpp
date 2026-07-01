@@ -69,24 +69,28 @@ signals:
 
 static void loadBundledFonts()
 {
+    // Variable-axis SIL OFL fonts. Each `wght` axis exposes every weight
+    // the UX Brief references (Regular, Medium, SemiBold, Bold), so QML
+    // only sees four family names — the actual weight is picked at render
+    // time via `Font.weight`. Failure to load is not fatal; Qt falls back
+    // to the platform default and QFontDatabase logs a warning we surface
+    // through diagnostics.
     const QStringList fonts = {
-        QStringLiteral(":/fonts/PlayfairDisplay-Regular.ttf"),
-        QStringLiteral(":/fonts/PlayfairDisplay-Medium.ttf"),
-        QStringLiteral(":/fonts/PlayfairDisplay-SemiBold.ttf"),
-        QStringLiteral(":/fonts/PlayfairDisplay-Bold.ttf"),
-        QStringLiteral(":/fonts/Merriweather-Regular.ttf"),
-        QStringLiteral(":/fonts/Merriweather-Italic.ttf"),
-        QStringLiteral(":/fonts/Merriweather-Bold.ttf"),
-        QStringLiteral(":/fonts/Merriweather-BoldItalic.ttf"),
-        QStringLiteral(":/fonts/Inter-Regular.ttf"),
-        QStringLiteral(":/fonts/Inter-Medium.ttf"),
-        QStringLiteral(":/fonts/Inter-SemiBold.ttf"),
-        QStringLiteral(":/fonts/JetBrainsMono-Regular.ttf"),
-        QStringLiteral(":/fonts/JetBrainsMono-Medium.ttf"),
-        QStringLiteral(":/fonts/JetBrainsMono-Bold.ttf")
+        QStringLiteral(":/fonts/PlayfairDisplay-Variable.ttf"),
+        QStringLiteral(":/fonts/PlayfairDisplay-Italic-Variable.ttf"),
+        QStringLiteral(":/fonts/Merriweather-Variable.ttf"),
+        QStringLiteral(":/fonts/Merriweather-Italic-Variable.ttf"),
+        QStringLiteral(":/fonts/Inter-Variable.ttf"),
+        QStringLiteral(":/fonts/Inter-Italic-Variable.ttf"),
+        QStringLiteral(":/fonts/JetBrainsMono-Variable.ttf"),
+        QStringLiteral(":/fonts/JetBrainsMono-Italic-Variable.ttf")
     };
     for (const QString &font : fonts) {
-        QFontDatabase::addApplicationFont(font);
+        const int id = QFontDatabase::addApplicationFont(font);
+        if (id < 0) {
+            qWarning("MukeiFonts: failed to register bundled font '%s' — falling back to system default",
+                     qUtf8Printable(font));
+        }
     }
 }
 
