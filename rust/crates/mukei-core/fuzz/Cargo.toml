@@ -1,0 +1,27 @@
+[package]
+name = "mukei-core-fuzz"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = { workspace = true }
+mukei-core = { path = ".." }
+
+[[bin]]
+name = "math_expression_fuzzer"
+path = "fuzz_targets/math_expression.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "query_input_fuzzer"
+path = "fuzz_targets/query_input.rs"
+test = false
+doc = false
+bench = false

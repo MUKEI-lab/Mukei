@@ -132,3 +132,14 @@ inherits  = "release"
 opt-level = "z"
 lto       = "fat"
 panic     = "unwind"          # REQUIRED — inherited but pinned explicitly
+
+# Release hardening profile with additional security flags
+[profile.release-hardening]
+inherits         = "release"
+lto              = "fat"
+codegen-units    = 1
+panic            = "unwind"
+strip            = "symbols"  # Keep some symbols for debugging
+opt-level        = 3
+# Stack protector and RELRO flags for enhanced security
+rustflags        = ["-C", "target-feature=+stack-protector-all", "-C", "link-arg=-Wl,-z,relro,-z,now"]
