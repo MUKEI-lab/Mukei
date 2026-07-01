@@ -1,0 +1,8 @@
+import QtQuick
+import QtQuick.Controls.Basic
+import QtQuick.Layouts
+import QtQuick.Accessibility
+import com.mukei.theme
+FocusScope { id: root; property alias text: textArea.text; property bool isStreaming: false; signal sendRequested(string text); signal stopRequested(); signal attachRequested(); implicitHeight: Math.min(textArea.contentHeight + Spacing.md * 2, Type.bodyUI.pixelSize * 1.5 * 6 + Spacing.md * 2)
+Rectangle { anchors.fill: parent; radius: 12; color: Theme.p.surface; border.width: 2; border.color: textArea.activeFocus ? Theme.p.accent : "transparent" }
+RowLayout { anchors.fill: parent; anchors.margins: Spacing.md; spacing: Spacing.sm; IconButton { iconSource: "qrc:/icons/attach.svg"; Accessible.name: qsTr("Attach file"); onClicked: root.attachRequested() } TextArea { id: textArea; Layout.fillWidth: true; Layout.minimumHeight: Type.bodyUI.pixelSize * 1.5; Layout.maximumHeight: Type.bodyUI.pixelSize * 1.5 * 6; wrapMode: TextArea.Wrap; font: Type.bodyUI; color: Theme.p.inkPrimary; placeholderText: qsTr("Ask Mukei anything…"); placeholderTextColor: Theme.p.inkFaint; background: null; Keys.onPressed: function(event) { if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_Return) { root.sendRequested(textArea.text); event.accepted = true } } } IconButton { iconSource: root.isStreaming ? "qrc:/icons/stop.svg" : "qrc:/icons/send.svg"; enabled: root.isStreaming || textArea.text.trim().length > 0; Accessible.name: root.isStreaming ? qsTr("Stop response") : qsTr("Send message"); onClicked: root.isStreaming ? root.stopRequested() : root.sendRequested(textArea.text) } } }

@@ -1,0 +1,111 @@
+<RCC>
+  <qresource prefix="/">
+    <file>MainWindow.qml</file>
+    <file alias="fonts/Inter-Medium.ttf">assets/fonts/Inter-Medium.ttf</file>
+    <file alias="fonts/Inter-Regular.ttf">assets/fonts/Inter-Regular.ttf</file>
+    <file alias="fonts/Inter-SemiBold.ttf">assets/fonts/Inter-SemiBold.ttf</file>
+    <file alias="fonts/JetBrainsMono-Bold.ttf">assets/fonts/JetBrainsMono-Bold.ttf</file>
+    <file alias="fonts/JetBrainsMono-Medium.ttf">assets/fonts/JetBrainsMono-Medium.ttf</file>
+    <file alias="fonts/JetBrainsMono-Regular.ttf">assets/fonts/JetBrainsMono-Regular.ttf</file>
+    <file alias="fonts/Merriweather-Bold.ttf">assets/fonts/Merriweather-Bold.ttf</file>
+    <file alias="fonts/Merriweather-Italic.ttf">assets/fonts/Merriweather-Italic.ttf</file>
+    <file alias="fonts/Merriweather-Regular.ttf">assets/fonts/Merriweather-Regular.ttf</file>
+    <file alias="fonts/PlayfairDisplay-Bold.ttf">assets/fonts/PlayfairDisplay-Bold.ttf</file>
+    <file alias="fonts/PlayfairDisplay-Medium.ttf">assets/fonts/PlayfairDisplay-Medium.ttf</file>
+    <file alias="fonts/PlayfairDisplay-Regular.ttf">assets/fonts/PlayfairDisplay-Regular.ttf</file>
+    <file alias="fonts/PlayfairDisplay-SemiBold.ttf">assets/fonts/PlayfairDisplay-SemiBold.ttf</file>
+    <file>assets/fonts/README.md</file>
+    <file alias="icons/active-dot.svg">assets/icons/active-dot.svg</file>
+    <file alias="icons/attach.svg">assets/icons/attach.svg</file>
+    <file alias="icons/back.svg">assets/icons/back.svg</file>
+    <file alias="icons/branch.svg">assets/icons/branch.svg</file>
+    <file alias="icons/chat.svg">assets/icons/chat.svg</file>
+    <file alias="icons/check.svg">assets/icons/check.svg</file>
+    <file alias="icons/chip.svg">assets/icons/chip.svg</file>
+    <file alias="icons/collapse.svg">assets/icons/collapse.svg</file>
+    <file alias="icons/copy.svg">assets/icons/copy.svg</file>
+    <file alias="icons/delete.svg">assets/icons/delete.svg</file>
+    <file alias="icons/done-target.svg">assets/icons/done-target.svg</file>
+    <file alias="icons/edit.svg">assets/icons/edit.svg</file>
+    <file alias="icons/error.svg">assets/icons/error.svg</file>
+    <file alias="icons/expand.svg">assets/icons/expand.svg</file>
+    <file alias="icons/export.svg">assets/icons/export.svg</file>
+    <file alias="icons/file.svg">assets/icons/file.svg</file>
+    <file alias="icons/lock.svg">assets/icons/lock.svg</file>
+    <file alias="icons/memory.svg">assets/icons/memory.svg</file>
+    <file alias="icons/network-off.svg">assets/icons/network-off.svg</file>
+    <file alias="icons/network-on.svg">assets/icons/network-on.svg</file>
+    <file alias="icons/regenerate.svg">assets/icons/regenerate.svg</file>
+    <file alias="icons/search.svg">assets/icons/search.svg</file>
+    <file alias="icons/send.svg">assets/icons/send.svg</file>
+    <file alias="icons/settings.svg">assets/icons/settings.svg</file>
+    <file alias="icons/stop.svg">assets/icons/stop.svg</file>
+    <file alias="icons/theme-auto.svg">assets/icons/theme-auto.svg</file>
+    <file alias="icons/view.svg">assets/icons/view.svg</file>
+    <file>components/AIMessageBubble.qml</file>
+    <file>components/ChatComposer.qml</file>
+    <file>components/ChatTimelineEvent.qml</file>
+    <file>components/CodeBlockComponent.qml</file>
+    <file>components/ConfirmationDialog.qml</file>
+    <file>components/CopyButton.qml</file>
+    <file>components/DestructiveButton.qml</file>
+    <file>components/DestructiveConfirmDialog.qml</file>
+    <file>components/FontLoader.qml</file>
+    <file>components/FullScreenModal.qml</file>
+    <file>components/GhostButton.qml</file>
+    <file>components/HapticFeedback.qml</file>
+    <file>components/IconButton.qml</file>
+    <file>components/LeftDrawer.qml</file>
+    <file>components/MarkdownRenderer.qml</file>
+    <file>components/ModalSheet.qml</file>
+    <file>components/NetworkBanner.qml</file>
+    <file>components/PrimaryButton.qml</file>
+    <file>components/ProgressBar.qml</file>
+    <file>components/RAGChunkCard.qml</file>
+    <file>components/SecondaryButton.qml</file>
+    <file>components/SkeletonLoader.qml</file>
+    <file>components/Spinner.qml</file>
+    <file>components/StatusPill.qml</file>
+    <file>components/StreamingCaret.qml</file>
+    <file>components/ThinkingAccordion.qml</file>
+    <file>components/ToastNotification.qml</file>
+    <file>components/ToolResultCard.qml</file>
+    <file>components/UserMessageBubble.qml</file>
+    <file>components/qmldir</file>
+    <file>main.cpp</file>
+    <file>screens/ChatScreen.qml</file>
+    <file>screens/EmptyChatScreen.qml</file>
+    <file>screens/ModelManagerScreen.qml</file>
+    <file>screens/ModelPickerScreen.qml</file>
+    <file>screens/RagRebuildPromptScreen.qml</file>
+    <file>screens/SafeModeScreen.qml</file>
+    <file>screens/SettingsScreen.qml</file>
+    <file>screens/ToolResultExpandedScreen.qml</file>
+    <file>screens/VerificationScreen.qml</file>
+    <file>screens/WelcomeScreen.qml</file>
+    <file>screens/qmldir</file>
+    <file>tests/tst_AIBubbleReaderWash.qml</file>
+    <file>tests/tst_AccessibleNamesExist.qml</file>
+    <file>tests/tst_AccessibleReadingOrder.qml</file>
+    <file>tests/tst_AnnouncementBatching.qml</file>
+    <file>tests/tst_BubbleFooterDensity.qml</file>
+    <file>tests/tst_ChatScreen.qml</file>
+    <file>tests/tst_ComposerMultiline.qml</file>
+    <file>tests/tst_FirstRunCanonicalPath.qml</file>
+    <file>tests/tst_FocusRing.qml</file>
+    <file>tests/tst_FontScaleExtreme.qml</file>
+    <file>tests/tst_HeaderChromeCompact.qml</file>
+    <file>tests/tst_HighContrast.qml</file>
+    <file>tests/tst_MessageBubble.qml</file>
+    <file>tests/tst_PromptCardFillOnly.qml</file>
+    <file>tests/tst_RTLMirror.qml</file>
+    <file>tests/tst_ScreenContractMatrix.qml</file>
+    <file>tests/tst_TabOrder.qml</file>
+    <file>tests/tst_ToolPillInTimeline.qml</file>
+    <file>theme/Motion.qml</file>
+    <file>theme/Spacing.qml</file>
+    <file>theme/Theme.qml</file>
+    <file>theme/Type.qml</file>
+    <file>theme/qmldir</file>
+  </qresource>
+</RCC>
