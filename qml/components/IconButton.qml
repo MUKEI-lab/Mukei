@@ -1,6 +1,35 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQuick.Accessibility
 import com.mukei.theme
-Control { id: root; property string iconSource: ""; signal clicked(); Accessible.role: Accessible.Button; Accessible.name: qsTr("Icon button"); implicitWidth: 48; implicitHeight: 48; background: Rectangle { color: root.hovered ? Theme.p.surfaceVariant : "transparent"; radius: 24; border.color: root.activeFocus ? Theme.p.focusRing : "transparent" } contentItem: Image { source: root.iconSource; sourceSize.width: 22; sourceSize.height: 22; fillMode: Image.PreserveAspectFit } TapHandler { onTapped: root.clicked() } }
+
+Control {
+    id: root
+
+    property string iconSource: ""
+    property bool active: false
+    signal clicked()
+
+    Accessible.role: Accessible.Button
+    Accessible.name: qsTr("Activate icon")
+    Accessible.description: qsTr("Icon-only action button")
+    implicitWidth: Spacing.xxl
+    implicitHeight: Spacing.xxl
+
+    background: Rectangle {
+        radius: Spacing.lg
+        color: root.hovered || root.activeFocus ? Theme.p.surfaceFaint : "transparent"
+        border.width: Theme.highContrast || root.activeFocus ? 1 : 0
+        border.color: root.active ? Theme.p.accent : Theme.p.divider
+    }
+
+    contentItem: Image {
+        source: root.iconSource
+        sourceSize.width: Spacing.lg
+        sourceSize.height: Spacing.lg
+        fillMode: Image.PreserveAspectFit
+        opacity: root.enabled ? 1 : 0.4
+    }
+
+    TapHandler { onTapped: root.clicked() }
+}

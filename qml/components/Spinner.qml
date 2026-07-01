@@ -1,6 +1,15 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQuick.Accessibility
 import com.mukei.theme
-Item { id: root; property string title: "Spinner"; property string text: ""; implicitWidth: 320; implicitHeight: 56; Accessible.role: Accessible.StaticText; Accessible.name: title; Rectangle { anchors.fill: parent; radius: Theme.radiusMd; color: Theme.p.surface; border.color: Theme.p.surfaceVariant } Text { anchors.centerIn: parent; text: root.text.length ? root.text : root.title; color: Theme.p.inkPrimary; font: Type.bodyUI } }
+
+Item {
+    id: root
+    Accessible.role: Accessible.StaticText
+    Accessible.name: qsTr("Loading")
+    Accessible.description: qsTr("Progress spinner")
+    implicitWidth: Spacing.xl
+    implicitHeight: Spacing.xl
+    Rectangle { anchors.fill: parent; radius: width / 2; color: "transparent"; border.width: 2; border.color: Theme.p.accent; opacity: Theme.reduceMotion ? 0.6 : 1 }
+    RotationAnimator on rotation { running: visible && !Theme.reduceMotion; loops: Animation.Infinite; from: 0; to: 360; duration: 1200 }
+}

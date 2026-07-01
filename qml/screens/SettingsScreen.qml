@@ -1,7 +1,14 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQuick.Accessibility
 import com.mukei.theme
 import "../components"
-Page { id: root; title: qsTr("Settings"); background: Rectangle { color: Theme.p.background } ColumnLayout { anchors.fill: parent; anchors.margins: Spacing.xl; spacing: Spacing.lg; Text { text: root.title; color: Theme.p.inkPrimary; font: Type.h1; wrapMode: Text.Wrap } Text { text: qsTr("Local-first, private, editorial interface scaffold."); color: Theme.p.inkSecondary; font: Type.bodyUI; wrapMode: Text.Wrap } PrimaryButton { text: qsTr("Continue") } } }
+
+Page {
+    id: root
+    background: Rectangle { color: Theme.p.background }
+    Accessible.role: Accessible.Pane
+    Accessible.name: qsTr("Settings")
+    Accessible.description: qsTr("General · Privacy · Storage · About")
+    ColumnLayout { anchors.fill: parent; anchors.margins: Spacing.lg; spacing: Spacing.md; Text { Layout.fillWidth: true; text: qsTr("Settings"); color: Theme.p.inkPrimary; wrapMode: Text.Wrap; Component.onCompleted: Type.apply(this, Type.h1) } Text { Layout.fillWidth: true; text: qsTr("General · Privacy · Storage · About"); color: Theme.p.inkSecondary; wrapMode: Text.Wrap; Component.onCompleted: Type.apply(this, Type.bodyUI) } PrimaryButton { text: qsTr("Continue") } GhostButton { text: qsTr("Close") } }
+}

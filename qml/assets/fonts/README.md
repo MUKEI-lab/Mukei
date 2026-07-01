@@ -1,1 +1,1 @@
-These 13 placeholder files document the OFL font payload required by UXB §11.5. Replace with upstream SIL Open Font License TTFs for production builds.
+These placeholder files document the bundled SIL Open Font License font payload required by UXB v2.1. Replace them with upstream TTF binaries for production packaging.

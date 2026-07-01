@@ -1,6 +1,19 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQuick.Accessibility
 import com.mukei.theme
-Item { id: root; property string title: "ToastNotification"; property string text: ""; implicitWidth: 320; implicitHeight: 56; Accessible.role: Accessible.StaticText; Accessible.name: title; Rectangle { anchors.fill: parent; radius: Theme.radiusMd; color: Theme.p.surface; border.color: Theme.p.surfaceVariant } Text { anchors.centerIn: parent; text: root.text.length ? root.text : root.title; color: Theme.p.inkPrimary; font: Type.bodyUI } }
+
+Popup {
+    id: root
+    property string message: ""
+    y: Spacing.lg
+    modal: false
+    focus: false
+    closePolicy: Popup.NoAutoClose
+    Accessible.role: Accessible.AlertMessage
+    Accessible.name: message
+    Accessible.description: qsTr("Toast notification")
+    Timer { interval: Motion.toastDismiss; running: root.opened; onTriggered: root.close() }
+    background: Rectangle { color: Theme.p.surface; radius: Spacing.sm; border.width: Theme.highContrast ? 1 : 0; border.color: Theme.p.divider }
+    contentItem: Text { text: root.message; color: Theme.p.inkPrimary; Component.onCompleted: Type.apply(this, Type.bodyUI) }
+}

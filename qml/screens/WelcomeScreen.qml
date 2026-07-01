@@ -1,7 +1,17 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQuick.Accessibility
 import com.mukei.theme
 import "../components"
-Page { id: root; title: qsTr("Welcome to Mukei"); background: Rectangle { color: Theme.p.background } ColumnLayout { anchors.fill: parent; anchors.margins: Spacing.xl; spacing: Spacing.lg; Text { text: root.title; color: Theme.p.inkPrimary; font: Type.h1; wrapMode: Text.Wrap } Text { text: qsTr("Local-first, private, editorial interface scaffold."); color: Theme.p.inkSecondary; font: Type.bodyUI; wrapMode: Text.Wrap } PrimaryButton { text: qsTr("Continue") } } }
+
+Page {
+    id: root
+    signal getStarted()
+    background: Rectangle { color: Theme.p.background }
+    Accessible.role: Accessible.Pane
+    Accessible.name: qsTr("Welcome screen")
+    Accessible.description: qsTr("Introduction to private on-device AI")
+    ColumnLayout { anchors.fill: parent; anchors.margins: Spacing.xl; spacing: Spacing.xl; Item { Layout.preferredHeight: Spacing.huge } Text { text: qsTr("Your Private AI,
+On Your Device."); color: Theme.p.inkPrimary; wrapMode: Text.Wrap; Component.onCompleted: Type.apply(this, Type.display) } Text { text: qsTr("No cloud. No subscriptions.
+No data leaves your phone."); color: Theme.p.inkSecondary; wrapMode: Text.Wrap; Component.onCompleted: Type.apply(this, Type.bodyUI) } Text { text: qsTr("🔒 Encrypted locally with your device."); color: Theme.p.accent; Component.onCompleted: Type.apply(this, Type.bodySmall) } Item { Layout.fillHeight: true } PrimaryButton { Layout.fillWidth: true; text: qsTr("Get Started"); onClicked: root.getStarted() } }
+}

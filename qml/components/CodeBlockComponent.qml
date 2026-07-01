@@ -1,6 +1,21 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQuick.Accessibility
 import com.mukei.theme
-Item { id: root; property string title: "CodeBlockComponent"; property string text: ""; implicitWidth: 320; implicitHeight: 56; Accessible.role: Accessible.StaticText; Accessible.name: title; Rectangle { anchors.fill: parent; radius: Theme.radiusMd; color: Theme.p.surface; border.color: Theme.p.surfaceVariant } Text { anchors.centerIn: parent; text: root.text.length ? root.text : root.title; color: Theme.p.inkPrimary; font: Type.bodyUI } }
+
+Flickable {
+    id: root
+    property string code: ""
+    property string language: ""
+    LayoutMirroring.enabled: false
+    Accessible.role: Accessible.StaticText
+    Accessible.name: qsTr("Code block")
+    Accessible.description: language
+    implicitHeight: Math.max(Spacing.xxl, codeText.implicitHeight + Spacing.lg)
+    contentWidth: codeText.implicitWidth + Spacing.lg
+    contentHeight: codeText.implicitHeight + Spacing.lg
+    clip: true
+    Rectangle { anchors.fill: parent; color: Theme.p.surfaceVariant; radius: Spacing.xs }
+    Text { id: codeText; x: Spacing.md; y: Spacing.md; text: root.code; color: Theme.p.inkPrimary; textFormat: Text.PlainText; Component.onCompleted: Type.apply(this, Type.code) }
+    CopyButton { anchors.top: parent.top; anchors.right: parent.right; textToCopy: root.code }
+}

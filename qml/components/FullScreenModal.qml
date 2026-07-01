@@ -1,6 +1,15 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQuick.Accessibility
 import com.mukei.theme
-Item { id: root; property string title: "FullScreenModal"; property string text: ""; implicitWidth: 320; implicitHeight: 56; Accessible.role: Accessible.StaticText; Accessible.name: title; Rectangle { anchors.fill: parent; radius: Theme.radiusMd; color: Theme.p.surface; border.color: Theme.p.surfaceVariant } Text { anchors.centerIn: parent; text: root.text.length ? root.text : root.title; color: Theme.p.inkPrimary; font: Type.bodyUI } }
+
+Page {
+    id: root
+    property alias content: body.data
+    signal backRequested()
+    background: Rectangle { color: Theme.p.background }
+    Accessible.role: Accessible.Pane
+    Accessible.name: qsTr("Full screen modal")
+    Accessible.description: qsTr("Full screen details")
+    ColumnLayout { anchors.fill: parent; anchors.margins: Spacing.lg; RowLayout { IconButton { iconSource: "qrc:/icons/back.svg"; Accessible.name: qsTr("Go back"); onClicked: root.backRequested() } Text { Layout.fillWidth: true; text: root.title; color: Theme.p.inkPrimary; Component.onCompleted: Type.apply(this, Type.h1) } } ColumnLayout { id: body; Layout.fillWidth: true; Layout.fillHeight: true; spacing: Spacing.md } }
+}

@@ -1,6 +1,11 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQuick.Accessibility
 import com.mukei.theme
-Item { id: root; property string title: "FontLoader"; property string text: ""; implicitWidth: 320; implicitHeight: 56; Accessible.role: Accessible.StaticText; Accessible.name: title; Rectangle { anchors.fill: parent; radius: Theme.radiusMd; color: Theme.p.surface; border.color: Theme.p.surfaceVariant } Text { anchors.centerIn: parent; text: root.text.length ? root.text : root.title; color: Theme.p.inkPrimary; font: Type.bodyUI } }
+
+QtObject {
+    id: root
+    signal allLoaded()
+    readonly property var fonts: ["qrc:/fonts/PlayfairDisplay-Regular.ttf", "qrc:/fonts/PlayfairDisplay-Medium.ttf", "qrc:/fonts/PlayfairDisplay-SemiBold.ttf", "qrc:/fonts/PlayfairDisplay-Bold.ttf", "qrc:/fonts/Merriweather-Regular.ttf", "qrc:/fonts/Merriweather-Italic.ttf", "qrc:/fonts/Merriweather-Bold.ttf", "qrc:/fonts/Merriweather-BoldItalic.ttf", "qrc:/fonts/Inter-Regular.ttf", "qrc:/fonts/Inter-Medium.ttf", "qrc:/fonts/Inter-SemiBold.ttf", "qrc:/fonts/JetBrainsMono-Regular.ttf", "qrc:/fonts/JetBrainsMono-Medium.ttf", "qrc:/fonts/JetBrainsMono-Bold.ttf"]
+    Component.onCompleted: root.allLoaded()
+}

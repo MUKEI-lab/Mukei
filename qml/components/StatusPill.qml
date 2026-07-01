@@ -1,6 +1,21 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQuick.Accessibility
 import com.mukei.theme
-Rectangle { id: root; property string text: ""; property string iconSource: ""; property string subtype: "ActiveTool"; radius: height/2; color: subtype === "Failure" ? Theme.p.danger : subtype === "Success" ? Theme.p.success : Theme.p.surface; border.color: Theme.p.accent; implicitHeight: 32; implicitWidth: row.implicitWidth + Spacing.md*2; Row { id: row; anchors.centerIn: parent; spacing: Spacing.xs; Image { visible: root.iconSource.length>0; source: root.iconSource; width: 16; height: 16 } Text { text: root.text; color: Theme.p.inkPrimary; font: Type.caption } } }
+
+Rectangle {
+    id: root
+    property string text: ""
+    property string iconSource: ""
+    property string subtype: "ActiveTool"
+    Accessible.role: Accessible.StaticText
+    Accessible.name: text
+    Accessible.description: qsTr("Status %1").arg(subtype)
+    radius: height / 2
+    color: subtype === "Failure" ? Theme.error : subtype === "Success" || subtype === "Network-Offline" ? Theme.success : Theme.p.surface
+    border.width: 1
+    border.color: Theme.p.accent
+    implicitHeight: Spacing.xl
+    implicitWidth: row.implicitWidth + Spacing.md
+    RowLayout { id: row; anchors.centerIn: parent; spacing: Spacing.xs; Image { visible: root.iconSource.length > 0; source: root.iconSource; Layout.preferredWidth: Spacing.md; Layout.preferredHeight: Spacing.md } Text { text: root.text; color: Theme.p.inkPrimary; Component.onCompleted: Type.apply(this, Type.caption) } }
+}

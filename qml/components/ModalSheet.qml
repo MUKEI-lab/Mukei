@@ -1,6 +1,20 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQuick.Accessibility
 import com.mukei.theme
-Item { id: root; property string title: "ModalSheet"; property string text: ""; implicitWidth: 320; implicitHeight: 56; Accessible.role: Accessible.StaticText; Accessible.name: title; Rectangle { anchors.fill: parent; radius: Theme.radiusMd; color: Theme.p.surface; border.color: Theme.p.surfaceVariant } Text { anchors.centerIn: parent; text: root.text.length ? root.text : root.title; color: Theme.p.inkPrimary; font: Type.bodyUI } }
+
+Popup {
+    id: root
+    property alias content: contentHost.data
+    modal: true
+    focus: true
+    width: parent ? parent.width : Spacing.huge * 4
+    height: Math.min(contentHost.implicitHeight + Spacing.xl, parent ? parent.height * 0.8 : Spacing.huge * 6)
+    y: parent ? parent.height - height : 0
+    background: Rectangle { color: Theme.p.surface; radius: Spacing.md }
+    Overlay.modal: Rectangle { color: Theme.overlay }
+    contentItem: Item { ColumnLayout { id: contentHost; anchors.fill: parent; anchors.margins: Spacing.lg; spacing: Spacing.md } }
+    Accessible.role: Accessible.Pane
+    Accessible.name: qsTr("Modal sheet")
+    Accessible.description: qsTr("Temporary action sheet")
+}

@@ -1,6 +1,17 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQuick.Accessibility
 import com.mukei.theme
-Item { id: root; property string title: "ThinkingAccordion"; property string text: ""; implicitWidth: 320; implicitHeight: 56; Accessible.role: Accessible.StaticText; Accessible.name: title; Rectangle { anchors.fill: parent; radius: Theme.radiusMd; color: Theme.p.surface; border.color: Theme.p.surfaceVariant } Text { anchors.centerIn: parent; text: root.text.length ? root.text : root.title; color: Theme.p.inkPrimary; font: Type.bodyUI } }
+
+Control {
+    id: root
+    property string text: ""
+    property bool expanded: false
+    Accessible.role: Accessible.Button
+    Accessible.name: expanded ? qsTr("Collapse thinking") : qsTr("Expand thinking")
+    Accessible.description: qsTr("Mukei reasoning summary")
+    implicitHeight: column.implicitHeight + Spacing.md
+    background: Rectangle { color: Theme.p.surfaceFaint; radius: Spacing.xs; border.width: Theme.highContrast ? 1 : 0; border.color: Theme.p.divider }
+    contentItem: ColumnLayout { id: column; spacing: Spacing.xs; RowLayout { Image { source: root.expanded ? "qrc:/icons/collapse.svg" : "qrc:/icons/expand.svg"; Layout.preferredWidth: Spacing.md; Layout.preferredHeight: Spacing.md } Text { text: qsTr("Thinking") ; color: Theme.p.inkSecondary; Component.onCompleted: Type.apply(this, Type.caption) } } Text { visible: root.expanded; text: root.text; color: Theme.p.inkSecondary; wrapMode: Text.Wrap; Component.onCompleted: Type.apply(this, Type.caption) } }
+    TapHandler { onTapped: root.expanded = !root.expanded }
+}

@@ -1,6 +1,16 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQuick.Accessibility
 import com.mukei.theme
-Item { id: root; property string title: "StreamingCaret"; property string text: ""; implicitWidth: 320; implicitHeight: 56; Accessible.role: Accessible.StaticText; Accessible.name: title; Rectangle { anchors.fill: parent; radius: Theme.radiusMd; color: Theme.p.surface; border.color: Theme.p.surfaceVariant } Text { anchors.centerIn: parent; text: root.text.length ? root.text : root.title; color: Theme.p.inkPrimary; font: Type.bodyUI } }
+
+Text {
+    id: root
+    property bool finalized: false
+    text: finalized ? qsTr("🎯") : qsTr("▌")
+    color: Theme.p.accent
+    Accessible.role: Accessible.StaticText
+    Accessible.name: finalized ? qsTr("Response complete") : qsTr("Mukei is typing")
+    Accessible.description: qsTr("Streaming caret")
+    Component.onCompleted: Type.apply(this, Type.bodyUI)
+    SequentialAnimation on opacity { running: !root.finalized && !Theme.reduceMotion; loops: Animation.Infinite; NumberAnimation { to: 0.5; duration: Motion.toolPulse / 2 } NumberAnimation { to: 1; duration: Motion.toolPulse / 2 } }
+}

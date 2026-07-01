@@ -8,6 +8,7 @@
     <file alias="fonts/JetBrainsMono-Medium.ttf">assets/fonts/JetBrainsMono-Medium.ttf</file>
     <file alias="fonts/JetBrainsMono-Regular.ttf">assets/fonts/JetBrainsMono-Regular.ttf</file>
     <file alias="fonts/Merriweather-Bold.ttf">assets/fonts/Merriweather-Bold.ttf</file>
+    <file alias="fonts/Merriweather-BoldItalic.ttf">assets/fonts/Merriweather-BoldItalic.ttf</file>
     <file alias="fonts/Merriweather-Italic.ttf">assets/fonts/Merriweather-Italic.ttf</file>
     <file alias="fonts/Merriweather-Regular.ttf">assets/fonts/Merriweather-Regular.ttf</file>
     <file alias="fonts/PlayfairDisplay-Bold.ttf">assets/fonts/PlayfairDisplay-Bold.ttf</file>
@@ -43,10 +44,12 @@
     <file alias="icons/theme-auto.svg">assets/icons/theme-auto.svg</file>
     <file alias="icons/view.svg">assets/icons/view.svg</file>
     <file>components/AIMessageBubble.qml</file>
+    <file>components/BranchSwitcherSheet.qml</file>
     <file>components/ChatComposer.qml</file>
     <file>components/ChatTimelineEvent.qml</file>
     <file>components/CodeBlockComponent.qml</file>
     <file>components/ConfirmationDialog.qml</file>
+    <file>components/ConversationList.qml</file>
     <file>components/CopyButton.qml</file>
     <file>components/DestructiveButton.qml</file>
     <file>components/DestructiveConfirmDialog.qml</file>
@@ -61,8 +64,11 @@
     <file>components/NetworkBanner.qml</file>
     <file>components/PrimaryButton.qml</file>
     <file>components/ProgressBar.qml</file>
+    <file>components/PromptCard.qml</file>
     <file>components/RAGChunkCard.qml</file>
+    <file>components/SearchField.qml</file>
     <file>components/SecondaryButton.qml</file>
+    <file>components/SettingsTextField.qml</file>
     <file>components/SkeletonLoader.qml</file>
     <file>components/Spinner.qml</file>
     <file>components/StatusPill.qml</file>
@@ -86,22 +92,22 @@
     <file>screens/qmldir</file>
     <file>tests/tst_AIBubbleReaderWash.qml</file>
     <file>tests/tst_AccessibleNamesExist.qml</file>
-    <file>tests/tst_AccessibleReadingOrder.qml</file>
     <file>tests/tst_AnnouncementBatching.qml</file>
     <file>tests/tst_BubbleFooterDensity.qml</file>
-    <file>tests/tst_ChatScreen.qml</file>
     <file>tests/tst_ComposerMultiline.qml</file>
-    <file>tests/tst_FirstRunCanonicalPath.qml</file>
-    <file>tests/tst_FocusRing.qml</file>
+    <file>tests/tst_DestructiveConfirmTwoTap.qml</file>
+    <file>tests/tst_DrawerSwipe.qml</file>
     <file>tests/tst_FontScaleExtreme.qml</file>
     <file>tests/tst_HeaderChromeCompact.qml</file>
-    <file>tests/tst_HighContrast.qml</file>
-    <file>tests/tst_MessageBubble.qml</file>
+    <file>tests/tst_LowStimulationModeAggregate.qml</file>
     <file>tests/tst_PromptCardFillOnly.qml</file>
     <file>tests/tst_RTLMirror.qml</file>
     <file>tests/tst_ScreenContractMatrix.qml</file>
+    <file>tests/tst_SummaryFirstRendering.qml</file>
     <file>tests/tst_TabOrder.qml</file>
+    <file>tests/tst_ThemeHexLock.qml</file>
     <file>tests/tst_ToolPillInTimeline.qml</file>
+    <file>tests/tst_TypeScale.qml</file>
     <file>theme/Motion.qml</file>
     <file>theme/Spacing.qml</file>
     <file>theme/Theme.qml</file>

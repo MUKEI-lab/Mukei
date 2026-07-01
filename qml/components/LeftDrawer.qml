@@ -1,6 +1,15 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQuick.Accessibility
 import com.mukei.theme
-Item { id: root; property string title: "LeftDrawer"; property string text: ""; implicitWidth: 320; implicitHeight: 56; Accessible.role: Accessible.StaticText; Accessible.name: title; Rectangle { anchors.fill: parent; radius: Theme.radiusMd; color: Theme.p.surface; border.color: Theme.p.surfaceVariant } Text { anchors.centerIn: parent; text: root.text.length ? root.text : root.title; color: Theme.p.inkPrimary; font: Type.bodyUI } }
+
+Drawer {
+    id: root
+    width: Type.compact ? Spacing.huge * 3 - Spacing.xs : Spacing.huge * 3 + Spacing.xl
+    edge: Qt.LeftEdge
+    Accessible.role: Accessible.Pane
+    Accessible.name: qsTr("Conversation drawer")
+    Accessible.description: qsTr("New chat, conversation list, and settings")
+    background: Rectangle { color: Theme.p.surface; border.width: Theme.highContrast ? 1 : 0; border.color: Theme.p.divider }
+    ColumnLayout { anchors.fill: parent; anchors.margins: Spacing.md; spacing: Spacing.md; PrimaryButton { text: qsTr("New Chat") } SearchField { Layout.fillWidth: true } ConversationList { Layout.fillWidth: true; Layout.fillHeight: true } GhostButton { text: qsTr("Open Settings") } }
+}
