@@ -133,7 +133,20 @@ opt-level = "z"
 lto       = "fat"
 panic     = "unwind"          # REQUIRED — inherited but pinned explicitly
 
-# Release hardening profile with additional security flags
+# Release hardening profile with additional security flags.
+#
+# NOTE: the previous revision on the security branch declared
+#   rustflags = ["-C", "target-feature=+stack-protector-all",
+#                "-C", "link-arg=-Wl,-z,relro,-z,now"]
+# inline here. That requires the unstable `profile-rustflags` Cargo
+# feature (nightly-only, RFC 3128), which fails `cargo check` on stable
+# for every workspace consumer — breaking CI on `main`.
+#
+# The same hardening flags now live in `.cargo/config.toml` under
+# `[target.'cfg(all(target_arch = "aarch64", target_os = "android"))']`
+# so they only activate for the Android release build (the surface
+# actually shipped to end users). Desktop / sandbox builds remain
+# stable-Cargo-friendly.
 [profile.release-hardening]
 inherits         = "release"
 lto              = "fat"
@@ -141,5 +154,3 @@ codegen-units    = 1
 panic            = "unwind"
 strip            = "symbols"  # Keep some symbols for debugging
 opt-level        = 3
-# Stack protector and RELRO flags for enhanced security
-rustflags        = ["-C", "target-feature=+stack-protector-all", "-C", "link-arg=-Wl,-z,relro,-z,now"]
