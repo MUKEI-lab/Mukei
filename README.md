@@ -76,7 +76,7 @@ Three crates, one direction of dependency. `mukei-core` never links Qt — that 
 | **llama.cpp integration** | ✅ Prebuilt path merged | Real load lives in the bridge; the vendored/prebuilt `libllama.a` per-ABI pipeline is now merged into `main` |
 | **Gemma 4 downloader** | ✅ Wired | Commit-pinned HF URLs, full-file SHA-256 verify, resumable, 416-restart safe |
 | **Candle MiniLM embedder** | ✅ Verified on main | Default build still uses the deterministic mock embedder, but the real candle path now compiles and tests cleanly under `--all-features` after the `half = =2.4.1` compatibility repin |
-| **QML editorial-luxury UI** | ⏳ Out of scope for this repo | Tracked in the UX Brief |
+| **QML editorial-luxury UI** | 🟡 Scaffold on `codex/create-qml-directory-structure-and-files` | 10 screens + 34 components + 4 theme singletons; real SIL OFL variable fonts and 27 unique Phosphor icons; `qml-check` CI enforces qmllint / SVG uniqueness / TTF magic / DDG regression / cmake configure |
 
 ---
 

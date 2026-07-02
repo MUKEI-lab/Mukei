@@ -1,3 +1,34 @@
 # Working notes from the documentation refresh sweep.
 # These files are intentionally per-checkout and must never be committed.
 .docs-refresh-notes.md
+
+# ---------------------------------------------------------------------------
+# Qt / QML build artefacts (added with the QML scaffold on this branch).
+# The `qml/` sub-project produces these on any cmake configure/build run.
+# ---------------------------------------------------------------------------
+build/
+build-*/
+qml/build/
+qml/build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+compile_commands.json
+
+# Qt moc / rcc / uic generated sources
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+
+# QML cache / compiled bytecode
+*.qmlc
+*.jsc
+
+# IDE noise
+.qtc_clangd/
+.vscode/
+.idea/
+*.swp

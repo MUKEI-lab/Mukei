@@ -1,0 +1,61 @@
+<RCC>
+  <qresource prefix="/">
+    <!--
+      Non-QML runtime assets only. QML files are declared to
+      `qt_add_qml_module` in CMakeLists.txt so they resolve through the
+      `com.mukei.app` URI (and QML tooling / qmlcachegen sees them). If
+      QML files were duplicated here they would collide with the URI-based
+      registrations, so this file is deliberately narrow.
+    -->
+
+    <!-- ============================================================
+         Fonts (SIL Open Font License 1.1, variable-axis)
+         Each family ships upright + italic; every weight the UX Brief
+         references is reachable through the `wght` variation axis.
+         See assets/fonts/README.md for attribution.
+    ============================================================ -->
+    <file alias="fonts/PlayfairDisplay-Variable.ttf">assets/fonts/PlayfairDisplay-Variable.ttf</file>
+    <file alias="fonts/PlayfairDisplay-Italic-Variable.ttf">assets/fonts/PlayfairDisplay-Italic-Variable.ttf</file>
+    <file alias="fonts/Merriweather-Variable.ttf">assets/fonts/Merriweather-Variable.ttf</file>
+    <file alias="fonts/Merriweather-Italic-Variable.ttf">assets/fonts/Merriweather-Italic-Variable.ttf</file>
+    <file alias="fonts/Inter-Variable.ttf">assets/fonts/Inter-Variable.ttf</file>
+    <file alias="fonts/Inter-Italic-Variable.ttf">assets/fonts/Inter-Italic-Variable.ttf</file>
+    <file alias="fonts/JetBrainsMono-Variable.ttf">assets/fonts/JetBrainsMono-Variable.ttf</file>
+    <file alias="fonts/JetBrainsMono-Italic-Variable.ttf">assets/fonts/JetBrainsMono-Italic-Variable.ttf</file>
+    <file>assets/fonts/README.md</file>
+
+    <!-- ============================================================
+         Icons (Phosphor Icons v2.0.8, MIT license)
+         27 semantically unique glyphs, viewBox 0 0 256 256,
+         `fill="currentColor"` so they respect the QML palette.
+         Upstream: https://github.com/phosphor-icons/core
+    ============================================================ -->
+    <file alias="icons/active-dot.svg">assets/icons/active-dot.svg</file>
+    <file alias="icons/attach.svg">assets/icons/attach.svg</file>
+    <file alias="icons/back.svg">assets/icons/back.svg</file>
+    <file alias="icons/branch.svg">assets/icons/branch.svg</file>
+    <file alias="icons/chat.svg">assets/icons/chat.svg</file>
+    <file alias="icons/check.svg">assets/icons/check.svg</file>
+    <file alias="icons/chip.svg">assets/icons/chip.svg</file>
+    <file alias="icons/collapse.svg">assets/icons/collapse.svg</file>
+    <file alias="icons/copy.svg">assets/icons/copy.svg</file>
+    <file alias="icons/delete.svg">assets/icons/delete.svg</file>
+    <file alias="icons/done-target.svg">assets/icons/done-target.svg</file>
+    <file alias="icons/edit.svg">assets/icons/edit.svg</file>
+    <file alias="icons/error.svg">assets/icons/error.svg</file>
+    <file alias="icons/expand.svg">assets/icons/expand.svg</file>
+    <file alias="icons/export.svg">assets/icons/export.svg</file>
+    <file alias="icons/file.svg">assets/icons/file.svg</file>
+    <file alias="icons/lock.svg">assets/icons/lock.svg</file>
+    <file alias="icons/memory.svg">assets/icons/memory.svg</file>
+    <file alias="icons/network-off.svg">assets/icons/network-off.svg</file>
+    <file alias="icons/network-on.svg">assets/icons/network-on.svg</file>
+    <file alias="icons/regenerate.svg">assets/icons/regenerate.svg</file>
+    <file alias="icons/search.svg">assets/icons/search.svg</file>
+    <file alias="icons/send.svg">assets/icons/send.svg</file>
+    <file alias="icons/settings.svg">assets/icons/settings.svg</file>
+    <file alias="icons/stop.svg">assets/icons/stop.svg</file>
+    <file alias="icons/theme-auto.svg">assets/icons/theme-auto.svg</file>
+    <file alias="icons/view.svg">assets/icons/view.svg</file>
+  </qresource>
+</RCC>
