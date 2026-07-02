@@ -25,8 +25,9 @@ use mukei_core::guard::{callback_with_guard, CallbackGuard, Inner};
 let inner = Inner::new();
 let ptr = Arc::into_raw(Arc::clone(&inner));
 let snapshot = inner.generation.load(Ordering::Acquire);
+let instance_id = inner.instance_id();
 
-let result: Result<i32, GuardError> = callback_with_guard!(ptr, snapshot, {
+let result: Result<i32, GuardError> = callback_with_guard!(ptr, snapshot, instance_id, {
     // Your callback logic here
     Ok::<_, GuardError>(42)
 });

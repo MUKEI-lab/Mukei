@@ -164,6 +164,7 @@ pub extern "C" fn mukei_send_message(
     // bound to a prior generation is logically cancelled (see
     // `mukei_callback_guard_bump_generation`).
     let generation = mukei_callback_guard_bump_generation(guard_ptr);
+    let instance_id = mukei_callback_guard_instance_id(guard_ptr);
     let context_addr = context_ptr as usize;
     let guard_addr = guard_ptr as usize;
 
@@ -178,10 +179,11 @@ pub extern "C" fn mukei_send_message(
         // Single dispatch — `callback_with_guard!` enforces:
         //   1. generation match,
         //   2. `catch_unwind` so a panic does NOT cross the FFI boundary.
-        let result: Result<(), GuardError> = callback_with_guard!(guard_ptr_local, generation, {
-            callback(context_ptr_local, generation, payload.as_ptr());
-            Ok::<(), GuardError>(())
-        });
+        let result: Result<(), GuardError> =
+            callback_with_guard!(guard_ptr_local, generation, instance_id, {
+                callback(context_ptr_local, generation, payload.as_ptr());
+                Ok::<(), GuardError>(())
+            });
 
         if let Err(err) = result {
             tracing::warn!(?err, "ffi-shim callback dropped (guard expired or panic)");

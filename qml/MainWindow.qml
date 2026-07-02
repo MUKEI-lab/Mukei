@@ -18,7 +18,11 @@ ApplicationWindow {
 
     Behavior on color {
         enabled: !Theme.reduceMotion
-        ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
+        ColorAnimation {
+                duration: Motion.themeCrossFade
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Motion.enter
+            }
     }
 
     LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft

@@ -12,7 +12,7 @@ Rectangle {
     Accessible.role: Accessible.StaticText
     Accessible.name: qsTr("Loading placeholder")
     Accessible.description: qsTr("Content is loading")
-    radius: Spacing.xs
+    radius: Theme.radiusSm
     color: Theme.p.surfaceVariant
     opacity: 0.55
     clip: true
@@ -49,6 +49,10 @@ Rectangle {
 
     Behavior on opacity {
         enabled: !Theme.reduceMotion
-        NumberAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
+        NumberAnimation {
+                duration: Motion.themeCrossFade
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Motion.enter
+            }
     }
 }

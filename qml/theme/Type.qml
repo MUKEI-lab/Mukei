@@ -14,7 +14,8 @@ QtObject {
     function fontSpec(family, size, lineHeight, weight, italic) {
         return {
             "family": family,
-            "pixelSize": px(size),
+            "size": size,
+            "pixelSize": size,
             "lineHeight": lineHeight,
             "weight": weight,
             "italic": italic === true
@@ -22,12 +23,12 @@ QtObject {
     }
 
     function apply(textItem, token) {
-        textItem.font.family = token.family;
-        textItem.font.pixelSize = token.pixelSize;
-        textItem.font.weight = token.weight;
-        textItem.font.italic = token.italic;
+        textItem.font.family = Qt.binding(function() { return token.family; });
+        textItem.font.pixelSize = Qt.binding(function() { return px(token.size); });
+        textItem.font.weight = Qt.binding(function() { return token.weight; });
+        textItem.font.italic = Qt.binding(function() { return token.italic; });
         textItem.lineHeightMode = Text.ProportionalHeight;
-        textItem.lineHeight = token.lineHeight;
+        textItem.lineHeight = Qt.binding(function() { return token.lineHeight; });
     }
 
     readonly property var display: fontSpec("Playfair Display", 32, 1.20, Font.DemiBold, false)

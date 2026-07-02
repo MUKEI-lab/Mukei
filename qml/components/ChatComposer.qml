@@ -19,7 +19,7 @@ FocusScope {
 
     Rectangle {
         anchors.fill: parent
-        radius: Spacing.sm
+        radius: Theme.radiusSm
         color: Theme.p.surface
         border.width: 2
         border.color: textArea.activeFocus ? Theme.p.accent : "transparent"

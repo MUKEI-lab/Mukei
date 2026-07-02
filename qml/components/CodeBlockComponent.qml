@@ -18,7 +18,7 @@ Flickable {
     Rectangle {
         anchors.fill: parent
         color: Theme.p.surfaceVariant
-        radius: Spacing.xs
+        radius: Theme.radiusSm
     }
     Text {
         id: codeText

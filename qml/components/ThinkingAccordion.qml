@@ -13,7 +13,7 @@ Control {
     implicitHeight: column.implicitHeight + Spacing.md
     background: Rectangle {
         color: Theme.p.surfaceFaint
-        radius: Spacing.xs
+        radius: Theme.radiusSm
         border.width: Theme.highContrast ? 1 : 0
         border.color: Theme.p.divider
     }

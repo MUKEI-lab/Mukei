@@ -43,7 +43,7 @@ Page {
 
         Rectangle {
             Layout.fillWidth: true
-            radius: Spacing.sm
+            radius: Theme.radiusSm
             color: Theme.p.surface
             implicitHeight: installedColumn.implicitHeight + Spacing.md * 2
             ColumnLayout {
@@ -88,7 +88,7 @@ Page {
 
         Rectangle {
             Layout.fillWidth: true
-            radius: Spacing.sm
+            radius: Theme.radiusSm
             color: Theme.p.surfaceFaint
             implicitHeight: availableColumn.implicitHeight + Spacing.md * 2
             ColumnLayout {

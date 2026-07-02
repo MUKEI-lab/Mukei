@@ -23,7 +23,8 @@ Control {
             enabled: !Theme.reduceMotion
             NumberAnimation {
                 duration: Motion.progressValue
-                easing.type: Easing.OutCubic
+                easing.type: Easing.BezierSpline
+            easing.bezierCurve: Motion.enter
             }
         }
     }

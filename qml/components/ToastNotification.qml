@@ -17,7 +17,7 @@ Popup {
     }
     background: Rectangle {
         color: Theme.p.surface
-        radius: Spacing.sm
+        radius: Theme.radiusSm
         border.width: Theme.highContrast ? 1 : 0
         border.color: Theme.p.divider
     }

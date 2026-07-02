@@ -19,10 +19,11 @@ fn callback_guard_prevents_use_after_free() {
 
     // Capture snapshot before release
     let snapshot = inner.generation.load(Ordering::Acquire);
+    let instance_id = inner.instance_id();
 
     // Verify callback works before release
     let result: Result<i32, GuardError> =
-        callback_with_guard!(ptr, snapshot, { Ok::<_, GuardError>(42) });
+        callback_with_guard!(ptr, snapshot, instance_id, { Ok::<_, GuardError>(42) });
     assert_eq!(result.unwrap(), 42);
 
     // Release the guard (simulating QObject destruction)
@@ -40,9 +41,10 @@ fn catch_unwind_contains_panic_at_ffi_boundary() {
     let inner = Inner::new();
     let ptr = Arc::into_raw(Arc::clone(&inner));
     let snapshot = inner.generation.load(Ordering::Acquire);
+    let instance_id = inner.instance_id();
 
     // Simulate a callback that panics
-    let result: Result<i32, GuardError> = callback_with_guard!(ptr, snapshot, {
+    let result: Result<i32, GuardError> = callback_with_guard!(ptr, snapshot, instance_id, {
         panic!("Simulated panic in FFI callback");
     });
 
@@ -103,13 +105,15 @@ fn generation_mismatch_detected_on_tombstone() {
 
     // Capture stale snapshot
     let stale_snapshot = inner.generation.load(Ordering::Acquire);
+    let instance_id = inner.instance_id();
 
     // Tombstone the guard
     inner.tombstone();
 
     // Attempt callback with stale snapshot
-    let result: Result<i32, GuardError> =
-        callback_with_guard!(ptr, stale_snapshot, { Ok::<_, GuardError>(99) });
+    let result: Result<i32, GuardError> = callback_with_guard!(ptr, stale_snapshot, instance_id, {
+        Ok::<_, GuardError>(99)
+    });
 
     // Should fail with GenerationMismatch
     assert!(matches!(
@@ -129,13 +133,14 @@ fn bump_allows_rebind_rejects_old_snapshots() {
 
     // Capture old snapshot
     let old_snapshot = inner.generation.load(Ordering::Acquire);
+    let instance_id = inner.instance_id();
 
     // Bump generation (simulating rebind)
     let new_snapshot = inner.bump();
 
     // Old snapshot should fail
     let old_result: Result<i32, GuardError> =
-        callback_with_guard!(ptr, old_snapshot, { Ok::<_, GuardError>(1) });
+        callback_with_guard!(ptr, old_snapshot, instance_id, { Ok::<_, GuardError>(1) });
     assert!(matches!(
         old_result.unwrap_err(),
         GuardError::GenerationMismatch { .. }
@@ -143,7 +148,7 @@ fn bump_allows_rebind_rejects_old_snapshots() {
 
     // New snapshot should succeed
     let new_result: Result<i32, GuardError> =
-        callback_with_guard!(ptr, new_snapshot, { Ok::<_, GuardError>(2) });
+        callback_with_guard!(ptr, new_snapshot, instance_id, { Ok::<_, GuardError>(2) });
     assert_eq!(new_result.unwrap(), 2);
 
     // Clean up
@@ -157,7 +162,7 @@ fn invalid_guard_always_returns_released() {
     assert!(!invalid.is_valid());
 
     let result: Result<i32, GuardError> =
-        callback_with_guard!(std::ptr::null(), 1u64, { Ok::<_, GuardError>(42) });
+        callback_with_guard!(std::ptr::null(), 1u64, 1u64, { Ok::<_, GuardError>(42) });
 
     assert_eq!(result.unwrap_err(), GuardError::Released);
 }

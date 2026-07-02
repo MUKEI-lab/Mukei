@@ -49,6 +49,14 @@ pub enum GuardError {
         /// The guard's live generation at the time of dispatch.
         current: u64,
     },
+    /// The heap address was re-used for a different `Inner`.
+    #[error("callback guard instance mismatch (expected {expected}, current {current})")]
+    InstanceIdMismatch {
+        /// The `instance_id` snapshot captured when the callback was bound.
+        expected: u64,
+        /// The guard's live `instance_id` at the time of dispatch.
+        current: u64,
+    },
     /// The callback panicked while we were delivering it across the FFI
     /// boundary. The panic was caught and converted into a typed error.
     #[error("callback panicked while guarded")]
@@ -248,12 +256,16 @@ impl Inner {
 /// - `$guard_ptr` — expression evaluating to `*const Inner` (or
 ///   `std::ptr::null()` if the guard is `invalid()`).
 /// - `$snapshot` — the generation number when the callback was bound.
+/// - `$instance_id` — the process-unique identity snapshot when the
+///   callback was bound.
 /// - `$callback` — block to invoke; must return `Result<T, GuardError>`.
 ///
 /// # Returns
 /// - `Ok(T)` if generation matched and callback returned `Ok`.
 /// - `Err(GuardError::Released)` if the guard is NULL.
 /// - `Err(GuardError::GenerationMismatch)` if the guard is live but stale.
+/// - `Err(GuardError::InstanceIdMismatch)` if the heap slot was reused
+///   for a different `Inner`.
 /// - `Err(GuardError::Panic)` if the callback panicked while we were
 ///   delivering it across the FFI boundary.
 ///
@@ -264,12 +276,13 @@ impl Inner {
 /// destroyed" from "delivery panicked".
 #[macro_export]
 macro_rules! callback_with_guard {
-    ($guard_ptr:expr, $snapshot:expr, $callback:block) => {{
+    ($guard_ptr:expr, $snapshot:expr, $instance_id:expr, $callback:block) => {{
         // SAFETY: callers MUST uphold the contract documented on
         // [`CallbackGuard::from_ptr`]: `$guard_ptr` is a stable raw
         // pointer to a live `Inner` until release().
         let guard_ptr: *const $crate::guard::Inner = $guard_ptr;
         let snap: u64 = $snapshot;
+        let snap_instance_id: u64 = $instance_id;
 
         if guard_ptr.is_null() {
             Err($crate::guard::GuardError::Released)
@@ -282,9 +295,18 @@ macro_rules! callback_with_guard {
                     current,
                 })
             } else {
-                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || $callback)) {
-                    Ok(result) => result,
-                    Err(_) => Err($crate::guard::GuardError::Panic),
+                let current_instance_id = inner.instance_id();
+                if current_instance_id != snap_instance_id {
+                    Err($crate::guard::GuardError::InstanceIdMismatch {
+                        expected: snap_instance_id,
+                        current: current_instance_id,
+                    })
+                } else {
+                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || $callback))
+                    {
+                        Ok(result) => result,
+                        Err(_) => Err($crate::guard::GuardError::Panic),
+                    }
                 }
             }
         }
@@ -299,8 +321,8 @@ mod tests {
 
     #[test]
     fn invalid_guard_rejects() {
-        let err =
-            callback_with_guard!(std::ptr::null(), 1u64, { Ok::<_, GuardError>(42) }).unwrap_err();
+        let err = callback_with_guard!(std::ptr::null(), 1u64, 1u64, { Ok::<_, GuardError>(42) })
+            .unwrap_err();
         assert_eq!(err, GuardError::Released);
     }
 
@@ -310,8 +332,9 @@ mod tests {
         let ptr = Arc::into_raw(Arc::clone(&inner));
 
         let snap = inner.generation.load(Ordering::Acquire);
+        let instance_id = inner.instance_id();
         let result: Result<i32, GuardError> =
-            callback_with_guard!(ptr, snap, { Ok::<_, GuardError>(7) });
+            callback_with_guard!(ptr, snap, instance_id, { Ok::<_, GuardError>(7) });
         assert_eq!(result.unwrap(), 7);
 
         // Clean up.
@@ -326,7 +349,10 @@ mod tests {
         let stale_snap = inner.generation.load(Ordering::Acquire);
         inner.tombstone();
 
-        let err = callback_with_guard!(ptr, stale_snap, { Ok::<_, GuardError>(0) }).unwrap_err();
+        let err = callback_with_guard!(ptr, stale_snap, inner.instance_id(), {
+            Ok::<_, GuardError>(0)
+        })
+        .unwrap_err();
         assert!(matches!(err, GuardError::GenerationMismatch { .. }));
 
         unsafe { CallbackGuard::release(ptr) };
@@ -349,11 +375,17 @@ mod tests {
         );
 
         // Old snapshot now mismatches.
-        let err = callback_with_guard!(ptr, old_snap, { Ok::<_, GuardError>(0) }).unwrap_err();
+        let err = callback_with_guard!(ptr, old_snap, inner.instance_id(), {
+            Ok::<_, GuardError>(0)
+        })
+        .unwrap_err();
         assert!(matches!(err, GuardError::GenerationMismatch { .. }));
 
         // New snapshot still works.
-        let ok = callback_with_guard!(ptr, new_snap, { Ok::<_, GuardError>(99) }).unwrap();
+        let ok = callback_with_guard!(ptr, new_snap, inner.instance_id(), {
+            Ok::<_, GuardError>(99)
+        })
+        .unwrap();
         assert_eq!(ok, 99);
 
         unsafe { CallbackGuard::release(ptr) };
@@ -365,9 +397,10 @@ mod tests {
         let ptr = Arc::into_raw(Arc::clone(&inner));
         let snap = inner.generation.load(Ordering::Acquire);
 
-        let result: Result<i32, GuardError> = callback_with_guard!(ptr, snap, {
-            panic!("intentional");
-        });
+        let result: Result<i32, GuardError> =
+            callback_with_guard!(ptr, snap, inner.instance_id(), {
+                panic!("intentional");
+            });
         assert_eq!(result.unwrap_err(), GuardError::Panic);
 
         unsafe { CallbackGuard::release(ptr) };
@@ -433,5 +466,19 @@ mod tests {
         assert_eq!(inner.instance_id(), id0);
         inner.tombstone();
         assert_eq!(inner.instance_id(), id0);
+    }
+
+    #[test]
+    fn instance_id_mismatch_rejects_reused_pointer() {
+        let inner = Inner::new();
+        let ptr = Arc::into_raw(Arc::clone(&inner));
+        let snap = inner.generation.load(Ordering::Acquire);
+        let snap_instance_id = inner.instance_id();
+
+        let err = callback_with_guard!(ptr, snap, snap_instance_id + 1, { Ok::<_, GuardError>(0) })
+            .unwrap_err();
+        assert!(matches!(err, GuardError::InstanceIdMismatch { .. }));
+
+        unsafe { CallbackGuard::release(ptr) };
     }
 }

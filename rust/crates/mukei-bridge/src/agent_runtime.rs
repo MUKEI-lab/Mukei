@@ -74,12 +74,53 @@ pub fn load_config(path: &Path) -> Result<MukeiConfig> {
     MukeiConfig::load_and_validate(path)
 }
 
+#[cfg(feature = "sqlcipher")]
+fn load_sqlcipher_key_from_env() -> Result<Vec<u8>> {
+    use mukei_core::error::MukeiError;
+
+    let hex = std::env::var("MUKEI_SQLCIPHER_KEY_HEX").map_err(|_| {
+        MukeiError::SafeStorageUnavailable(
+            "MUKEI_SQLCIPHER_KEY_HEX missing for sqlcipher boot".to_string(),
+        )
+    })?;
+
+    if hex.len() % 2 != 0 {
+        return Err(MukeiError::SafeStorageUnavailable(
+            "MUKEI_SQLCIPHER_KEY_HEX must contain an even number of hex digits".to_string(),
+        ));
+    }
+
+    let mut out = Vec::with_capacity(hex.len() / 2);
+    let bytes = hex.as_bytes();
+    for i in (0..bytes.len()).step_by(2) {
+        let hi = (bytes[i] as char).to_digit(16).ok_or_else(|| {
+            MukeiError::SafeStorageUnavailable(
+                "MUKEI_SQLCIPHER_KEY_HEX contains non-hex characters".to_string(),
+            )
+        })?;
+        let lo = (bytes[i + 1] as char).to_digit(16).ok_or_else(|| {
+            MukeiError::SafeStorageUnavailable(
+                "MUKEI_SQLCIPHER_KEY_HEX contains non-hex characters".to_string(),
+            )
+        })?;
+        out.push(((hi << 4) | lo) as u8);
+    }
+    Ok(out)
+}
+
 /// Open the SQLite / SQLCipher pool and apply migrations.
 #[cfg(feature = "rusqlite")]
 pub async fn open_pool(cfg: &MukeiConfig) -> Result<mukei_core::storage::DatabasePool> {
     use mukei_core::storage::{DatabasePool, Migrator, MIGRATIONS_DIR};
 
-    let pool = DatabasePool::open(&cfg.database_path)?;
+    #[cfg(feature = "sqlcipher")]
+    let pool =
+        DatabasePool::open_with_cipher_key(&cfg.database_path, load_sqlcipher_key_from_env()?)?;
+    #[cfg(not(feature = "sqlcipher"))]
+    let pool = {
+        tracing::warn!("bridge built without sqlcipher — opening database without encryption");
+        DatabasePool::open(&cfg.database_path)?
+    };
     let migrations_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../")
         .join(MIGRATIONS_DIR);

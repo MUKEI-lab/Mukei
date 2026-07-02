@@ -63,4 +63,7 @@ QtObject {
     readonly property color warning: "#F59E0B"
     readonly property color error: "#EF4444"
     readonly property color overlay: Qt.rgba(0, 0, 0, 0.4)
+    readonly property int radiusSm: 4
+    readonly property int radiusMd: 8
+    readonly property int radiusLg: 12
 }

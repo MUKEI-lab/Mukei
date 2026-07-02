@@ -22,22 +22,34 @@ Item {
             id: bubble
             Layout.fillWidth: true
             implicitHeight: message.implicitHeight + Spacing.md * 2
-            radius: Spacing.sm
+            radius: Theme.radiusSm
             color: Theme.p.surfaceVariant
             Behavior on color {
                 enabled: !Theme.reduceMotion
-                ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
+                ColorAnimation {
+                    duration: Motion.themeCrossFade
+                    easing.type: Easing.BezierSpline
+                    easing.bezierCurve: Motion.enter
+                }
             }
             opacity: 0
             scale: 0.98
             Component.onCompleted: { opacity = 1; scale = 1.0 }
             Behavior on opacity {
                 enabled: !Theme.reduceMotion
-                NumberAnimation { duration: Motion.bubbleAppear; easing.type: Easing.OutCubic }
+                NumberAnimation {
+                    duration: Motion.bubbleAppear
+                    easing.type: Easing.BezierSpline
+                    easing.bezierCurve: Motion.enter
+                }
             }
             Behavior on scale {
                 enabled: !Theme.reduceMotion
-                NumberAnimation { duration: Motion.bubbleAppear; easing.type: Easing.OutBack }
+                NumberAnimation {
+                    duration: Motion.bubbleAppear
+                    easing.type: Easing.BezierSpline
+                    easing.bezierCurve: Motion.enter
+                }
             }
             Text {
                 id: message

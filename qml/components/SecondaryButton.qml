@@ -13,17 +13,25 @@ Control {
     implicitWidth: Math.max(Spacing.huge, label.implicitWidth + Spacing.xl)
     implicitHeight: Spacing.xxl
     background: Rectangle {
-        radius: Spacing.xs
+        radius: Theme.radiusSm
         color: tapHandler.pressed ? Theme.p.surfaceFaint : "transparent"
         border.width: 1
         border.color: Theme.p.accent
         Behavior on color {
             enabled: !Theme.reduceMotion
-            ColorAnimation { duration: Motion.buttonPressTint; easing.type: Easing.OutCubic }
+            ColorAnimation {
+                duration: Motion.buttonPressTint
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Motion.enter
+            }
         }
         Behavior on border.color {
             enabled: !Theme.reduceMotion
-            ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
+            ColorAnimation {
+                duration: Motion.themeCrossFade
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Motion.enter
+            }
         }
     }
     contentItem: Text {

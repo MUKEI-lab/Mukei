@@ -38,7 +38,7 @@ Page {
                 }]
             delegate: Rectangle {
                 Layout.fillWidth: true
-                radius: Spacing.sm
+                radius: Theme.radiusSm
                 color: Theme.p.surface
                 implicitHeight: cardColumn.implicitHeight + Spacing.md * 2
                 ColumnLayout {
