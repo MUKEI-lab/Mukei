@@ -19,6 +19,13 @@ QtObject {
     property real scale: 1.0
     readonly property string scaleClass: scale > 1.5 ? "large" : "regular"
 
+    // Corner radius tokens per TRD: radiusSm=4, radiusMd=8, radiusLg=12.
+    // These are independent from Spacing tokens so spacing and radius
+    // can be tuned separately.
+    readonly property int radiusSm: 4
+    readonly property int radiusMd: 8
+    readonly property int radiusLg: 12
+
     readonly property QtObject dv: QtObject {
         readonly property color background: "#D8CABD"
         readonly property color surface: "#E8DDD0"

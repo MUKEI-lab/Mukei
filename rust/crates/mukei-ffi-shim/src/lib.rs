@@ -160,10 +160,13 @@ pub extern "C" fn mukei_send_message(
         Err(_) => return 0,
     };
 
-    // Bind the callback against a fresh generation. Any pending callback
-    // bound to a prior generation is logically cancelled (see
-    // `mukei_callback_guard_bump_generation`).
+    // Bind the callback against a fresh generation and capture the
+    // instance_id at bind time. This defeats the heap-reuse ABA window
+    // flagged in architect review GH #53: even if the allocator reuses
+    // the same address for a new Inner after release(), the new Inner
+    // will have a different instance_id so any stale snapshot is rejected.
     let generation = mukei_callback_guard_bump_generation(guard_ptr);
+    let instance_id = mukei_callback_guard_instance_id(guard_ptr);
     let context_addr = context_ptr as usize;
     let guard_addr = guard_ptr as usize;
 
@@ -177,8 +180,9 @@ pub extern "C" fn mukei_send_message(
 
         // Single dispatch — `callback_with_guard!` enforces:
         //   1. generation match,
-        //   2. `catch_unwind` so a panic does NOT cross the FFI boundary.
-        let result: Result<(), GuardError> = callback_with_guard!(guard_ptr_local, generation, {
+        //   2. instance_id match (ABA mitigation per GH #53),
+        //   3. `catch_unwind` so a panic does NOT cross the FFI boundary.
+        let result: Result<(), GuardError> = callback_with_guard!(guard_ptr_local, generation, instance_id, {
             callback(context_ptr_local, generation, payload.as_ptr());
             Ok::<(), GuardError>(())
         });

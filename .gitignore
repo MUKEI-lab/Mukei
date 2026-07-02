@@ -1,1 +1,50 @@
-Nothing needs to be added to the .gitignore file based on the provided changes. The modified file 'rust/crates/mukei-bridge/src/agent_runtime.rs' is a source code file and should not be ignored.
+```
+# Compiled and build artifacts
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.a
+*.pyc
+__pycache__/
+
+# Dependencies
+node_modules/
+venv/
+.venv/
+.env
+.env.local
+.env.*
+
+# Build directories (common for Rust projects)
+target/
+Cargo.lock
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Coverage reports
+coverage/
+htmlcov/
+.coverage
+
+# Rust specific
+**/target/
+Cargo.lock
+
+# Temporary and cache directories
+.mypy_cache/
+.pytest_cache/
+```

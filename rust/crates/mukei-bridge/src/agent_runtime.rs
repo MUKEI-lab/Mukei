@@ -32,11 +32,15 @@
 //!
 //! # Encryption-at-rest (PRD REQ-SEC-19)
 //!
-//! The [`open_pool`] function now wires `DatabasePool::open_with_cipher_key()`
+//! The [`open_pool`] function wires `DatabasePool::open_with_cipher_key()`
 //! when the `sqlcipher` feature is enabled. The unwrapped key bytes must
 //! come from the Android Keystore (or desktop keyring equivalent) — the
 //! bridge crate owns that unwrap step. On non-cipher builds, `open_pool`
 //! falls back to plaintext `DatabasePool::open()`.
+//!
+//! Callers MUST pass `Some(key_bytes)` when building with `sqlcipher`
+//! feature; passing `None` on a cipher build will panic with a clear
+//! error message since encryption is mandatory in that configuration.
 
 #![cfg_attr(
     not(feature = "rusqlite"),
@@ -83,11 +87,45 @@ pub fn load_config(path: &Path) -> Result<MukeiConfig> {
 }
 
 /// Open the SQLite / SQLCipher pool and apply migrations.
+///
+/// # Arguments
+/// * `cfg` - Configuration containing database path
+/// * `cipher_key` - Optional unwrapped cipher key bytes. Required when
+///   built with `sqlcipher` feature, ignored otherwise.
+///
+/// # Returns
+/// Returns `Err(MukeiError::DatabaseInitFailed)` if built with `sqlcipher`
+/// feature but `cipher_key` is `None`, since encryption is mandatory in
+/// that configuration.
 #[cfg(feature = "rusqlite")]
-pub async fn open_pool(cfg: &MukeiConfig) -> Result<mukei_core::storage::DatabasePool> {
+pub async fn open_pool(
+    cfg: &MukeiConfig,
+    cipher_key: Option<Vec<u8>>,
+) -> Result<mukei_core::storage::DatabasePool> {
     use mukei_core::storage::{DatabasePool, Migrator, MIGRATIONS_DIR};
 
-    let pool = DatabasePool::open(&cfg.database_path)?;
+    #[cfg(feature = "sqlcipher")]
+    let pool = {
+        let key = cipher_key.ok_or_else(|| {
+            mukei_core::error::MukeiError::DatabaseInitFailed(
+                "sqlcipher feature enabled but no cipher key provided; \
+                 encryption-at-rest is mandatory with sqlcipher build. \
+                 Wire Android Keystore unwrap in lib.rs"
+                    .to_string()
+            )
+        })?;
+        DatabasePool::open_with_cipher_key(&cfg.database_path, key)?
+    };
+
+    #[cfg(not(feature = "sqlcipher"))]
+    let pool = {
+        // Log a warning if a key was passed but we're not using it
+        if cipher_key.is_some() {
+            tracing::warn!("cipher key provided but sqlcipher feature not enabled; using plaintext SQLite");
+        }
+        DatabasePool::open(&cfg.database_path)?
+    };
+
     let migrations_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../")
         .join(MIGRATIONS_DIR);
