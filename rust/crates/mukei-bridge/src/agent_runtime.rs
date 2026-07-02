@@ -29,6 +29,14 @@
 //!
 //! All SQLite-touching paths are gated behind the `rusqlite` feature so
 //! the bridge still compiles cleanly on hosts where persistence is off.
+//!
+//! # Encryption-at-rest (PRD REQ-SEC-19)
+//!
+//! The [`open_pool`] function now wires `DatabasePool::open_with_cipher_key()`
+//! when the `sqlcipher` feature is enabled. The unwrapped key bytes must
+//! come from the Android Keystore (or desktop keyring equivalent) — the
+//! bridge crate owns that unwrap step. On non-cipher builds, `open_pool`
+//! falls back to plaintext `DatabasePool::open()`.
 
 #![cfg_attr(
     not(feature = "rusqlite"),
