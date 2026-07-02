@@ -1,13 +1,23 @@
 ```
 # Compiled and build artifacts
+*.pyc
+__pycache__/
 *.o
 *.obj
 *.exe
 *.dll
 *.so
 *.a
-*.pyc
-__pycache__/
+*.out
+*.class
+*.pyd
+*.dylib
+*.jar
+*.war
+*.zip
+*.tar.gz
+*.tar.xz
+*.tar.bz2
 
 # Dependencies
 node_modules/
@@ -17,9 +27,24 @@ venv/
 .env.local
 .env.*
 
-# Build directories (common for Rust projects)
+# Rust specific
 target/
 Cargo.lock
+**/*.rs.bk
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.swo
+*.bak
+*.~*
+
+# OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
 
 # Editors
 .vscode/
@@ -27,24 +52,29 @@ Cargo.lock
 *.swp
 *.swo
 
-# System files
-.DS_Store
-Thumbs.db
-
-# Logs and temp files
-*.log
-*.tmp
-
-# Coverage reports
+# Coverage
 coverage/
 htmlcov/
 .coverage
 
-# Rust specific
-**/target/
-Cargo.lock
-
-# Temporary and cache directories
-.mypy_cache/
+# Build systems
+build/
+dist/
+*.egg-info/
 .pytest_cache/
+.mypy_cache/
+.nyc_output/
+coverage/lcov-report/
+
+# Compression
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.Z
+*.lz
+*.lzo
 ```
