@@ -2,6 +2,11 @@ pragma Singleton
 import QtQuick
 
 QtObject {
+    // Bezier curve tokens for enter/exit animations. Use with:
+    //   easing.type: Easing.BezierSpline
+    //   easing.bezierCurve: Motion.enter (or Motion.exit)
+    // These replace hardcoded Easing.OutCubic/OutQuad literals
+    // per the "no easing literal outside Motion.qml" rule.
     readonly property var enter: [0.16, 1, 0.3, 1]
     readonly property var exit: [0.7, 0, 0.84, 0]
     readonly property int bubbleAppear: 220

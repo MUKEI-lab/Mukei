@@ -21,6 +21,14 @@ QtObject {
         };
     }
 
+    // Deprecated: apply() is a one-shot copy that does NOT react to
+    // Theme.scale changes after Component.onCompleted. New code should
+    // use live bindings directly:
+    //   font.family: Type.bodyUI.family
+    //   font.pixelSize: Type.bodyUI.pixelSize
+    //   lineHeight: Type.bodyUI.lineHeight
+    // This function remains only for backward compatibility during the
+    // migration to binding-based typography.
     function apply(textItem, token) {
         textItem.font.family = token.family;
         textItem.font.pixelSize = token.pixelSize;

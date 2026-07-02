@@ -112,6 +112,13 @@ fn validate_expression(expression: &str) -> Result<()> {
     Ok(())
 }
 
+/// Validate a math expression string against the character whitelist
+/// and allowed identifier set. Used by fuzzing harnesses and external
+/// validation layers.
+pub fn validate_math_expression(expression: &str) -> Result<()> {
+    validate_expression(expression)
+}
+
 fn extract_identifiers(expression: &str) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     let mut current = String::new();

@@ -24,7 +24,7 @@ Control {
     }
 
     background: Rectangle {
-        radius: Spacing.xs
+        radius: Theme.radiusMd
         color: Theme.error
     }
     contentItem: Text {
@@ -33,7 +33,13 @@ Control {
         color: Theme.p.background
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
-        Component.onCompleted: Type.apply(this, Type.bodyUI)
+        // Live bindings for font properties so they react to Theme.scale changes
+        font.family: Type.bodyUI.family
+        font.pixelSize: Type.bodyUI.pixelSize
+        font.weight: Type.bodyUI.weight
+        font.italic: Type.bodyUI.italic
+        lineHeightMode: Text.ProportionalHeight
+        lineHeight: Type.bodyUI.lineHeight
     }
 
     TapHandler {

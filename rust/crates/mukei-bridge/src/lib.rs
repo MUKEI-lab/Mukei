@@ -484,7 +484,30 @@ impl MukeiAgentRust {
 
             #[cfg(feature = "rusqlite")]
             {
-                let pool = match agent_runtime::open_pool(&cfg).await {
+                // Obtain cipher key if sqlcipher feature is enabled.
+                // The bridge crate owns the Android Keystore unwrap step.
+                #[cfg(feature = "sqlcipher")]
+                let cipher_key = {
+                    // TODO: Wire actual Android Keystore unwrap here.
+                    // For now, this is a placeholder that panics with a
+                    // clear message since encryption is mandatory with
+                    // sqlcipher builds. The calling code on Android must
+                    // call into the Keystore API to unwrap the key bytes
+                    // and pass them here.
+                    let key_bytes: Option<Vec<u8>> = None; // Placeholder
+                    key_bytes.or_else(|| {
+                        tracing::error!(
+                            "sqlcipher feature enabled but no cipher key available; \
+                             Android Keystore unwrap must be wired in lib.rs"
+                        );
+                        None
+                    })
+                };
+
+                #[cfg(not(feature = "sqlcipher"))]
+                let cipher_key: Option<Vec<u8>> = None;
+
+                let pool = match agent_runtime::open_pool(&cfg, cipher_key).await {
                     Ok(p) => Arc::new(p),
                     Err(e) => {
                         let code = e.error_code().to_string();
