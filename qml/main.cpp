@@ -8,6 +8,29 @@
 #include <QSGRendererInterface>
 #include <QTimer>
 #include <QVariantMap>
+#include <QClipboard>
+#include <QGuiApplication>
+
+class MukeiClipboard final : public QObject
+{
+    Q_OBJECT
+public:
+    using QObject::QObject;
+    
+    Q_INVOKABLE void setText(const QString &text)
+    {
+        QClipboard *clipboard = QGuiApplication::clipboard();
+        if (clipboard) {
+            clipboard->setText(text);
+        }
+    }
+    
+    Q_INVOKABLE QString text() const
+    {
+        QClipboard *clipboard = QGuiApplication::clipboard();
+        return clipboard ? clipboard->text() : QString();
+    }
+};
 
 class MukeiAgentStub final : public QObject
 {
@@ -107,11 +130,13 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     loadBundledFonts();
 
+    MukeiClipboard clipboard;
     MukeiAgentStub agent;
     MukeiBridgeStub bridge;
     SafRegistryStub safRegistry;
 
     QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("mukeiClipboard"), &clipboard);
     engine.rootContext()->setContextProperty(QStringLiteral("mukeiAgent"), &agent);
     engine.rootContext()->setContextProperty(QStringLiteral("mukeiBridge"), &bridge);
     engine.rootContext()->setContextProperty(QStringLiteral("safRegistry"), &safRegistry);

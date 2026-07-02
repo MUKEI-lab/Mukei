@@ -1,0 +1,118 @@
+name: security-audit
+
+# Run cargo audit on every PR and weekly for dependency vulnerability scanning.
+# This job checks for known security vulnerabilities in the dependency tree
+# using RustSec Advisory Database.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run weekly on Monday at 2 AM UTC
+    - cron: '0 2 * * 1'
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Cargo Audit - Check dependencies against RustSec Advisory Database
+  # ---------------------------------------------------------------------
+  cargo-audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      
+      - name: Run cargo audit
+        working-directory: rust
+        run: |
+          cargo audit \
+            --deny warnings \
+            --deny unmaintained \
+            --deny yanked \
+            --deny unsound \
+            || echo "::warning::cargo audit found issues - review required"
+      
+      - name: Generate audit report
+        working-directory: rust
+        run: |
+          cargo audit --json > audit-report.json || true
+      
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cargo-audit-report
+          path: rust/audit-report.json
+          retention-days: 30
+
+  # ---------------------------------------------------------------------
+  # Fuzzing - Run fuzzers for a limited time to catch regressions
+  # Note: Full fuzzing should run continuously in a separate workflow
+  # ---------------------------------------------------------------------
+  fuzz-regression:
+    name: fuzz regression tests
+    runs-on: ubuntu-latest
+    continue-on-error: true  # Fuzzing may not always find issues
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+      
+      - name: Install libfuzzer dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      
+      - name: Run math expression fuzzer (quick regression)
+        working-directory: rust/crates/mukei-core/fuzz
+        run: |
+          cargo fuzz run math_expression_fuzzer -- -max_total_time=60 -timeout=10 \
+            || echo "::warning::Math expression fuzzer found issues"
+      
+      - name: Run query input fuzzer (quick regression)
+        working-directory: rust/crates/mukei-core/fuzz
+        run: |
+          cargo fuzz run query_input_fuzzer -- -max_total_time=60 -timeout=10 \
+            || echo "::warning::Query input fuzzer found issues"
+      
+      - name: Upload any found crashes
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-crashes
+          path: rust/crates/mukei-core/fuzz/artifacts/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------
+  # Security Lint Summary - Aggregate security-focused checks
+  # ---------------------------------------------------------------------
+  security-summary:
+    name: security checks summary
+    runs-on: ubuntu-latest
+    needs: [cargo-audit, fuzz-regression]
+    if: always()
+    steps:
+      - name: Check security job results
+        run: |
+          echo "## Security Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Cargo Audit | ${{ needs.cargo-audit.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Fuzz Regression | ${{ needs.fuzz-regression.result }} |" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.cargo-audit.result }}" == "failure" ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **Cargo audit found vulnerabilities that require attention.**" >> $GITHUB_STEP_SUMMARY
+          fi

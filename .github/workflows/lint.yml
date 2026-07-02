@@ -115,3 +115,32 @@ jobs:
             -p mukei-ffi-shim \
             --lib --tests \
             -- --nocapture
+
+  # ---------------------------------------------------------------------
+  # Security-focused Clippy lints for unwrap/expect usage and arithmetic
+  # side effects. This job enforces additional security-oriented lints
+  # beyond the standard clippy checks.
+  # ---------------------------------------------------------------------
+  clippy-security:
+    name: cargo clippy (security lints)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: cargo clippy with security lints
+        working-directory: rust
+        run: |
+          cargo clippy \
+            -p mukei-core \
+            --no-default-features --features "std,tokio,rusqlite,network" \
+            --lib --tests \
+            -- -D clippy::unwrap_in_result \
+                 -D clippy::expect_used \
+                 -D clippy::arithmetic_side_effects \
+                 -D clippy::panic_in_result_fn \
+                 -W clippy::todo \
+                 -W clippy::unimplemented

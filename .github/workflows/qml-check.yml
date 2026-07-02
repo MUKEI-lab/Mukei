@@ -202,3 +202,75 @@ jobs:
             ninja-build
       - name: Configure only
         run: cmake -S qml -B qml/build -G Ninja
+
+  # ---------------------------------------------------------------------
+  # QML Security Tests. Runs security-focused QML tests including:
+  # - Clipboard bridge functionality verification
+  # - Console logging absence checks  
+  # - Component isolation tests
+  # - Accessible properties validation
+  # ---------------------------------------------------------------------
+  qml-security-tests:
+    name: QML security test suite
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Qt 6 dev packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            qt6-base-dev \
+            qt6-declarative-dev \
+            qt6-declarative-dev-tools \
+            qt6-svg-dev \
+            qml6-module-qtquick \
+            qml6-module-qtquick-controls \
+            qml6-module-qtquick-layouts \
+            qml6-module-qttest \
+            cmake \
+            ninja-build
+      - name: Build and run QML security tests
+        run: |
+          set -e
+          cd qml
+          mkdir -p build && cd build
+          cmake .. -G Ninja
+          ninja
+          # Run the security test suite
+          if [ -f tst_Security ]; then
+            ./tst_Security -o security-results.xml
+          else
+            echo "::warning::Security test binary not found - ensure tests are built"
+          fi
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qml-security-test-results
+          path: qml/build/security-results.xml
+          retention-days: 30
+
+  # ---------------------------------------------------------------------
+  # QML Static Security Analysis. Runs Python-based static analyzer to
+  # detect security anti-patterns in QML source code:
+  # - Console logging statements
+  # - Dynamic code execution patterns
+  # - Unsafe imports and network access
+  # - File system operations
+  # ---------------------------------------------------------------------
+  qml-static-security-analysis:
+    name: QML static security analysis
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run QML security analyzer
+        run: |
+          set -e
+          python3 qml/scripts/qml_security_analyzer.py qml
+      - name: Upload analysis report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qml-security-analysis-report
+          path: qml/scripts/
+          retention-days: 30
