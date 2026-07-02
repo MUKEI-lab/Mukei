@@ -17,13 +17,16 @@ Popup {
     }
     background: Rectangle {
         color: Theme.p.surface
-        radius: Spacing.sm
+        radius: Theme.radiusSm
         border.width: Theme.highContrast ? 1 : 0
         border.color: Theme.p.divider
     }
     contentItem: Text {
         text: root.message
         color: Theme.p.inkPrimary
-        Component.onCompleted: Type.apply(this, Type.bodyUI)
+        font.family: Type.bodyUI.family
+        font.pixelSize: Type.bodyUI.pixelSize
+        lineHeight: Type.bodyUI.lineHeight
+        lineHeightMode: Type.bodyUI.lineHeightMode
     }
 }

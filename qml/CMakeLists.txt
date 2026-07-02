@@ -40,9 +40,19 @@ set(MUKEI_BRIDGE_LIB "${_MUKEI_BRIDGE_DEFAULT}"
     CACHE FILEPATH "Path to the Cargo-built mukei-bridge shared library"
 )
 
+# MUKEI_USE_REAL_BRIDGE controls whether main.cpp instantiates the real
+# CXX-Qt bridge objects (MukeiAgent/MukeiBridge/SafRegistry from libmukei_bridge)
+# or falls back to local stub classes. Default OFF until cxx-qt bridge headers
+# are available in the build environment.
+option(MUKEI_USE_REAL_BRIDGE "Use real CXX-Qt bridge instead of stubs" OFF)
+
 add_executable(mukei
     main.cpp
     qml.qrc
+)
+
+target_compile_definitions(mukei PRIVATE
+    $<$<BOOL:${MUKEI_USE_REAL_BRIDGE}>:MUKEI_USE_REAL_BRIDGE>
 )
 
 qt_add_qml_module(mukei

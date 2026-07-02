@@ -29,6 +29,14 @@ Control {
         sourceSize.height: Spacing.lg
         fillMode: Image.PreserveAspectFit
         opacity: root.enabled ? 1 : 0.4
+        // Apply colorization effect to tint icons per theme and active state
+        // Uses MultiEffect for runtime color overlay bound to theme colors
+        layer.enabled: true
+        layer.effect: MultiEffect {
+            id: iconEffect
+            colorization: root.active ? Theme.p.accent : (root.enabled ? Theme.p.inkPrimary : Theme.p.inkFaint)
+            colorizationAmount: 1.0
+        }
     }
 
     TapHandler {

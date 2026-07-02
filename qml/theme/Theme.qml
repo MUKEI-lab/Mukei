@@ -22,6 +22,7 @@ QtObject {
     // Corner radius tokens per TRD: radiusSm=4, radiusMd=8, radiusLg=12.
     // These are independent from Spacing tokens so spacing and radius
     // can be tuned separately.
+    readonly property int radiusXxs: 4
     readonly property int radiusSm: 4
     readonly property int radiusMd: 8
     readonly property int radiusLg: 12

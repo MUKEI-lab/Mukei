@@ -38,8 +38,45 @@ class MukeiAgentStub final : public QObject
 public:
     using QObject::QObject;
     Q_INVOKABLE bool initialize(const QString &) { return true; }
-    Q_INVOKABLE void send_message(const QString &) { emit state_changed(QStringLiteral("streaming")); }
-    Q_INVOKABLE void stop_generation() { emit stream_finalized(); }
+    Q_INVOKABLE void send_message(const QString &) 
+    { 
+        emit state_changed(QStringLiteral("streaming"));
+        // Simulate streaming output via QTimer for UI testing
+        // Emits chunk_generated every ~50ms, then stream_finalized
+        m_streamChunks = QStringList{
+            QStringLiteral("Hello"),
+            QStringLiteral(" "),
+            QStringLiteral("this"),
+            QStringLiteral(" "),
+            QStringLiteral("is"),
+            QStringLiteral(" "),
+            QStringLiteral("simulated"),
+            QStringLiteral(" "),
+            QStringLiteral("streaming"),
+            QStringLiteral(" "),
+            QStringLiteral("output"),
+            QStringLiteral(".")
+        };
+        m_streamIndex = 0;
+        if (!m_streamTimer) {
+            m_streamTimer = new QTimer(this);
+            m_streamTimer->setInterval(50);
+            connect(m_streamTimer, &QTimer::timeout, this, [this]() {
+                if (m_streamIndex < m_streamChunks.size()) {
+                    emit chunk_generated(m_streamChunks.at(m_streamIndex));
+                    m_streamIndex++;
+                } else {
+                    m_streamTimer->stop();
+                    emit stream_finalized();
+                }
+            });
+            m_streamTimer->start();
+        }
+    }
+    Q_INVOKABLE void stop_generation() { 
+        if (m_streamTimer) m_streamTimer->stop();
+        emit stream_finalized(); 
+    }
     Q_INVOKABLE void download_model(const QString &, const QString &) { emit download_progress(0.0, QStringLiteral("queued")); }
     Q_INVOKABLE void stop_download() { emit download_progress(0.0, QStringLiteral("stopped")); }
     Q_INVOKABLE void clear_conversation() { emit state_changed(QStringLiteral("idle")); }
@@ -55,6 +92,10 @@ signals:
     void download_progress(double progress, const QString &status);
     void thinking_started();
     void thinking_completed();
+private:
+    QTimer *m_streamTimer = nullptr;
+    QStringList m_streamChunks;
+    int m_streamIndex = 0;
 };
 
 class MukeiBridgeStub final : public QObject
@@ -131,9 +172,23 @@ int main(int argc, char *argv[])
     loadBundledFonts();
 
     MukeiClipboard clipboard;
+    
+#ifdef MUKEI_USE_REAL_BRIDGE
+    // Real CXX-Qt bridge objects from libmukei_bridge
+    // Requires MUKEI_USE_REAL_BRIDGE=ON at cmake configure time
+    #include <mukei_bridge/MukeiAgent.h>
+    #include <mukei_bridge/MukeiBridge.h>
+    #include <mukei_bridge/SafRegistry.h>
+    
+    auto agent = new MukeiAgent(&app);
+    auto bridge = new MukeiBridge(&app);
+    auto safRegistry = new SafRegistry(&app);
+#else
+    // Stub objects for UI testing when real bridge is not available
     MukeiAgentStub agent;
     MukeiBridgeStub bridge;
     SafRegistryStub safRegistry;
+#endif
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("mukeiClipboard"), &clipboard);
@@ -148,6 +203,15 @@ int main(int argc, char *argv[])
     QTimer::singleShot(100, &engine, [&engine] {
         engine.load(QUrl(QStringLiteral("qrc:/qt/qml/com/mukei/app/MainWindow.qml")));
     });
+
+#ifdef MUKEI_USE_REAL_BRIDGE
+    // Real bridge objects are heap-allocated; clean up on exit
+    QObject::connect(&engine, &QQmlApplicationEngine::objectCreated, &app, [&app](QObject *obj, const QUrl &) {
+        if (!obj) {
+            QCoreApplication::exit(-1);
+        }
+    }, Qt::QueuedConnection);
+#endif
 
     return app.exec();
 }

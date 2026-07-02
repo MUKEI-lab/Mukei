@@ -17,7 +17,7 @@ Rectangle {
     border.color: Theme.p.accent
     Behavior on color {
         enabled: !Theme.reduceMotion
-        ColorAnimation { duration: Motion.toolCrossFade; easing.type: Easing.OutCubic }
+        ColorAnimation { duration: Motion.toolCrossFade; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.enter }
     }
     implicitHeight: Spacing.xl
     implicitWidth: row.implicitWidth + Spacing.md
@@ -34,7 +34,10 @@ Rectangle {
         Text {
             text: root.text
             color: Theme.p.inkPrimary
-            Component.onCompleted: Type.apply(this, Type.caption)
+            font.family: Type.caption.family
+            font.pixelSize: Type.caption.pixelSize
+            lineHeight: Type.caption.lineHeight
+            lineHeightMode: Type.caption.lineHeightMode
         }
     }
 }

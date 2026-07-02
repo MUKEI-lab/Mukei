@@ -19,7 +19,7 @@ FocusScope {
 
     Rectangle {
         anchors.fill: parent
-        radius: Spacing.sm
+        radius: Theme.radiusSm
         color: Theme.p.surface
         border.width: 2
         border.color: textArea.activeFocus ? Theme.p.accent : "transparent"
@@ -49,7 +49,10 @@ FocusScope {
             background: null
             Accessible.name: qsTr("Message text")
             Accessible.description: qsTr("One to six line message editor")
-            Component.onCompleted: Type.apply(this, Type.bodyUI)
+            font.family: Type.bodyUI.family
+            font.pixelSize: Type.bodyUI.pixelSize
+            lineHeight: Type.bodyUI.lineHeight
+            lineHeightMode: Type.bodyUI.lineHeightMode
             Keys.onPressed: function (event) {
                 if ((event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)) && event.key === Qt.Key_Return) {
                     root.sendRequested(textArea.text);

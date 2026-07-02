@@ -12,18 +12,19 @@ Control {
     implicitHeight: Spacing.xxs
     background: Rectangle {
         color: Theme.p.surfaceVariant
-        radius: Spacing.xxs
+        radius: Theme.radiusXxs
     }
     contentItem: Rectangle {
         width: parent.width * Math.max(0, Math.min(1, root.value))
         height: parent.height
-        radius: Spacing.xxs
+        radius: Theme.radiusXxs
         color: Theme.p.accent
         Behavior on width {
             enabled: !Theme.reduceMotion
             NumberAnimation {
                 duration: Motion.progressValue
-                easing.type: Easing.OutCubic
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Motion.enter
             }
         }
     }

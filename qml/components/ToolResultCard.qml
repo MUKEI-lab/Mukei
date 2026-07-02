@@ -10,17 +10,17 @@ Rectangle {
     Accessible.role: Accessible.StaticText
     Accessible.name: title
     Accessible.description: body
-    radius: Spacing.sm
+    radius: Theme.radiusSm
     color: Theme.p.surface
     border.width: 1
     border.color: Theme.p.divider
     Behavior on color {
         enabled: !Theme.reduceMotion
-        ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
+        ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.enter }
     }
     Behavior on border.color {
         enabled: !Theme.reduceMotion
-        ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
+        ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.enter }
     }
     implicitHeight: column.implicitHeight + Spacing.md * 2
     ColumnLayout {
@@ -30,13 +30,19 @@ Rectangle {
         Text {
             text: root.title
             color: Theme.p.inkPrimary
-            Component.onCompleted: Type.apply(this, Type.h3)
+            font.family: Type.h3.family
+            font.pixelSize: Type.h3.pixelSize
+            lineHeight: Type.h3.lineHeight
+            lineHeightMode: Type.h3.lineHeightMode
         }
         Text {
             text: root.body
             color: Theme.p.inkSecondary
             wrapMode: Text.Wrap
-            Component.onCompleted: Type.apply(this, Type.code)
+            font.family: Type.code.family
+            font.pixelSize: Type.code.pixelSize
+            lineHeight: Type.code.lineHeight
+            lineHeightMode: Type.code.lineHeightMode
         }
     }
 }
