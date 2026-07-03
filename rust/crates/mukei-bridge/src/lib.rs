@@ -53,12 +53,13 @@ mod core_saf {
 
 use std::collections::HashSet;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QString, QVariant};
 use once_cell::sync::Lazy;
+use parking_lot::Mutex as ParkingMutex;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
@@ -66,7 +67,11 @@ use mukei_core::agent::AgentLoop;
 use mukei_core::config::MukeiConfig;
 use mukei_core::ffi::tags::{TagEvents, TagsStreaming};
 use mukei_core::tools::ToolRegistry;
-use mukei_core::types::BranchId;
+use mukei_core::types::{BranchId, ConversationId, MessageId};
+use mukei_core::ui_contract::{
+    AndroidStorageState, AppLifecycleState, BridgeEvent, BridgeEventKind, CapabilitySnapshot,
+    ChatTurnState, DownloadState, UiError,
+};
 
 static GLOBAL_SAF_REGISTRY: Lazy<Arc<core_saf::SafRegistry>> =
     Lazy::new(|| Arc::new(core_saf::SafRegistry::new()));
@@ -151,6 +156,44 @@ static GLOBAL_CONFIG: Lazy<Mutex<Option<MukeiConfig>>> = Lazy::new(|| Mutex::new
 /// path including panic-unwind (workspace mandates `panic = "unwind"`).
 static GLOBAL_DOWNLOADS_IN_FLIGHT: Lazy<Arc<Mutex<HashSet<std::path::PathBuf>>>> =
     Lazy::new(|| Arc::new(Mutex::new(HashSet::new())));
+
+fn event_json(event: BridgeEvent) -> QString {
+    let json = serde_json::to_string(&event).unwrap_or_else(|err| {
+        serde_json::json!({
+            "schema_version": BridgeEvent::SCHEMA_VERSION,
+            "timestamp": chrono::Utc::now(),
+            "category": "error",
+            "error": {
+                "code": "ERR_EVENT_SERIALIZE",
+                "class": "bridge",
+                "severity": "error",
+                "recoverable": true,
+                "user_message": "Bridge event could not be serialized.",
+                "technical_message": err.to_string(),
+                "suggested_action": "report_issue",
+                "source": "bridge",
+            }
+        })
+        .to_string()
+    });
+    QString::from(&json)
+}
+
+fn error_bridge_event(error: &mukei_core::error::MukeiError, source: &'static str) -> BridgeEvent {
+    BridgeEvent::new(BridgeEventKind::Error {
+        error: UiError::from_mukei_error(error, source),
+    })
+}
+
+fn download_event_error(code: &'static str, message: String) -> mukei_core::error::MukeiError {
+    match code {
+        "ERR_CANCELLED" => mukei_core::error::MukeiError::Cancelled,
+        "ERR_DOWNLOAD_HASH" => mukei_core::error::MukeiError::DownloadHashMismatch,
+        "ERR_NETWORK" => mukei_core::error::MukeiError::NetworkError(message),
+        "ERR_IO" => mukei_core::error::MukeiError::Io(message),
+        _ => mukei_core::error::MukeiError::Internal(message),
+    }
+}
 
 /// RAII guard that removes its destination path from
 /// [`GLOBAL_DOWNLOADS_IN_FLIGHT`] on `Drop`. Pairs with the same RAII
@@ -328,6 +371,8 @@ pub mod ffi {
         fn thinking_started(self: Pin<&mut MukeiAgent>);
         #[qsignal]
         fn thinking_completed(self: Pin<&mut MukeiAgent>);
+        #[qsignal]
+        fn event_emitted(self: Pin<&mut MukeiAgent>, event_json: QString);
 
         #[qinvokable]
         fn initialize(self: Pin<&mut MukeiAgent>, config_path: QString) -> bool;
@@ -358,6 +403,8 @@ pub mod ffi {
         fn saf_grant_revoked(self: Pin<&mut MukeiBridge>, token: QString);
         #[qsignal]
         fn error_occurred(self: Pin<&mut MukeiBridge>, error_code: QString, message: QString);
+        #[qsignal]
+        fn event_emitted(self: Pin<&mut MukeiBridge>, event_json: QString);
 
         // Wrapped-secrets API — each setter accepts the UNWRAPPED key
         // material (the bridge unwraps via Android Keystore *before*
@@ -447,6 +494,36 @@ pub struct MukeiAgentRust {
     /// because a chat turn and a download are not mutually exclusive,
     /// but two downloads of the same dest path are.
     busy: Arc<AtomicBool>,
+    /// Monotonic bridge-local event sequence. This is not persisted
+    /// across process restarts; it is only for ordering events delivered
+    /// to one live QML engine.
+    event_sequence: Arc<AtomicU64>,
+    /// Bridge-local mirror of active downloads for stop/cancel events.
+    /// `stop_download()` still cancels every in-flight download because
+    /// the public API has one global download token; when exactly one
+    /// download is active we can honestly include its model/destination
+    /// in the emitted event.
+    active_downloads: Arc<ParkingMutex<Vec<ActiveDownload>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ActiveDownload {
+    model_id: Option<String>,
+    destination: String,
+}
+
+fn single_active_download(
+    downloads: &ParkingMutex<Vec<ActiveDownload>>,
+) -> (Option<String>, Option<String>) {
+    let downloads = downloads.lock();
+    if downloads.len() == 1 {
+        (
+            downloads[0].model_id.clone(),
+            Some(downloads[0].destination.clone()),
+        )
+    } else {
+        (None, None)
+    }
 }
 
 /// RAII guard that clears the re-entrancy flag on `Drop`. Held by the
@@ -472,6 +549,8 @@ impl Default for MukeiAgentRust {
             download_cancel: CancellationToken::new(),
             state: Arc::new(Mutex::new("UNINITIALIZED".to_string())),
             busy: Arc::new(AtomicBool::new(false)),
+            event_sequence: Arc::new(AtomicU64::new(1)),
+            active_downloads: Arc::new(ParkingMutex::new(Vec::new())),
         }
     }
 }
@@ -498,13 +577,33 @@ impl ffi::MukeiAgent {
         let qt = self.as_ref().get_ref().qt_thread();
         let config_path = config_path.to_string();
         mukei_core::runtime::get().spawn(async move {
+            let _ = qt.queue(|mut qobject| {
+                qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                    BridgeEventKind::AppLifecycle {
+                        state: AppLifecycleState::Booting,
+                        capabilities: CapabilitySnapshot::uninitialized(),
+                        android_storage: Some(AndroidStorageState::Unknown),
+                    },
+                )));
+            });
+            let _ = qt.queue(|mut qobject| {
+                qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                    BridgeEventKind::AppLifecycle {
+                        state: AppLifecycleState::LoadingConfig,
+                        capabilities: CapabilitySnapshot::uninitialized(),
+                        android_storage: Some(AndroidStorageState::Unknown),
+                    },
+                )));
+            });
             let cfg_path = std::path::PathBuf::from(&config_path);
             let cfg = match agent_runtime::load_config(&cfg_path) {
                 Ok(c) => c,
                 Err(e) => {
                     let code = e.error_code().to_string();
                     let msg = e.to_string();
+                    let event = error_bridge_event(&e, "initialize");
                     let _ = qt.queue(move |mut qobject| {
+                        qobject.as_mut().event_emitted(event_json(event));
                         qobject
                             .as_mut()
                             .error_occurred(QString::from(&code), QString::from(&msg));
@@ -523,6 +622,15 @@ impl ffi::MukeiAgent {
 
             #[cfg(feature = "rusqlite")]
             {
+                let _ = qt.queue(|mut qobject| {
+                    qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                        BridgeEventKind::AppLifecycle {
+                            state: AppLifecycleState::OpeningDatabase,
+                            capabilities: CapabilitySnapshot::uninitialized(),
+                            android_storage: Some(AndroidStorageState::Unknown),
+                        },
+                    )));
+                });
                 #[cfg(feature = "sqlcipher")]
                 let database_key = match GLOBAL_DATABASE_CIPHER_KEY.lock().await.take() {
                     Some(key) if !key.is_empty() => key,
@@ -533,7 +641,9 @@ impl ffi::MukeiAgent {
                         );
                         let code = err.error_code().to_string();
                         let msg = err.to_string();
+                        let event = error_bridge_event(&err, "initialize");
                         let _ = qt.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(event));
                             qobject
                                 .as_mut()
                                 .error_occurred(QString::from(&code), QString::from(&msg));
@@ -553,7 +663,9 @@ impl ffi::MukeiAgent {
                     Err(e) => {
                         let code = e.error_code().to_string();
                         let msg = e.to_string();
+                        let event = error_bridge_event(&e, "initialize");
                         let _ = qt.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(event));
                             qobject
                                 .as_mut()
                                 .error_occurred(QString::from(&code), QString::from(&msg));
@@ -566,7 +678,9 @@ impl ffi::MukeiAgent {
                 if let Err(e) = GLOBAL_AUDIT_LOG_WRITER.hydrate_from_pool(&pool).await {
                     let code = e.error_code().to_string();
                     let msg = e.to_string();
+                    let event = error_bridge_event(&e, "initialize");
                     let _ = qt.queue(move |mut qobject| {
+                        qobject.as_mut().event_emitted(event_json(event));
                         qobject
                             .as_mut()
                             .error_occurred(QString::from(&code), QString::from(&msg));
@@ -574,10 +688,30 @@ impl ffi::MukeiAgent {
                     return;
                 }
 
+                let _ = qt.queue(|mut qobject| {
+                    qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                        BridgeEventKind::AppLifecycle {
+                            state: AppLifecycleState::HydratingSaf,
+                            capabilities: CapabilitySnapshot::uninitialized(),
+                            android_storage: Some(AndroidStorageState::HydratingSaf),
+                        },
+                    )));
+                });
                 if let Err(e) = agent_runtime::hydrate_saf_registry(&GLOBAL_SAF_REGISTRY, &pool).await {
                     tracing::warn!(error = %e, "SafRegistry hydration failed; starting empty");
                 }
 
+                let _ = qt.queue(|mut qobject| {
+                    qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                        BridgeEventKind::AppLifecycle {
+                            state: AppLifecycleState::ReconcilingVectorStore,
+                            capabilities: CapabilitySnapshot::uninitialized(),
+                            android_storage: Some(AndroidStorageState::Ready {
+                                saf_grant_count: GLOBAL_SAF_REGISTRY.count(),
+                            }),
+                        },
+                    )));
+                });
                 match agent_runtime::reconcile_vector_store(&cfg, &pool).await {
                     Ok(report) => {
                         tracing::info!(
@@ -614,6 +748,15 @@ impl ffi::MukeiAgent {
 
             *state.lock().await = "IDLE_READY".to_string();
             let _ = qt.queue(|mut qobject| {
+                qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                    BridgeEventKind::AppLifecycle {
+                        state: AppLifecycleState::Ready,
+                        capabilities: CapabilitySnapshot::ready(),
+                        android_storage: Some(AndroidStorageState::Ready {
+                            saf_grant_count: GLOBAL_SAF_REGISTRY.count(),
+                        }),
+                    },
+                )));
                 qobject.as_mut().state_changed(QString::from("IDLE_READY"));
             });
         });
@@ -625,8 +768,15 @@ impl ffi::MukeiAgent {
         let rust = binding.rust();
         let cancel_token = rust.cancel_token.clone();
         let busy = rust.busy.clone();
+        let sequence = rust.event_sequence.clone();
         let qt_thread = self.as_ref().get_ref().qt_thread();
         let input = user_input.to_string();
+        // Bridge-local correlation ids only. The current AgentLoop API
+        // accepts a BranchId but does not return persisted conversation
+        // or turn ids, so these are for live event ordering until the
+        // storage-backed chat state is wired through.
+        let conversation_id = ConversationId::new();
+        let turn_id = MessageId::new().0.to_string();
 
         // Re-entrancy guard (user priority follow-up): refuse the call
         // if a prior `send_message` is still streaming. The QML side
@@ -641,7 +791,9 @@ impl ffi::MukeiAgent {
             let err = mukei_core::error::MukeiError::BridgeBusy;
             let code = err.error_code().to_string();
             let message = err.to_string();
+            let event = error_bridge_event(&err, "send_message");
             let _ = qt_thread.queue(move |mut qobject| {
+                qobject.as_mut().event_emitted(event_json(event));
                 qobject
                     .as_mut()
                     .error_occurred(QString::from(&code), QString::from(&message));
@@ -659,6 +811,8 @@ impl ffi::MukeiAgent {
 
         let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel::<String>(256);
         let ui_thread = qt_thread.clone();
+        let chunk_sequence = sequence.clone();
+        let chunk_turn_id = turn_id.clone();
 
         mukei_core::runtime::get().spawn(async move {
             let mut tags = TagsStreaming::new();
@@ -680,31 +834,74 @@ impl ffi::MukeiAgent {
                 if events.contains(TagEvents::CLOSED) {
                     let _ = ui_thread.queue(|mut qobject| qobject.as_mut().thinking_completed());
                 }
+                let event_sequence = chunk_sequence.clone();
+                let event_turn_id = chunk_turn_id.clone();
                 let _ = ui_thread.queue(move |mut qobject| {
+                    let event = BridgeEvent::new(BridgeEventKind::ChatChunk {
+                        chunk: chunk.clone(),
+                    })
+                    .with_chat_context(conversation_id, event_turn_id)
+                    .with_sequence(event_sequence.fetch_add(1, Ordering::AcqRel));
+                    qobject.as_mut().event_emitted(event_json(event));
                     qobject.as_mut().chunk_generated(QString::from(&chunk));
                 });
             }
         });
 
         mukei_core::runtime::get().spawn(async move {
-            let _ = qt_thread.queue(|mut qobject| qobject.as_mut().state_changed(QString::from("INFERRING")));
+            let submit_event = BridgeEvent::new(BridgeEventKind::ChatState {
+                state: ChatTurnState::Submitting,
+                capabilities: CapabilitySnapshot::inferencing(),
+            })
+            .with_chat_context(conversation_id, turn_id.clone())
+            .with_sequence(sequence.fetch_add(1, Ordering::AcqRel));
+            let _ = qt_thread.queue(move |mut qobject| {
+                qobject.as_mut().event_emitted(event_json(submit_event));
+                qobject.as_mut().state_changed(QString::from("INFERRING"));
+            });
 
             let loop_handle = { GLOBAL_AGENT_LOOP.lock().await.clone() };
+            let mut failed = false;
+            let mut final_capabilities = CapabilitySnapshot::ready();
             match loop_handle {
                 Some(handle) => {
                     let result = handle
-                        .run(input, BranchId::default(), cancel_token, chunk_tx.clone())
+                        .run(
+                            input,
+                            BranchId::default(),
+                            cancel_token.clone(),
+                            chunk_tx.clone(),
+                        )
                         .await;
                     if let Err(error) = result {
+                        failed = true;
                         let code = error.error_code().to_string();
                         let message = error.to_string();
+                        let event = BridgeEvent::new(BridgeEventKind::ChatFailed {
+                            error: UiError::from_mukei_error(&error, "send_message"),
+                        })
+                        .with_chat_context(conversation_id, turn_id.clone())
+                        .with_sequence(sequence.fetch_add(1, Ordering::AcqRel));
                         let _ = qt_thread.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(event));
                             qobject.as_mut().error_occurred(QString::from(&code), QString::from(&message));
                         });
                     }
                 }
                 None => {
-                    let _ = qt_thread.queue(|mut qobject| {
+                    failed = true;
+                    final_capabilities = CapabilitySnapshot::uninitialized();
+                    let err = mukei_core::error::MukeiError::Internal(
+                        "AgentLoop was never constructed — call MukeiAgent.initialize(config_path) first."
+                            .to_string(),
+                    );
+                    let event = BridgeEvent::new(BridgeEventKind::ChatFailed {
+                        error: UiError::from_mukei_error(&err, "send_message"),
+                    })
+                    .with_chat_context(conversation_id, turn_id.clone())
+                    .with_sequence(sequence.fetch_add(1, Ordering::AcqRel));
+                    let _ = qt_thread.queue(move |mut qobject| {
+                        qobject.as_mut().event_emitted(event_json(event));
                         qobject.as_mut().error_occurred(
                             QString::from("BRIDGE_NOT_INITIALIZED"),
                             QString::from("AgentLoop was never constructed — call MukeiAgent.initialize(config_path) first."),
@@ -713,7 +910,27 @@ impl ffi::MukeiAgent {
                 }
             }
             let _ = chunk_tx.send("\u{0001}STREAM_FINAL\u{0001}".to_string()).await;
-            let _ = qt_thread.queue(|mut qobject| qobject.as_mut().state_changed(QString::from("IDLE_READY")));
+            let final_event = if failed {
+                BridgeEvent::new(BridgeEventKind::ChatState {
+                    state: ChatTurnState::Failed,
+                    capabilities: final_capabilities.clone(),
+                })
+            } else if cancel_token.is_cancelled() {
+                BridgeEvent::new(BridgeEventKind::ChatCancelled)
+            } else {
+                BridgeEvent::new(BridgeEventKind::ChatCompleted)
+            }
+            .with_chat_context(conversation_id, turn_id)
+            .with_sequence(sequence.fetch_add(1, Ordering::AcqRel));
+            let _ = qt_thread.queue(move |mut qobject| {
+                qobject.as_mut().event_emitted(event_json(final_event));
+                qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                    BridgeEventKind::CapabilitySnapshot {
+                        capabilities: final_capabilities,
+                    },
+                )));
+                qobject.as_mut().state_changed(QString::from("IDLE_READY"));
+            });
             // BusyGuard drops here on the normal path. Critically, it
             // *also* drops on the panic-unwind path — anything inside
             // `handle.run(...)` that panics (currently the `unwrap()`s
@@ -735,18 +952,46 @@ impl ffi::MukeiAgent {
     /// now own independent tokens; call [`Self::stop_download`] to
     /// cancel a download.
     pub fn stop_generation(mut self: Pin<&mut Self>) {
+        let qt = self.as_ref().get_ref().qt_thread();
         let mut rust = self.as_mut().rust_mut();
+        let sequence = rust.event_sequence.clone();
+        let was_busy = rust.busy.load(Ordering::Acquire);
         rust.cancel_token.cancel();
         rust.cancel_token = CancellationToken::new();
+        if was_busy {
+            let event = BridgeEvent::new(BridgeEventKind::ChatState {
+                state: ChatTurnState::Cancelling,
+                capabilities: CapabilitySnapshot::inferencing(),
+            })
+            .with_sequence(sequence.fetch_add(1, Ordering::AcqRel));
+            let _ = qt.queue(move |mut qobject| {
+                qobject.as_mut().event_emitted(event_json(event));
+            });
+        }
     }
 
     /// Cancel the in-flight model download (if any). Independent of
     /// `stop_generation` so pressing the chat Stop button never kills
     /// a multi-gigabyte model fetch running underneath the UI.
     pub fn stop_download(mut self: Pin<&mut Self>) {
+        let qt = self.as_ref().get_ref().qt_thread();
         let mut rust = self.as_mut().rust_mut();
+        let (model_id, destination) = single_active_download(&rust.active_downloads);
+        let has_active_download = !rust.active_downloads.lock().is_empty();
         rust.download_cancel.cancel();
         rust.download_cancel = CancellationToken::new();
+        if has_active_download {
+            let _ = qt.queue(move |mut qobject| {
+                qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                    BridgeEventKind::DownloadState {
+                        state: DownloadState::Cancelling,
+                        model_id,
+                        destination,
+                        capabilities: CapabilitySnapshot::downloading(false),
+                    },
+                )));
+            });
+        }
     }
 
     /// Kick off a streaming GGUF download (TRD §8.1 / REQ-MOD-01).
@@ -783,19 +1028,44 @@ impl ffi::MukeiAgent {
     /// * `error:<ERR_CODE>:<message>`
     pub fn download_model(self: Pin<&mut Self>, url: QString, sha256: QString) {
         let cancel = self.as_ref().rust().download_cancel.clone();
+        let active_downloads = self.as_ref().rust().active_downloads.clone();
         let qt = self.as_ref().get_ref().qt_thread();
         // Architect-review follow-up: use the *download-only* token so
         // `stop_generation()` no longer silently cancels the download.
         let url_or_id = url.to_string();
         let sha = sha256.to_string();
+        let model_id = mukei_core::engine::lookup_model_str(&url_or_id)
+            .map(|descriptor| descriptor.id.as_str().to_string());
 
         mukei_core::runtime::get().spawn(async move {
+            let queued_model_id = model_id.clone();
+            let _ = qt.queue(move |mut qobject| {
+                qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                    BridgeEventKind::DownloadState {
+                        state: DownloadState::Queued,
+                        model_id: queued_model_id,
+                        destination: None,
+                        capabilities: CapabilitySnapshot::downloading(false),
+                    },
+                )));
+            });
             let req = match resolve_download_request(&url_or_id, &sha).await {
                 Ok(r) => r,
                 Err(e) => {
                     let code = e.error_code().to_string();
                     let message = e.to_string();
+                    let state_event = BridgeEvent::new(BridgeEventKind::DownloadState {
+                        state: DownloadState::Failed,
+                        model_id: model_id.clone(),
+                        destination: None,
+                        capabilities: CapabilitySnapshot::ready(),
+                    });
+                    let event = BridgeEvent::new(BridgeEventKind::DownloadFailed {
+                        error: UiError::from_mukei_error(&e, "download_model"),
+                    });
                     let _ = qt.queue(move |mut qobject| {
+                        qobject.as_mut().event_emitted(event_json(state_event));
+                        qobject.as_mut().event_emitted(event_json(event));
                         qobject.as_mut().download_progress(
                             0.0,
                             QString::from(format!("error:{code}:{message}").as_str()),
@@ -822,7 +1092,18 @@ impl ffi::MukeiAgent {
                     };
                     let code = err.error_code().to_string();
                     let message = err.to_string();
+                    let state_event = BridgeEvent::new(BridgeEventKind::DownloadState {
+                        state: DownloadState::Failed,
+                        model_id: model_id.clone(),
+                        destination: Some(req.dest.to_string_lossy().into_owned()),
+                        capabilities: CapabilitySnapshot::ready(),
+                    });
+                    let event = BridgeEvent::new(BridgeEventKind::DownloadFailed {
+                        error: UiError::from_mukei_error(&err, "download_model"),
+                    });
                     let _ = qt.queue(move |mut qobject| {
+                        qobject.as_mut().event_emitted(event_json(state_event));
+                        qobject.as_mut().event_emitted(event_json(event));
                         qobject.as_mut().download_progress(
                             0.0,
                             QString::from(format!("error:{code}:{message}").as_str()),
@@ -838,6 +1119,11 @@ impl ffi::MukeiAgent {
             };
 
             let dest_for_status = req.dest.clone();
+            let active_download = ActiveDownload {
+                model_id: model_id.clone(),
+                destination: dest_for_status.to_string_lossy().into_owned(),
+            };
+            active_downloads.lock().push(active_download.clone());
             let (tx, mut rx) = tokio::sync::mpsc::channel::<mukei_core::storage::DownloadEvent>(32);
             let req_for_dl = req.clone();
             let cancel_for_dl = cancel.clone();
@@ -845,15 +1131,30 @@ impl ffi::MukeiAgent {
                 mukei_core::storage::run_download(req_for_dl, tx, cancel_for_dl).await
             });
 
+            let mut total_bytes_seen: Option<u64> = None;
+            let mut terminal_download_event_seen = false;
             while let Some(ev) = rx.recv().await {
                 let qt_for_ev = qt.clone();
                 match ev {
                     mukei_core::storage::DownloadEvent::Started { total_bytes } => {
+                        total_bytes_seen = total_bytes;
                         let status = match total_bytes {
                             Some(n) => format!("started:{n}"),
                             None => "started:unknown".to_string(),
                         };
+                        let model_id = model_id.clone();
+                        let destination = Some(dest_for_status.to_string_lossy().into_owned());
                         let _ = qt_for_ev.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                                BridgeEventKind::DownloadProgress {
+                                    state: DownloadState::Starting,
+                                    progress: 0.0,
+                                    bytes_downloaded: 0,
+                                    total_bytes,
+                                    model_id,
+                                    destination,
+                                },
+                            )));
                             qobject
                                 .as_mut()
                                 .download_progress(0.0, QString::from(&status));
@@ -864,23 +1165,70 @@ impl ffi::MukeiAgent {
                         bytes_downloaded,
                     } => {
                         let status = format!("downloading:{bytes_downloaded}");
+                        let model_id = model_id.clone();
+                        let destination = Some(dest_for_status.to_string_lossy().into_owned());
+                        let total_bytes = total_bytes_seen;
                         let _ = qt_for_ev.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                                BridgeEventKind::DownloadProgress {
+                                    state: DownloadState::Downloading,
+                                    progress,
+                                    bytes_downloaded,
+                                    total_bytes,
+                                    model_id,
+                                    destination,
+                                },
+                            )));
                             qobject
                                 .as_mut()
                                 .download_progress(progress, QString::from(&status));
                         });
                     }
                     mukei_core::storage::DownloadEvent::Complete { final_path } => {
+                        terminal_download_event_seen = true;
                         let status = format!("complete:{}", final_path.to_string_lossy());
+                        let final_path_string = final_path.to_string_lossy().into_owned();
                         let _ = qt_for_ev.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                                BridgeEventKind::DownloadCompleted {
+                                    final_path: final_path_string.clone(),
+                                },
+                            )));
                             qobject
                                 .as_mut()
                                 .download_progress(1.0, QString::from(&status));
                         });
                     }
                     mukei_core::storage::DownloadEvent::Error { code, message } => {
+                        terminal_download_event_seen = true;
                         let status = format!("error:{code}:{message}");
+                        let err = download_event_error(code, message.clone());
+                        let model_id = model_id.clone();
+                        let destination = Some(dest_for_status.to_string_lossy().into_owned());
+                        let state = if matches!(err, mukei_core::error::MukeiError::Cancelled) {
+                            DownloadState::Cancelled
+                        } else {
+                            DownloadState::Failed
+                        };
+                        let state_event = BridgeEvent::new(BridgeEventKind::DownloadState {
+                            state,
+                            model_id: model_id.clone(),
+                            destination: destination.clone(),
+                            capabilities: CapabilitySnapshot::ready(),
+                        });
+                        let failed_event =
+                            if matches!(err, mukei_core::error::MukeiError::Cancelled) {
+                                None
+                            } else {
+                                Some(BridgeEvent::new(BridgeEventKind::DownloadFailed {
+                                    error: UiError::from_mukei_error(&err, "download_model"),
+                                }))
+                            };
                         let _ = qt_for_ev.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(state_event));
+                            if let Some(event) = failed_event {
+                                qobject.as_mut().event_emitted(event_json(event));
+                            }
                             qobject
                                 .as_mut()
                                 .download_progress(0.0, QString::from(&status));
@@ -895,11 +1243,52 @@ impl ffi::MukeiAgent {
                 }
                 Ok(Err(e)) => {
                     tracing::warn!(error = %e, "model download failed");
+                    if !terminal_download_event_seen {
+                        let code = e.error_code().to_string();
+                        let message = e.to_string();
+                        let state = if matches!(e, mukei_core::error::MukeiError::Cancelled) {
+                            DownloadState::Cancelled
+                        } else {
+                            DownloadState::Failed
+                        };
+                        let state_event = BridgeEvent::new(BridgeEventKind::DownloadState {
+                            state,
+                            model_id: model_id.clone(),
+                            destination: Some(dest_for_status.to_string_lossy().into_owned()),
+                            capabilities: CapabilitySnapshot::ready(),
+                        });
+                        let event = BridgeEvent::new(BridgeEventKind::DownloadFailed {
+                            error: UiError::from_mukei_error(&e, "download_model"),
+                        });
+                        let _ = qt.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(state_event));
+                            qobject.as_mut().event_emitted(event_json(event));
+                            qobject.as_mut().download_progress(
+                                0.0,
+                                QString::from(format!("error:{code}:{message}").as_str()),
+                            );
+                        });
+                    }
                 }
                 Err(join_err) => {
                     let msg = format!("download task panicked: {join_err}");
                     tracing::error!(error = %msg);
+                    let err = mukei_core::error::MukeiError::FFIPanic;
+                    let state_event = BridgeEvent::new(BridgeEventKind::DownloadState {
+                        state: DownloadState::Failed,
+                        model_id: model_id.clone(),
+                        destination: Some(dest_for_status.to_string_lossy().into_owned()),
+                        capabilities: CapabilitySnapshot::ready(),
+                    });
+                    let event = BridgeEvent::new(BridgeEventKind::DownloadFailed {
+                        error: UiError {
+                            technical_message: msg.clone(),
+                            ..UiError::from_mukei_error(&err, "download_model")
+                        },
+                    });
                     let _ = qt.queue(move |mut qobject| {
+                        qobject.as_mut().event_emitted(event_json(state_event));
+                        qobject.as_mut().event_emitted(event_json(event));
                         qobject.as_mut().download_progress(
                             0.0,
                             QString::from(format!("error:ERR_FFI_PANIC:{msg}").as_str()),
@@ -907,12 +1296,22 @@ impl ffi::MukeiAgent {
                     });
                 }
             }
+            active_downloads
+                .lock()
+                .retain(|download| download != &active_download);
         });
     }
 
     pub fn clear_conversation(self: Pin<&mut Self>) {
         let qt = self.as_ref().get_ref().qt_thread();
-        let _ = qt.queue(|mut qobject| qobject.as_mut().state_changed(QString::from("IDLE_READY")));
+        let _ = qt.queue(|mut qobject| {
+            qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                BridgeEventKind::CapabilitySnapshot {
+                    capabilities: CapabilitySnapshot::ready(),
+                },
+            )));
+            qobject.as_mut().state_changed(QString::from("IDLE_READY"));
+        });
     }
 
     pub fn get_hardware_info(self: Pin<&mut Self>) -> QVariant {
@@ -973,7 +1372,13 @@ impl ffi::MukeiBridge {
                     *store.lock().await = Some(key_bytes);
                 }
                 Err(message) => {
+                    let err = mukei_core::error::MukeiError::ConfigInvalid {
+                        field: "database_cipher_key".to_string(),
+                        reason: message.clone(),
+                    };
+                    let event = error_bridge_event(&err, "set_database_cipher_key");
                     let _ = qt.queue(move |mut qobject| {
+                        qobject.as_mut().event_emitted(event_json(event));
                         qobject.as_mut().error_occurred(
                             QString::from("ERR_DATABASE_KEY_INVALID"),
                             QString::from(&message),
@@ -994,7 +1399,20 @@ impl ffi::MukeiBridge {
         let global = GLOBAL_THERMAL_STATUS.clone();
         mukei_core::runtime::get().spawn(async move {
             *global.lock().await = status;
-            let _ = qt.queue(move |mut qobject| qobject.as_mut().thermal_status_changed(status));
+            let _ = qt.queue(move |mut qobject| {
+                if status >= 3 {
+                    qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                        BridgeEventKind::AppLifecycle {
+                            state: AppLifecycleState::Degraded,
+                            capabilities: CapabilitySnapshot::ready(),
+                            android_storage: Some(AndroidStorageState::Ready {
+                                saf_grant_count: GLOBAL_SAF_REGISTRY.count(),
+                            }),
+                        },
+                    )));
+                }
+                qobject.as_mut().thermal_status_changed(status);
+            });
         });
     }
 
@@ -1125,6 +1543,39 @@ pub extern "C" fn Java_com_mukei_app_MukeiBridge_nativeOnThermalStatus(status: i
 
 #[no_mangle]
 pub extern "C" fn Java_com_mukei_app_MukeiBridge_nativeOnSafGrantRevoked() {}
+
+#[cfg(test)]
+mod qml_contract_tests {
+    const SOURCE: &str = include_str!("lib.rs");
+
+    #[test]
+    fn legacy_agent_qml_contract_symbols_remain_declared() {
+        for symbol in [
+            "fn initialize(",
+            "fn send_message(",
+            "fn stop_generation(",
+            "fn download_model(",
+            "fn stop_download(",
+            "fn model_catalogue_json(",
+            "fn recommended_model_id(",
+            "fn state_changed(",
+            "fn chunk_generated(",
+            "fn stream_finalized(",
+            "fn download_progress(",
+            "fn error_occurred(",
+        ] {
+            assert!(
+                SOURCE.contains(symbol),
+                "missing QML contract symbol {symbol}"
+            );
+        }
+    }
+
+    #[test]
+    fn typed_event_signal_is_declared() {
+        assert!(SOURCE.contains("fn event_emitted("));
+    }
+}
 
 #[cfg(test)]
 mod busy_guard_tests {
@@ -1288,5 +1739,39 @@ mod download_guard_tests {
 
         s.remove(&a);
         s.remove(&b);
+    }
+}
+
+#[cfg(test)]
+mod active_download_tests {
+    use super::{single_active_download, ActiveDownload};
+    use parking_lot::Mutex as ParkingMutex;
+
+    #[test]
+    fn single_active_download_reports_target() {
+        let downloads = ParkingMutex::new(vec![ActiveDownload {
+            model_id: Some("gemma-4-e2b-it".to_string()),
+            destination: "/models/gemma.gguf".to_string(),
+        }]);
+        let (model_id, destination) = single_active_download(&downloads);
+        assert_eq!(model_id.as_deref(), Some("gemma-4-e2b-it"));
+        assert_eq!(destination.as_deref(), Some("/models/gemma.gguf"));
+    }
+
+    #[test]
+    fn multiple_active_downloads_do_not_fake_a_single_target() {
+        let downloads = ParkingMutex::new(vec![
+            ActiveDownload {
+                model_id: Some("gemma-4-e2b-it".to_string()),
+                destination: "/models/e2b.gguf".to_string(),
+            },
+            ActiveDownload {
+                model_id: Some("gemma-4-e4b-it".to_string()),
+                destination: "/models/e4b.gguf".to_string(),
+            },
+        ]);
+        let (model_id, destination) = single_active_download(&downloads);
+        assert!(model_id.is_none());
+        assert!(destination.is_none());
     }
 }

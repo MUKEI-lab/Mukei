@@ -81,6 +81,7 @@ signals:
     void download_progress(double progress, const QString &status);
     void thinking_started();
     void thinking_completed();
+    void event_emitted(const QString &eventJson);
 private slots:
     void emitNextChunk()
     {
@@ -115,6 +116,8 @@ public:
 signals:
     void thermal_status_changed(int status);
     void saf_grant_revoked(const QString &token);
+    void error_occurred(const QString &errorCode, const QString &message);
+    void event_emitted(const QString &eventJson);
 private:
     QString m_modelDir;
 };
