@@ -24,9 +24,10 @@ qml/
 ## Build (desktop smoke)
 
 ```bash
-# 1. Install Qt 6.5 or newer (system package manager or online installer).
+# 1. Install Qt 6.5 or newer (system package manager or Qt online installer).
+#    Ensure QtQuick.Effects / QuickEffects and QtSvg are included.
 #    Fedora:   sudo dnf install qt6-qtdeclarative-devel qt6-qtsvg-devel cmake ninja-build
-#    Debian:   sudo apt install qt6-declarative-dev qt6-svg-dev cmake ninja-build
+#    Debian:   use Qt online installer if distro Qt is older than 6.5.
 #    macOS:    brew install qt cmake ninja
 
 # 2. Configure + build.
@@ -45,6 +46,14 @@ Build it first:
 ```bash
 cd rust
 cargo build -p mukei-bridge --release
+```
+
+Android release builds must enable SQLCipher so local storage opens via
+the encrypted path:
+
+```bash
+cd rust
+cargo build -p mukei-bridge --profile android-release --target aarch64-linux-android --features sqlcipher
 ```
 
 If the file is present, `target_link_libraries(mukei PRIVATE …)` picks it

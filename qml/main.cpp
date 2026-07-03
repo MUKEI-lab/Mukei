@@ -6,10 +6,19 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
+#include <QStringList>
 #include <QTimer>
 #include <QVariantMap>
 #include <QClipboard>
 #include <QGuiApplication>
+
+#ifdef MUKEI_USE_REAL_BRIDGE
+#  if __has_include("mukei_bridge/src/lib.rs.h")
+#    include "mukei_bridge/src/lib.rs.h"
+#  else
+#    error "MUKEI_USE_REAL_BRIDGE requires the CXX-Qt generated mukei_bridge/src/lib.rs.h header in the include path"
+#  endif
+#endif
 
 class MukeiClipboard final : public QObject
 {
@@ -38,8 +47,25 @@ class MukeiAgentStub final : public QObject
 public:
     using QObject::QObject;
     Q_INVOKABLE bool initialize(const QString &) { return true; }
-    Q_INVOKABLE void send_message(const QString &) { emit state_changed(QStringLiteral("streaming")); }
-    Q_INVOKABLE void stop_generation() { emit stream_finalized(); }
+    Q_INVOKABLE void send_message(const QString &message)
+    {
+        m_chunks = {
+            QStringLiteral("Stub response for: "),
+            message.left(80),
+            QStringLiteral("\n\nStreaming path is active.")
+        };
+        m_chunkIndex = 0;
+        emit state_changed(QStringLiteral("streaming"));
+        emit thinking_started();
+        QTimer::singleShot(50, this, &MukeiAgentStub::emitNextChunk);
+    }
+    Q_INVOKABLE void stop_generation()
+    {
+        m_chunkIndex = m_chunks.size();
+        emit thinking_completed();
+        emit stream_finalized();
+        emit state_changed(QStringLiteral("idle"));
+    }
     Q_INVOKABLE void download_model(const QString &, const QString &) { emit download_progress(0.0, QStringLiteral("queued")); }
     Q_INVOKABLE void stop_download() { emit download_progress(0.0, QStringLiteral("stopped")); }
     Q_INVOKABLE void clear_conversation() { emit state_changed(QStringLiteral("idle")); }
@@ -55,6 +81,21 @@ signals:
     void download_progress(double progress, const QString &status);
     void thinking_started();
     void thinking_completed();
+private slots:
+    void emitNextChunk()
+    {
+        if (m_chunkIndex >= m_chunks.size()) {
+            emit thinking_completed();
+            emit stream_finalized();
+            emit state_changed(QStringLiteral("idle"));
+            return;
+        }
+        emit chunk_generated(m_chunks.at(m_chunkIndex++));
+        QTimer::singleShot(50, this, &MukeiAgentStub::emitNextChunk);
+    }
+private:
+    QStringList m_chunks;
+    qsizetype m_chunkIndex = 0;
 };
 
 class MukeiBridgeStub final : public QObject
@@ -64,6 +105,7 @@ public:
     using QObject::QObject;
     Q_INVOKABLE void set_brave_api_key(const QString &) {}
     Q_INVOKABLE void set_tavily_api_key(const QString &) {}
+    Q_INVOKABLE void set_database_cipher_key(const QString &) {}
     Q_INVOKABLE void note_thermal_status(int status) { emit thermal_status_changed(status); }
     Q_INVOKABLE int saf_registry_count() const { return 0; }
     Q_INVOKABLE void set_model_dir(const QString &path) { m_modelDir = path; }
@@ -131,9 +173,15 @@ int main(int argc, char *argv[])
     loadBundledFonts();
 
     MukeiClipboard clipboard;
+#ifdef MUKEI_USE_REAL_BRIDGE
+    ffi::MukeiAgent agent;
+    ffi::MukeiBridge bridge;
+    ffi::SafRegistry safRegistry;
+#else
     MukeiAgentStub agent;
     MukeiBridgeStub bridge;
     SafRegistryStub safRegistry;
+#endif
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("mukeiClipboard"), &clipboard);

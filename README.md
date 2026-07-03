@@ -318,6 +318,8 @@ The full design pass — TRD v0.7.5 (≈6,400 lines), PRD v0.7.5, Backend Schema
 - **Qt 6.5+** for the `mukei-bridge` build only.
 - **SQLite 3.40+** with WAL support (bundled when `rusqlite` feature is on).
 - **Android NDK r26+** for on-device builds (target `aarch64-linux-android`).
+- **SQLCipher feature enabled for Android release bridge builds**:
+  `cargo build -p mukei-bridge --profile android-release --target aarch64-linux-android --features sqlcipher`.
 - A vendored `llama.cpp` checkout under `rust/llama-cpp-prebuilt/vendor/llama.cpp` for real inference builds; the workspace falls back to the release-hardened stub crate otherwise.
 
 ---

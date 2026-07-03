@@ -13,11 +13,11 @@ Control {
     implicitWidth: Math.max(Spacing.xxl, label.implicitWidth + Spacing.md)
     implicitHeight: Spacing.xxl
     background: Rectangle {
-        radius: Spacing.xs
+        radius: Theme.radiusMd
         color: (root.hovered || tapHandler.pressed) ? Theme.p.surfaceFaint : "transparent"
         Behavior on color {
             enabled: !Theme.reduceMotion
-            ColorAnimation { duration: Motion.buttonPressTint; easing.type: Easing.OutCubic }
+            ColorAnimation { duration: Motion.buttonPressTint; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.enter }
         }
     }
     contentItem: Text {

@@ -24,17 +24,17 @@ Item {
             id: body
             Layout.fillWidth: true
             implicitHeight: renderer.implicitHeight + Spacing.md * 2
-            radius: Spacing.sm
+            radius: Theme.radiusLg
             color: root.readerWash ? Theme.p.surfaceFaint : "transparent"
             Behavior on color {
                 enabled: !Theme.reduceMotion
-                ColorAnimation { duration: Motion.bubbleAppear; easing.type: Easing.OutCubic }
+                ColorAnimation { duration: Motion.bubbleAppear; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.enter }
             }
             opacity: 0
             Component.onCompleted: opacity = 1
             Behavior on opacity {
                 enabled: !Theme.reduceMotion
-                NumberAnimation { duration: Motion.bubbleAppear; easing.type: Easing.OutCubic }
+                NumberAnimation { duration: Motion.bubbleAppear; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.enter }
             }
             MarkdownRenderer {
                 id: renderer

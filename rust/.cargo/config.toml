@@ -22,6 +22,13 @@
 # link, no penalty). The flags only apply when the compilation target
 # is aarch64-linux-android, i.e. `cargo ndk` / `cargo apk` runs.
 
+[env]
+# CXX-Qt 0.9's build scripts do not always discover Qt 6 via PATH on
+# Linux/Termux hosts even when `qmake6` is installed. Pin the workspace
+# build to the Qt 6 qmake binary so cargo builds do not require callers
+# to remember `QMAKE=qmake6`.
+QMAKE = "qmake6"
+
 [target.'cfg(all(target_arch = "aarch64", target_os = "android"))']
 rustflags = [
     "-C", "target-feature=+stack-protector-all",

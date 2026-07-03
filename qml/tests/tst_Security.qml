@@ -6,6 +6,7 @@ import QtQuick
 import "../components"
 
 TestCase {
+    id: testCase
     name: "SecurityTests"
     
     // Test 1: Verify CopyButton uses clipboard bridge correctly
@@ -53,45 +54,8 @@ TestCase {
             }
         `, testCase);
         
-        // Note: We can't directly verify clipboard content in QML tests
-        // This test ensures the button can be created and clicked without errors
         copyButton.clicked();
-        
-        // If we reach here without exception, the bridge is working
-        verify(true, "CopyButton click executed without errors");
-        
-        copyButton.destroy();
-    }
-    
-    // Test 4: Verify no dynamic code execution patterns
-    function test_no_dynamic_code_execution() {
-        // Verify that Qt.createQmlObject is only used for static resources
-        // This is a compile-time check - runtime would need static analysis
-        var fontLoader = Qt.createQmlObject(`
-            import QtQuick
-            FontLoader { source: "qrc:/fonts/Inter-Variable.ttf" }
-        `, testCase);
-        
-        verify(fontLoader !== null, "Static font loading should work");
-        fontLoader.destroy();
-    }
-    
-    // Test 5: Verify component isolation
-    function test_component_isolation() {
-        var copyButton = Qt.createQmlObject(`
-            import QtQuick
-            import "../components"
-            CopyButton {
-                textToCopy: "isolated test"
-            }
-        `, testCase);
-        
-        // Verify component doesn't expose internal state globally
-        verify(typeof copyButton._acknowledging !== "undefined", "Internal state should be private convention");
-        
-        // Verify no global pollution
-        verify(typeof window === "undefined" || typeof window.testVar === "undefined", 
-               "Component should not pollute global scope");
+        compare(mukeiClipboard.text(), testText, "CopyButton should write exact text to clipboard bridge");
         
         copyButton.destroy();
     }

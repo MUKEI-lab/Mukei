@@ -112,29 +112,19 @@ jobs:
           echo "OK: no DDG references in qml/"
 
   # ---------------------------------------------------------------------
-  # Static QML lint via qmllint (part of Qt 6). We install Qt 6.6 from
-  # the Ubuntu APT stream instead of aqtinstall because the modules we
-  # need (qtdeclarative, qtsvg, qmllint) are packaged as first-class
-  # `qt6-declarative-dev` / `qt6-svg-dev` there. This avoids the aqt
-  # module-name churn and keeps CI fast (< 60 s).
+  # Static QML lint via qmllint (part of Qt 6). Qt 6.5+ is required by
+  # qml/CMakeLists.txt and IconButton.qml's QtQuick.Effects usage.
   # ---------------------------------------------------------------------
   qmllint:
     name: qmllint
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - name: Install Qt 6 dev packages
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            qt6-base-dev \
-            qt6-declarative-dev \
-            qt6-declarative-dev-tools \
-            qt6-svg-dev \
-            qml6-module-qtquick \
-            qml6-module-qtquick-controls \
-            qml6-module-qtquick-layouts \
-            qml6-module-qttest
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.5.3"
+          modules: "qtsvg"
+          cache: true
       - name: Locate qmllint
         id: locate
         run: |
@@ -156,7 +146,7 @@ jobs:
           set +e
           fail=0
           cd qml
-          # qmllint on Ubuntu's Qt 6.4 emits Warnings for QtQuick.Controls.Basic
+          # qmllint can emit Warnings for QtQuick.Controls.Basic
           # implementation types (T.Control, T.Page, T.Drawer) that ship with
           # the runtime but are not discoverable from the dev headers alone.
           # These are advisory noise — the fail-gate only fires on lines
@@ -190,14 +180,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - name: Install Qt 6 dev packages
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.5.3"
+          modules: "qtsvg"
+          cache: true
+      - name: Install build tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            qt6-base-dev \
-            qt6-declarative-dev \
-            qt6-declarative-dev-tools \
-            qt6-svg-dev \
             cmake \
             ninja-build
       - name: Configure only
@@ -215,18 +206,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - name: Install Qt 6 dev packages
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.5.3"
+          modules: "qtsvg"
+          cache: true
+      - name: Install build tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            qt6-base-dev \
-            qt6-declarative-dev \
-            qt6-declarative-dev-tools \
-            qt6-svg-dev \
-            qml6-module-qtquick \
-            qml6-module-qtquick-controls \
-            qml6-module-qtquick-layouts \
-            qml6-module-qttest \
             cmake \
             ninja-build
       - name: Build and run QML security tests

@@ -13,7 +13,7 @@ Popup {
     y: parent ? parent.height - height : 0
     background: Rectangle {
         color: Theme.p.surface
-        radius: Spacing.md
+        radius: Theme.radiusXl
     }
     Overlay.modal: Rectangle {
         color: Theme.overlay

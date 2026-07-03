@@ -33,8 +33,9 @@ async-trait = "0.1"
 
 # ----- CXX-Qt Bridge (TRD §1.2) -----------------------------------------
 cxx         = "1.0"
-cxx-qt      = "0.6"
-cxx-qt-lib  = "0.6"
+cxx-qt      = "0.9"
+cxx-qt-lib  = "0.9"
+cxx-qt-build = "0.9"
 
 # ----- LLM Inference -----------------------------------------------------
 # TRD §1.2.2 — pinned rev of llama-cpp-rs; only resolved when the

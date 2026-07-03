@@ -25,8 +25,9 @@ use mukei_core::guard::{callback_with_guard, CallbackGuard, Inner};
 let inner = Inner::new();
 let ptr = Arc::into_raw(Arc::clone(&inner));
 let snapshot = inner.generation.load(Ordering::Acquire);
+let instance_id = inner.instance_id();
 
-let result: Result<i32, GuardError> = callback_with_guard!(ptr, snapshot, {
+let result: Result<i32, GuardError> = callback_with_guard!(ptr, snapshot, instance_id, {
     // Your callback logic here
     Ok::<_, GuardError>(42)
 });
@@ -38,6 +39,20 @@ let result: Result<i32, GuardError> = callback_with_guard!(ptr, snapshot, {
 - ABA mitigation via process-unique instance IDs
 - Monotonic generation ensures forward progress only
 
+## 2. Encryption at Rest
+
+Production persistence must be built with the bridge `sqlcipher`
+feature. In that mode `MukeiAgent.initialize()` fails closed unless
+`MukeiBridge.set_database_cipher_key()` has already supplied the
+Android-Keystore-unwrapped database key as hex text. Raw key bytes must
+not cross the `QString` boundary; the bridge decodes the hex string
+back to bytes, then opens storage through
+`DatabasePool::open_with_cipher_key()`, which binds `PRAGMA key` and
+zeroizes the in-memory key buffer after initialization.
+
+Plain `DatabasePool::open()` is the explicit non-cipher fallback for
+development builds that omit the `sqlcipher` feature.
+
 ### Testing FFI Safety
 
 Run the FFI boundary integration tests:
@@ -47,7 +62,7 @@ cd rust
 cargo test -p mukei-core --test ffi_boundaries
 ```
 
-## 2. Input Validation & Fuzzing
+## 3. Input Validation & Fuzzing
 
 ### Fuzzing Harnesses
 
@@ -83,7 +98,7 @@ cargo fuzz run math_expression_fuzzer -j4
 3. **Fail safely** - Invalid input should produce clear errors, not crashes
 4. **Sanitize before use** - Escape special characters in SQL, shell, etc.
 
-## 3. Dependency Security
+## 4. Dependency Security
 
 ### Cargo Audit
 
@@ -122,7 +137,7 @@ cargo deny check advisories sources licenses bans
 - Known vulnerable crates are blocked
 - Wildcard dependencies are denied (except intra-workspace paths)
 
-## 4. Compiler-Level Protections
+## 5. Compiler-Level Protections
 
 ### Release Hardening Profile
 
@@ -171,7 +186,7 @@ cargo clippy -- -D clippy::unwrap_in_result \
 - No panics in functions returning `Result`
 - Warnings on `todo!()` and `unimplemented!()`
 
-## 5. Continuous Security Monitoring
+## 6. Continuous Security Monitoring
 
 ### GitHub Actions Workflows
 
@@ -196,7 +211,7 @@ cargo clippy -- -D clippy::unwrap_in_result \
 | Security Lint | Every PR | GitHub Actions |
 | Full Penetration Test | Quarterly | Manual |
 
-## 6. Property-Based Testing
+## 7. Property-Based Testing
 
 ### Proptest Integration
 

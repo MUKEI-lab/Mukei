@@ -22,6 +22,7 @@ mod core_saf {
     pub struct SafRegistry;
 
     #[derive(Clone, Debug)]
+    #[allow(dead_code)]
     pub struct SafTokenRow {
         pub token_id: String,
         pub source: String,
@@ -55,7 +56,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use cxx_qt::CxxQtType;
+use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QString, QVariant};
 use once_cell::sync::Lazy;
 use tokio::sync::Mutex;
@@ -79,6 +80,9 @@ static GLOBAL_BRAVE_API_KEY: Lazy<Arc<Mutex<Option<String>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
 static GLOBAL_TAVILY_API_KEY: Lazy<Arc<Mutex<Option<String>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
+#[cfg(feature = "sqlcipher")]
+static GLOBAL_DATABASE_CIPHER_KEY: Lazy<Arc<Mutex<Option<Vec<u8>>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(None)));
 
 /// Tool registry shared across every `send_message` invocation. Rebuilt
 /// whenever the Brave or Tavily key changes so the next tool call sees
@@ -89,6 +93,25 @@ static GLOBAL_TOOL_REGISTRY: Lazy<Arc<Mutex<Arc<ToolRegistry>>>> = Lazy::new(|| 
         "missing-tavily-key",
     ))))
 });
+
+#[cfg(feature = "sqlcipher")]
+fn decode_hex_key(hex: &str) -> Result<Vec<u8>, String> {
+    let trimmed = hex.trim();
+    if trimmed.is_empty() {
+        return Err("database cipher key hex is empty".to_string());
+    }
+    if trimmed.len() % 2 != 0 {
+        return Err("database cipher key hex must contain an even number of digits".to_string());
+    }
+
+    let mut out = Vec::with_capacity(trimmed.len() / 2);
+    for idx in (0..trimmed.len()).step_by(2) {
+        let byte = u8::from_str_radix(&trimmed[idx..idx + 2], 16)
+            .map_err(|_| format!("database cipher key hex contains invalid digits at offset {idx}"))?;
+        out.push(byte);
+    }
+    Ok(out)
+}
 
 /// Shared `Arc<AgentLoop>` — `None` until `initialize()` builds it.
 static GLOBAL_AGENT_LOOP: Lazy<Mutex<Option<Arc<AgentLoop>>>> = Lazy::new(|| Mutex::new(None));
@@ -274,6 +297,14 @@ async fn rebuild_tool_registry_from_secrets() {
 
 #[cxx_qt::bridge]
 pub mod ffi {
+    unsafe extern "C++" {
+        include!("cxx-qt-lib/qstring.h");
+        include!("cxx-qt-lib/qvariant.h");
+
+        type QString = cxx_qt_lib::QString;
+        type QVariant = cxx_qt_lib::QVariant;
+    }
+
     unsafe extern "RustQt" {
         #[qobject]
         pub type MukeiAgent = super::MukeiAgentRust;
@@ -324,6 +355,8 @@ pub mod ffi {
         fn thermal_status_changed(self: Pin<&mut MukeiBridge>, status: i32);
         #[qsignal]
         fn saf_grant_revoked(self: Pin<&mut MukeiBridge>, token: QString);
+        #[qsignal]
+        fn error_occurred(self: Pin<&mut MukeiBridge>, error_code: QString, message: QString);
 
         // Wrapped-secrets API — each setter accepts the UNWRAPPED key
         // material (the bridge unwraps via Android Keystore *before*
@@ -333,6 +366,11 @@ pub mod ffi {
         fn set_brave_api_key(self: Pin<&mut MukeiBridge>, api_key: QString);
         #[qinvokable]
         fn set_tavily_api_key(self: Pin<&mut MukeiBridge>, api_key: QString);
+        /// Inject the hex-encoded unwrapped SQLCipher database key
+        /// before `MukeiAgent.initialize()` opens storage. Raw key
+        /// bytes must never be passed through QString.
+        #[qinvokable]
+        fn set_database_cipher_key(self: Pin<&mut MukeiBridge>, key: QString);
         #[qinvokable]
         fn note_thermal_status(self: Pin<&mut MukeiBridge>, status: i32);
         #[qinvokable]
@@ -367,6 +405,10 @@ pub mod ffi {
         #[qinvokable]
         fn count(self: Pin<&mut SafRegistry>) -> i32;
     }
+
+    impl cxx_qt::Threading for MukeiAgent {}
+    impl cxx_qt::Threading for MukeiBridge {}
+    impl cxx_qt::Threading for SafRegistry {}
 }
 
 pub struct MukeiAgentRust {
@@ -445,18 +487,14 @@ impl Default for SafRegistryRust {
     }
 }
 
-impl CxxQtType for MukeiAgentRust {}
-impl CxxQtType for MukeiBridgeRust {}
-impl CxxQtType for SafRegistryRust {}
-
-impl MukeiAgentRust {
+impl ffi::MukeiAgent {
     /// Boot path. Loads + validates `config.toml`, opens the SQLite /
     /// SQLCipher pool, runs pending migrations, hydrates the SAF
     /// registry from disk, reconciles persisted vector state, and
     /// constructs the shared `Arc<AgentLoop>`.
     pub fn initialize(self: Pin<&mut Self>, config_path: QString) -> bool {
-        let qt = self.qt_thread();
-        let state = self.state.clone();
+        let state = self.as_ref().rust().state.clone();
+        let qt = self.as_ref().get_ref().qt_thread();
         let config_path = config_path.to_string();
         mukei_core::runtime::get().spawn(async move {
             let cfg_path = std::path::PathBuf::from(&config_path);
@@ -468,7 +506,7 @@ impl MukeiAgentRust {
                     let _ = qt.queue(move |mut qobject| {
                         qobject
                             .as_mut()
-                            .error_occurred(QString::from(code), QString::from(msg));
+                            .error_occurred(QString::from(&code), QString::from(&msg));
                     });
                     return;
                 }
@@ -484,7 +522,32 @@ impl MukeiAgentRust {
 
             #[cfg(feature = "rusqlite")]
             {
-                let pool = match agent_runtime::open_pool(&cfg).await {
+                #[cfg(feature = "sqlcipher")]
+                let database_key = match GLOBAL_DATABASE_CIPHER_KEY.lock().await.take() {
+                    Some(key) if !key.is_empty() => key,
+                    _ => {
+                        let err = mukei_core::error::MukeiError::DatabaseInitFailed(
+                            "SQLCipher build requires set_database_cipher_key() before initialize()"
+                                .to_string(),
+                        );
+                        let code = err.error_code().to_string();
+                        let msg = err.to_string();
+                        let _ = qt.queue(move |mut qobject| {
+                            qobject
+                                .as_mut()
+                                .error_occurred(QString::from(&code), QString::from(&msg));
+                        });
+                        return;
+                    }
+                };
+
+                let pool = match agent_runtime::open_pool(
+                    &cfg,
+                    #[cfg(feature = "sqlcipher")]
+                    database_key,
+                )
+                .await
+                {
                     Ok(p) => Arc::new(p),
                     Err(e) => {
                         let code = e.error_code().to_string();
@@ -492,7 +555,7 @@ impl MukeiAgentRust {
                         let _ = qt.queue(move |mut qobject| {
                             qobject
                                 .as_mut()
-                                .error_occurred(QString::from(code), QString::from(msg));
+                                .error_occurred(QString::from(&code), QString::from(&msg));
                         });
                         return;
                     }
@@ -505,7 +568,7 @@ impl MukeiAgentRust {
                     let _ = qt.queue(move |mut qobject| {
                         qobject
                             .as_mut()
-                            .error_occurred(QString::from(code), QString::from(msg));
+                            .error_occurred(QString::from(&code), QString::from(&msg));
                     });
                     return;
                 }
@@ -557,9 +620,11 @@ impl MukeiAgentRust {
     }
 
     pub fn send_message(self: Pin<&mut Self>, user_input: QString) {
-        let qt_thread = self.qt_thread();
-        let cancel_token = self.cancel_token.clone();
-        let busy = self.busy.clone();
+        let binding = self.as_ref();
+        let rust = binding.rust();
+        let cancel_token = rust.cancel_token.clone();
+        let busy = rust.busy.clone();
+        let qt_thread = self.as_ref().get_ref().qt_thread();
         let input = user_input.to_string();
 
         // Re-entrancy guard (user priority follow-up): refuse the call
@@ -578,7 +643,7 @@ impl MukeiAgentRust {
             let _ = qt_thread.queue(move |mut qobject| {
                 qobject
                     .as_mut()
-                    .error_occurred(QString::from(code), QString::from(message));
+                    .error_occurred(QString::from(&code), QString::from(&message));
             });
             return;
         }
@@ -633,7 +698,7 @@ impl MukeiAgentRust {
                         let code = error.error_code().to_string();
                         let message = error.to_string();
                         let _ = qt_thread.queue(move |mut qobject| {
-                            qobject.as_mut().error_occurred(QString::from(code), QString::from(message));
+                            qobject.as_mut().error_occurred(QString::from(&code), QString::from(&message));
                         });
                     }
                 }
@@ -669,16 +734,18 @@ impl MukeiAgentRust {
     /// now own independent tokens; call [`Self::stop_download`] to
     /// cancel a download.
     pub fn stop_generation(mut self: Pin<&mut Self>) {
-        self.cancel_token.cancel();
-        self.cancel_token = CancellationToken::new();
+        let mut rust = self.as_mut().rust_mut();
+        rust.cancel_token.cancel();
+        rust.cancel_token = CancellationToken::new();
     }
 
     /// Cancel the in-flight model download (if any). Independent of
     /// `stop_generation` so pressing the chat Stop button never kills
     /// a multi-gigabyte model fetch running underneath the UI.
     pub fn stop_download(mut self: Pin<&mut Self>) {
-        self.download_cancel.cancel();
-        self.download_cancel = CancellationToken::new();
+        let mut rust = self.as_mut().rust_mut();
+        rust.download_cancel.cancel();
+        rust.download_cancel = CancellationToken::new();
     }
 
     /// Kick off a streaming GGUF download (TRD §8.1 / REQ-MOD-01).
@@ -714,10 +781,10 @@ impl MukeiAgentRust {
     /// * `complete:<absolute_path>`
     /// * `error:<ERR_CODE>:<message>`
     pub fn download_model(self: Pin<&mut Self>, url: QString, sha256: QString) {
-        let qt = self.qt_thread();
+        let cancel = self.as_ref().rust().download_cancel.clone();
+        let qt = self.as_ref().get_ref().qt_thread();
         // Architect-review follow-up: use the *download-only* token so
         // `stop_generation()` no longer silently cancels the download.
-        let cancel = self.download_cancel.clone();
         let url_or_id = url.to_string();
         let sha = sha256.to_string();
 
@@ -730,7 +797,7 @@ impl MukeiAgentRust {
                     let _ = qt.queue(move |mut qobject| {
                         qobject.as_mut().download_progress(
                             0.0,
-                            QString::from(format!("error:{code}:{message}")),
+                            QString::from(format!("error:{code}:{message}").as_str()),
                         );
                     });
                     return;
@@ -757,7 +824,7 @@ impl MukeiAgentRust {
                     let _ = qt.queue(move |mut qobject| {
                         qobject.as_mut().download_progress(
                             0.0,
-                            QString::from(format!("error:{code}:{message}")),
+                            QString::from(format!("error:{code}:{message}").as_str()),
                         );
                     });
                     return;
@@ -788,7 +855,7 @@ impl MukeiAgentRust {
                         let _ = qt_for_ev.queue(move |mut qobject| {
                             qobject
                                 .as_mut()
-                                .download_progress(0.0, QString::from(status));
+                                .download_progress(0.0, QString::from(&status));
                         });
                     }
                     mukei_core::storage::DownloadEvent::Progress {
@@ -799,7 +866,7 @@ impl MukeiAgentRust {
                         let _ = qt_for_ev.queue(move |mut qobject| {
                             qobject
                                 .as_mut()
-                                .download_progress(progress, QString::from(status));
+                                .download_progress(progress, QString::from(&status));
                         });
                     }
                     mukei_core::storage::DownloadEvent::Complete { final_path } => {
@@ -807,7 +874,7 @@ impl MukeiAgentRust {
                         let _ = qt_for_ev.queue(move |mut qobject| {
                             qobject
                                 .as_mut()
-                                .download_progress(1.0, QString::from(status));
+                                .download_progress(1.0, QString::from(&status));
                         });
                     }
                     mukei_core::storage::DownloadEvent::Error { code, message } => {
@@ -815,7 +882,7 @@ impl MukeiAgentRust {
                         let _ = qt_for_ev.queue(move |mut qobject| {
                             qobject
                                 .as_mut()
-                                .download_progress(0.0, QString::from(status));
+                                .download_progress(0.0, QString::from(&status));
                         });
                     }
                 }
@@ -834,7 +901,7 @@ impl MukeiAgentRust {
                     let _ = qt.queue(move |mut qobject| {
                         qobject.as_mut().download_progress(
                             0.0,
-                            QString::from(format!("error:ERR_FFI_PANIC:{msg}")),
+                            QString::from(format!("error:ERR_FFI_PANIC:{msg}").as_str()),
                         );
                     });
                 }
@@ -843,17 +910,18 @@ impl MukeiAgentRust {
     }
 
     pub fn clear_conversation(self: Pin<&mut Self>) {
-        let qt = self.qt_thread();
+        let qt = self.as_ref().get_ref().qt_thread();
         let _ = qt.queue(|mut qobject| qobject.as_mut().state_changed(QString::from("IDLE_READY")));
     }
 
     pub fn get_hardware_info(self: Pin<&mut Self>) -> QVariant {
-        QVariant::from(QString::from(format!(
+        let summary = QString::from(format!(
             "os={} arch={} thermal_status={}",
             std::env::consts::OS,
             std::env::consts::ARCH,
             *GLOBAL_THERMAL_STATUS.blocking_lock()
-        )))
+        ).as_str());
+        QVariant::from(&summary)
     }
 
     pub fn update_setting(self: Pin<&mut Self>, key: QString, value: QVariant) {
@@ -861,7 +929,7 @@ impl MukeiAgentRust {
     }
 }
 
-impl MukeiBridgeRust {
+impl ffi::MukeiBridge {
     /// Inject the unwrapped Brave API key and rebuild the shared tool
     /// registry so the next `web_search` call uses the new credential.
     /// (Issue #3.)
@@ -886,8 +954,39 @@ impl MukeiBridgeRust {
         });
     }
 
+    /// Inject the hex-encoded unwrapped SQLCipher key that protects the
+    /// local database. The Android/JNI side must hex-encode raw
+    /// Keystore output before crossing the QString boundary; this
+    /// method decodes it back to bytes before storage initialization.
+    #[cfg(feature = "sqlcipher")]
+    pub fn set_database_cipher_key(self: Pin<&mut Self>, key: QString) {
+        let qt = self.as_ref().get_ref().qt_thread();
+        let store = GLOBAL_DATABASE_CIPHER_KEY.clone();
+        let key_hex = key.to_string();
+        mukei_core::runtime::get().spawn(async move {
+            match decode_hex_key(&key_hex) {
+                Ok(key_bytes) => {
+                    *store.lock().await = Some(key_bytes);
+                }
+                Err(message) => {
+                    let _ = qt.queue(move |mut qobject| {
+                        qobject.as_mut().error_occurred(
+                            QString::from("ERR_DATABASE_KEY_INVALID"),
+                            QString::from(&message),
+                        );
+                    });
+                }
+            }
+        });
+    }
+
+    #[cfg(not(feature = "sqlcipher"))]
+    pub fn set_database_cipher_key(self: Pin<&mut Self>, key: QString) {
+        let _ = (self, key);
+    }
+
     pub fn note_thermal_status(self: Pin<&mut Self>, status: i32) {
-        let qt = self.qt_thread();
+        let qt = self.as_ref().get_ref().qt_thread();
         let global = GLOBAL_THERMAL_STATUS.clone();
         mukei_core::runtime::get().spawn(async move {
             *global.lock().await = status;
@@ -944,11 +1043,11 @@ impl MukeiBridgeRust {
             })
             .collect();
         let json = serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string());
-        QString::from(json)
+        QString::from(&json)
     }
 }
 
-impl SafRegistryRust {
+impl ffi::SafRegistry {
     pub fn upsert_grant(
         self: Pin<&mut Self>,
         token: QString,
@@ -981,12 +1080,12 @@ impl SafRegistryRust {
     pub fn resolve_token(self: Pin<&mut Self>, token: QString) -> QString {
         GLOBAL_SAF_REGISTRY
             .resolve(&token.to_string())
-            .map(QString::from)
+            .map(|target| QString::from(&target))
             .unwrap_or_else(|_| QString::from(""))
     }
 
     pub fn revoke_token(self: Pin<&mut Self>, token: QString) -> bool {
-        let qt = self.qt_thread();
+        let qt = self.as_ref().get_ref().qt_thread();
         let token_string = token.to_string();
         let qt_clone = qt.clone();
         mukei_core::runtime::get().spawn(async move {
@@ -1004,7 +1103,7 @@ impl SafRegistryRust {
                 }
             }
             let _ = qt_clone.queue(move |mut qobject| {
-                qobject.as_mut().token_revoked(QString::from(token_string));
+                qobject.as_mut().token_revoked(QString::from(&token_string));
             });
         });
         true

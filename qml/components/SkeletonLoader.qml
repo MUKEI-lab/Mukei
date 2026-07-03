@@ -12,7 +12,7 @@ Rectangle {
     Accessible.role: Accessible.StaticText
     Accessible.name: qsTr("Loading placeholder")
     Accessible.description: qsTr("Content is loading")
-    radius: Spacing.xs
+    radius: Theme.radiusMd
     color: Theme.p.surfaceVariant
     opacity: 0.55
     clip: true
@@ -37,7 +37,8 @@ Rectangle {
             from: -shimmer.width
             to: root.width + shimmer.width
             duration: 1400
-            easing.type: Easing.InOutQuad
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Motion.enter
         }
     }
 
@@ -49,6 +50,6 @@ Rectangle {
 
     Behavior on opacity {
         enabled: !Theme.reduceMotion
-        NumberAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
+        NumberAnimation { duration: Motion.themeCrossFade; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.exit }
     }
 }

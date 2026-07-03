@@ -6,18 +6,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(QT_QUICK_CONTROLS_STYLE "Basic")
 
-# Prefer Qt 6.5+ so we get `qt_add_qml_module` + variable-font support,
-# but accept 6.4 (Ubuntu 24.04 ships 6.4.2) if that is all the host has —
-# variable fonts still render, only the `wght` axis is picked up as
-# discrete weights instead of interpolated. CI defends the 6.5 pathway
-# via the desktop-cache install; this softer bound keeps distro builds
-# working out of the box.
-find_package(Qt6 6.4 REQUIRED COMPONENTS
-    Core Gui Quick Qml QuickControls2 Widgets Svg
+option(MUKEI_USE_REAL_BRIDGE "Instantiate CXX-Qt bridge objects instead of local QML stubs" OFF)
+
+# Qt 6.5+ is required for QtQuick.Effects.MultiEffect and variable-font
+# axis handling used by the committed QML components.
+find_package(Qt6 6.5 REQUIRED COMPONENTS
+    Core Gui Quick Qml QuickControls2 QuickEffects Widgets Svg
 )
-if(Qt6_VERSION VERSION_LESS 6.5)
-    message(WARNING "Qt ${Qt6_VERSION} < 6.5 — variable-font axes fall back to nearest static weight; upgrade the host Qt for the full UXB v2.1 rendering.")
-endif()
 
 # Cargo build directory selection. Android builds still cross-compile to
 # `aarch64-linux-android/release`; every other host (Linux/macOS desktop
@@ -107,12 +102,19 @@ target_link_libraries(mukei PRIVATE
     Qt6::Quick
     Qt6::Qml
     Qt6::QuickControls2
+    Qt6::QuickEffects
     Qt6::Widgets
     Qt6::Svg
 )
 
 if(EXISTS ${MUKEI_BRIDGE_LIB})
     target_link_libraries(mukei PRIVATE ${MUKEI_BRIDGE_LIB})
+elseif(MUKEI_USE_REAL_BRIDGE)
+    message(FATAL_ERROR "MUKEI_USE_REAL_BRIDGE=ON but MUKEI_BRIDGE_LIB does not exist: ${MUKEI_BRIDGE_LIB}")
+endif()
+
+if(MUKEI_USE_REAL_BRIDGE)
+    target_compile_definitions(mukei PRIVATE MUKEI_USE_REAL_BRIDGE=1)
 endif()
 
 if(ANDROID)

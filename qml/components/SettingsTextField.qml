@@ -31,7 +31,7 @@ Control {
                 color: Theme.p.surface
                 border.width: 1
                 border.color: root.errorText.length > 0 ? Theme.error : Theme.p.divider
-                radius: Spacing.xs
+                radius: Theme.radiusMd
             }
         }
         Text {

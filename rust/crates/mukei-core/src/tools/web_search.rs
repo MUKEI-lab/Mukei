@@ -88,6 +88,20 @@ impl WebSearchTool {
     }
 }
 
+/// Validate and normalize an untrusted web-search query before planner
+/// execution. Exposed for fuzzing so the harness covers production
+/// validation rather than a local placeholder sanitizer.
+pub fn validate_query_input(query: &str) -> Result<&str> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Err(MukeiError::ToolArgumentInvalid {
+            field: "query",
+            reason: "empty query".to_string(),
+        });
+    }
+    Ok(query)
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct WebSearchArgs {
     query: String,
@@ -102,13 +116,7 @@ impl Tool for WebSearchTool {
     async fn run(&self, arguments: Value) -> Result<String> {
         let args: WebSearchArgs = serde_json::from_value(arguments)
             .map_err(|e| MukeiError::ToolParseFailed(e.to_string()))?;
-        let query = args.query.trim();
-        if query.is_empty() {
-            return Err(MukeiError::ToolArgumentInvalid {
-                field: "query",
-                reason: "empty query".to_string(),
-            });
-        }
+        let query = validate_query_input(&args.query)?;
 
         let plan = self.planner.run(query).await?;
 

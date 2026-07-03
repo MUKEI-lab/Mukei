@@ -14,6 +14,7 @@ QtObject {
     function fontSpec(family, size, lineHeight, weight, italic) {
         return {
             "family": family,
+            "baseSize": size,
             "pixelSize": px(size),
             "lineHeight": lineHeight,
             "weight": weight,
@@ -23,7 +24,7 @@ QtObject {
 
     function apply(textItem, token) {
         textItem.font.family = token.family;
-        textItem.font.pixelSize = token.pixelSize;
+        textItem.font.pixelSize = Qt.binding(function() { return px(token.baseSize); });
         textItem.font.weight = token.weight;
         textItem.font.italic = token.italic;
         textItem.lineHeightMode = Text.ProportionalHeight;

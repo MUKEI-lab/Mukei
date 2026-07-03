@@ -76,10 +76,17 @@ pub fn load_config(path: &Path) -> Result<MukeiConfig> {
 
 /// Open the SQLite / SQLCipher pool and apply migrations.
 #[cfg(feature = "rusqlite")]
-pub async fn open_pool(cfg: &MukeiConfig) -> Result<mukei_core::storage::DatabasePool> {
+pub async fn open_pool(
+    cfg: &MukeiConfig,
+    #[cfg(feature = "sqlcipher")] unwrapped_database_key: Vec<u8>,
+) -> Result<mukei_core::storage::DatabasePool> {
     use mukei_core::storage::{DatabasePool, Migrator, MIGRATIONS_DIR};
 
+    #[cfg(feature = "sqlcipher")]
+    let pool = DatabasePool::open_with_cipher_key(&cfg.database_path, unwrapped_database_key)?;
+    #[cfg(not(feature = "sqlcipher"))]
     let pool = DatabasePool::open(&cfg.database_path)?;
+
     let migrations_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../")
         .join(MIGRATIONS_DIR);

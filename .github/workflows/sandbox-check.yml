@@ -76,6 +76,22 @@ jobs:
             exit 1
           fi
 
+      - name: P3b — Android release bridge builds must enable SQLCipher
+        run: |
+          # Any future Android/release build command that ships
+          # mukei-bridge must include the fail-closed SQLCipher feature.
+          # Plain SQLite is allowed only for non-release development
+          # builds.
+          hits=$(grep -RInE 'cargo[[:space:]]+build.*mukei-bridge.*(aarch64-linux-android|android-release)|(aarch64-linux-android|android-release).*cargo[[:space:]]+build.*mukei-bridge' \
+            .github README.md SECURITY.md qml/README.md rust/README.md rust/docs 2>/dev/null \
+            | grep -v '.github/workflows/sandbox-check.yml' || true)
+          violations=$(echo "$hits" | grep -v 'sqlcipher' || true)
+          if [ -n "$violations" ]; then
+            echo "::error::Android/release bridge build command missing --features sqlcipher:"
+            echo "$violations"
+            exit 1
+          fi
+
       - name: P4 — tool execution policy default threshold must be at least 5
         run: |
           # The legacy default of 2 was too brittle for transient errors.

@@ -82,7 +82,11 @@ impl Tool for MathTool {
     }
 }
 
-fn validate_expression(expression: &str) -> Result<()> {
+/// Validate an untrusted math expression before it reaches `meval`.
+///
+/// Exposed for fuzzing and validator tests; evaluation remains owned by
+/// [`MathTool`] so callers do not bypass timeout handling.
+pub fn validate_expression(expression: &str) -> Result<()> {
     if expression.is_empty() {
         return Err(MukeiError::ToolArgumentInvalid {
             field: "expression",

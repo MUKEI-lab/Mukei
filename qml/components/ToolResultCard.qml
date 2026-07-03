@@ -10,17 +10,17 @@ Rectangle {
     Accessible.role: Accessible.StaticText
     Accessible.name: title
     Accessible.description: body
-    radius: Spacing.sm
+    radius: Theme.radiusLg
     color: Theme.p.surface
     border.width: 1
     border.color: Theme.p.divider
     Behavior on color {
         enabled: !Theme.reduceMotion
-        ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
+        ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.enter }
     }
     Behavior on border.color {
         enabled: !Theme.reduceMotion
-        ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
+        ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.enter }
     }
     implicitHeight: column.implicitHeight + Spacing.md * 2
     ColumnLayout {

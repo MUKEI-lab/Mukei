@@ -24,7 +24,7 @@ Control {
     }
 
     background: Rectangle {
-        radius: Spacing.xs
+        radius: Theme.radiusMd
         color: Theme.error
     }
     contentItem: Text {

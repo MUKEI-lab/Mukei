@@ -116,6 +116,18 @@ jobs:
             --lib --tests \
             -- --nocapture
 
+  sqlcipher-build:
+    name: cargo build --workspace --features sqlcipher
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo build workspace with SQLCipher feature
+        working-directory: rust
+        run: cargo build --workspace --features sqlcipher
+
   # ---------------------------------------------------------------------
   # Security-focused Clippy lints for unwrap/expect usage and arithmetic
   # side effects.

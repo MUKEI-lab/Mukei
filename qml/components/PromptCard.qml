@@ -12,7 +12,7 @@ Rectangle {
     Accessible.role: Accessible.Button
     Accessible.name: qsTr("Fill prompt")
     Accessible.description: prompt
-    radius: Spacing.sm
+    radius: Theme.radiusLg
     color: Theme.p.surface
     implicitHeight: promptText.implicitHeight + Spacing.lg
     Text {

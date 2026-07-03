@@ -7,7 +7,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use mukei_core::types; // Assuming math validation is in types module
+use mukei_core::tools::math::validate_expression;
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(input) = std::str::from_utf8(data) {
@@ -16,13 +16,11 @@ fuzz_target!(|data: &[u8]| {
             return;
         }
         
-        // Test math expression validation
-        // The meval crate should handle all inputs gracefully
-        let _result = meval::eval_str(input);
-        
-        // If we have a custom validation layer, test it here
-        // For example, if there's a whitelist of allowed functions:
-        // let _validated = validate_math_expression(input);
+        // Test Mukei's production validation layer first. Only inputs
+        // accepted by that layer should reach the third-party parser.
+        if validate_expression(input).is_ok() {
+            let _result = meval::eval_str(input);
+        }
         
         // Additional checks can be added:
         // - Ensure no stack overflow on deeply nested expressions

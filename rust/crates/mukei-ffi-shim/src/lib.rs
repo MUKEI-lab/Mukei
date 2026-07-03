@@ -6,8 +6,8 @@
 //! [`mukei_core::guard::CallbackGuard`] and dispatched through the
 //! [`mukei_core::callback_with_guard!`] macro so that:
 //!
-//!  1. A destroyed QObject can never receive a tail-callback (generation
-//!     mismatch → drop).
+//!  1. A destroyed or ABA-reused QObject can never receive a
+//!     tail-callback (generation or instance mismatch → drop).
 //!  2. A Rust-side panic can never escape across the FFI boundary
 //!     (`std::panic::catch_unwind` wrapper inside the macro).
 //!
@@ -101,6 +101,23 @@ pub extern "C" fn mukei_callback_guard_matches(guard_ptr: *const Inner, generati
     inner.generation.load(Ordering::Acquire) == generation
 }
 
+/// True iff `(generation, instance_id)` matches the live guard. This is
+/// the full ABA-safe predicate; `mukei_callback_guard_matches` remains
+/// for legacy callers that only understand generation snapshots.
+#[no_mangle]
+pub extern "C" fn mukei_callback_guard_matches_instance(
+    guard_ptr: *const Inner,
+    generation: u64,
+    instance_id: u64,
+) -> bool {
+    if guard_ptr.is_null() {
+        return false;
+    }
+    // SAFETY: see `mukei_callback_guard_matches`.
+    let inner = unsafe { &*guard_ptr };
+    inner.generation.load(Ordering::Acquire) == generation && inner.instance_id() == instance_id
+}
+
 /// Bump the guard's generation as the "stop the world" signal. Any
 /// callback still scheduled against the previous generation will be
 /// dropped on its next dispatch.
@@ -164,6 +181,7 @@ pub extern "C" fn mukei_send_message(
     // bound to a prior generation is logically cancelled (see
     // `mukei_callback_guard_bump_generation`).
     let generation = mukei_callback_guard_bump_generation(guard_ptr);
+    let instance_id = mukei_callback_guard_instance_id(guard_ptr);
     let context_addr = context_ptr as usize;
     let guard_addr = guard_ptr as usize;
 
@@ -178,10 +196,11 @@ pub extern "C" fn mukei_send_message(
         // Single dispatch — `callback_with_guard!` enforces:
         //   1. generation match,
         //   2. `catch_unwind` so a panic does NOT cross the FFI boundary.
-        let result: Result<(), GuardError> = callback_with_guard!(guard_ptr_local, generation, {
-            callback(context_ptr_local, generation, payload.as_ptr());
-            Ok::<(), GuardError>(())
-        });
+        let result: Result<(), GuardError> =
+            callback_with_guard!(guard_ptr_local, generation, instance_id, {
+                callback(context_ptr_local, generation, payload.as_ptr());
+                Ok::<(), GuardError>(())
+            });
 
         if let Err(err) = result {
             tracing::warn!(?err, "ffi-shim callback dropped (guard expired or panic)");
@@ -254,6 +273,7 @@ mod tests {
             "mukei_callback_guard_current_generation",
             "mukei_callback_guard_bump_generation",
             "mukei_callback_guard_matches",
+            "mukei_callback_guard_matches_instance",
             "mukei_stop_generation",
             "mukei_callback_guard_instance_id",
             "mukei_initialize",

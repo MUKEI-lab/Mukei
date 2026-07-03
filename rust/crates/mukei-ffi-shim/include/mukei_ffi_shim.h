@@ -123,6 +123,15 @@ bool mukei_callback_guard_matches(const MukeiCallbackGuardInner* guard_ptr,
                                   uint64_t generation);
 
 /*
+ * Compare both generation and instance id to a previously-captured
+ * snapshot. This is the ABA-safe form new dispatch code should use.
+ */
+bool mukei_callback_guard_matches_instance(
+    const MukeiCallbackGuardInner* guard_ptr,
+    uint64_t generation,
+    uint64_t instance_id);
+
+/*
  * Permanently invalidate the guard target (tombstone). Any in-flight
  * callback observes a generation mismatch on its next attempt.
  * Distinct from `mukei_release_callback_guard`: the guard heap
@@ -169,19 +178,19 @@ bool mukei_initialize(const char* config_path);
  * Returns the generation value the callback will be invoked with so
  * the caller can match deliveries to bind sites.
  *
- *   guard_ptr   — guard allocated via `mukei_acquire_callback_guard`.
- *                 NULL is rejected (returns 0).
- *   context_ptr — opaque pointer relayed to every callback invocation.
  *   input       — UTF-8, NUL-terminated user prompt. NULL is rejected
  *                 (returns 0). Copied internally; lifetime ends with
  *                 this call.
+ *   context_ptr — opaque pointer relayed to every callback invocation.
+ *   guard_ptr   — guard allocated via `mukei_acquire_callback_guard`.
+ *                 NULL is rejected (returns 0).
  *   callback    — token-stream sink. MUST NOT be NULL.
  *
  * Returns 0 on NULL-input rejection; otherwise the dispatch generation.
  */
-uint64_t mukei_send_message(const MukeiCallbackGuardInner* guard_ptr,
+uint64_t mukei_send_message(const char* input,
                             void* context_ptr,
-                            const char* input,
+                            const MukeiCallbackGuardInner* guard_ptr,
                             MukeiTokenCallback callback);
 
 #ifdef __cplusplus
