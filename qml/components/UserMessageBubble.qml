@@ -47,8 +47,7 @@ Item {
                 enabled: !Theme.reduceMotion
                 NumberAnimation {
                     duration: Motion.bubbleAppear
-                    easing.type: Easing.BezierSpline
-                    easing.bezierCurve: Motion.enter
+                    easing.type: Easing.OutBack
                 }
             }
             Text {

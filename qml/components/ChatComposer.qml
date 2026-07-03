@@ -15,7 +15,7 @@ FocusScope {
     Accessible.role: Accessible.EditableText
     Accessible.name: qsTr("Compose message")
     Accessible.description: qsTr("Type a private message to Mukei")
-    implicitHeight: Math.min(textArea.contentHeight + Spacing.md * 2, Type.bodyUI.pixelSize * 6 + Spacing.lg)
+    implicitHeight: Math.min(textArea.contentHeight + Spacing.md * 2, Type.px(Type.bodyUI.size) * 6 + Spacing.lg)
 
     Rectangle {
         anchors.fill: parent
@@ -40,8 +40,8 @@ FocusScope {
         TextArea {
             id: textArea
             Layout.fillWidth: true
-            Layout.minimumHeight: Type.bodyUI.pixelSize
-            Layout.maximumHeight: Type.bodyUI.pixelSize * 6
+            Layout.minimumHeight: Type.px(Type.bodyUI.size)
+            Layout.maximumHeight: Type.px(Type.bodyUI.size) * 6
             wrapMode: TextArea.Wrap
             color: Theme.p.inkPrimary
             placeholderText: qsTr("Ask Mukei anything…")
