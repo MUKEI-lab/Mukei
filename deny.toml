@@ -117,6 +117,9 @@ skip = [
     { crate = "bit-vec@0.6.3",            reason = "candle-transformers transitive via fancy-regex 0.13" },
     # `raw-cpuid` (used by gemm/candle) still pins `bitflags 1.x`.
     { crate = "bitflags@1.3.2",           reason = "candle-core/gemm transitive via raw-cpuid 10.x" },
+    # `cxx-qt-build` 0.9 still carries the older diagnostics stack; `cxx-build`
+    # is already on codespan-reporting 0.13 / unicode-width 0.2.
+    { crate = "codespan-reporting@0.11.1", reason = "cxx-qt-build 0.9 transitive — clears when upstream moves to codespan-reporting 0.13+" },
     # `sha2` 0.10 lags one minor behind `blake3`/`chacha20` for cpufeatures.
     { crate = "cpufeatures@0.2.17",       reason = "sha2 0.10 transitive; blake3/chacha20 already on 0.3" },
     # The 0.2/0.3/0.4 split tracks the rand/uuid major bump cycle.
@@ -146,6 +149,7 @@ skip = [
     # is on the 1.x line.
     { crate = "toml_datetime@0.6.11",     reason = "toml 0.8 transitive — clears with toml 1.0 rollout" },
     { crate = "toml_edit@0.22.27",        reason = "toml 0.8 transitive — clears with toml 1.0 rollout" },
+    { crate = "unicode-width@0.1.14",      reason = "cxx-qt-build 0.9 transitive via codespan-reporting 0.11" },
     # `indicatif` / `console` keep windows-sys 0.59 while mio/socket2 use 0.61.
     { crate = "windows-sys@0.59.0",       reason = "indicatif/console transitive — clears with indicatif 0.18" },
     # `toml_edit 0.22` keeps `winnow 0.7`; the cxx-build chain is on 1.x.

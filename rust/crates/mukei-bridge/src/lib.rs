@@ -106,8 +106,9 @@ fn decode_hex_key(hex: &str) -> Result<Vec<u8>, String> {
 
     let mut out = Vec::with_capacity(trimmed.len() / 2);
     for idx in (0..trimmed.len()).step_by(2) {
-        let byte = u8::from_str_radix(&trimmed[idx..idx + 2], 16)
-            .map_err(|_| format!("database cipher key hex contains invalid digits at offset {idx}"))?;
+        let byte = u8::from_str_radix(&trimmed[idx..idx + 2], 16).map_err(|_| {
+            format!("database cipher key hex contains invalid digits at offset {idx}")
+        })?;
         out.push(byte);
     }
     Ok(out)
@@ -915,12 +916,15 @@ impl ffi::MukeiAgent {
     }
 
     pub fn get_hardware_info(self: Pin<&mut Self>) -> QVariant {
-        let summary = QString::from(format!(
-            "os={} arch={} thermal_status={}",
-            std::env::consts::OS,
-            std::env::consts::ARCH,
-            *GLOBAL_THERMAL_STATUS.blocking_lock()
-        ).as_str());
+        let summary = QString::from(
+            format!(
+                "os={} arch={} thermal_status={}",
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+                *GLOBAL_THERMAL_STATUS.blocking_lock()
+            )
+            .as_str(),
+        );
         QVariant::from(&summary)
     }
 

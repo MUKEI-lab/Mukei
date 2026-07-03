@@ -124,6 +124,21 @@ jobs:
         with:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.5.3"
+          cache: true
+      - name: Configure qmake for cxx-qt
+        run: |
+          set -e
+          if command -v qmake6 >/dev/null; then
+            echo "QMAKE=$(command -v qmake6)" >> "$GITHUB_ENV"
+          elif command -v qmake >/dev/null; then
+            echo "QMAKE=$(command -v qmake)" >> "$GITHUB_ENV"
+          else
+            echo "::error::qmake/qmake6 not found after Qt install"
+            exit 1
+          fi
       - name: cargo build workspace with SQLCipher feature
         working-directory: rust
         run: cargo build --workspace --features sqlcipher

@@ -111,8 +111,9 @@ fn generation_mismatch_detected_on_tombstone() {
     inner.tombstone();
 
     // Attempt callback with stale snapshot
-    let result: Result<i32, GuardError> =
-        callback_with_guard!(ptr, stale_snapshot, instance_id, { Ok::<_, GuardError>(99) });
+    let result: Result<i32, GuardError> = callback_with_guard!(ptr, stale_snapshot, instance_id, {
+        Ok::<_, GuardError>(99)
+    });
 
     // Should fail with GenerationMismatch
     assert!(matches!(

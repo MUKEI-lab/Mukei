@@ -319,10 +319,8 @@ mod tests {
 
     #[test]
     fn invalid_guard_rejects() {
-        let err = callback_with_guard!(std::ptr::null(), 1u64, 1u64, {
-            Ok::<_, GuardError>(42)
-        })
-        .unwrap_err();
+        let err = callback_with_guard!(std::ptr::null(), 1u64, 1u64, { Ok::<_, GuardError>(42) })
+            .unwrap_err();
         assert_eq!(err, GuardError::Released);
     }
 
@@ -350,8 +348,8 @@ mod tests {
         let instance = inner.instance_id();
         inner.tombstone();
 
-        let err =
-            callback_with_guard!(ptr, stale_snap, instance, { Ok::<_, GuardError>(0) }).unwrap_err();
+        let err = callback_with_guard!(ptr, stale_snap, instance, { Ok::<_, GuardError>(0) })
+            .unwrap_err();
         assert!(matches!(err, GuardError::GenerationMismatch { .. }));
 
         unsafe { CallbackGuard::release(ptr) };
@@ -471,9 +469,8 @@ mod tests {
         let snap = inner.generation.load(Ordering::Acquire);
         let stale_instance = inner.instance_id() + 1;
 
-        let err =
-            callback_with_guard!(ptr, snap, stale_instance, { Ok::<_, GuardError>(0) })
-                .unwrap_err();
+        let err = callback_with_guard!(ptr, snap, stale_instance, { Ok::<_, GuardError>(0) })
+            .unwrap_err();
         assert!(matches!(err, GuardError::InstanceMismatch { .. }));
 
         unsafe { CallbackGuard::release(ptr) };
