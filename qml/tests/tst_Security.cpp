@@ -1,5 +1,6 @@
 #include <QObject>
 #include <QQmlContext>
+#include <QQmlEngine>
 #include <QtQuickTest/quicktest.h>
 
 class ClipboardStub final : public QObject {
