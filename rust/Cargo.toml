@@ -81,7 +81,7 @@ toml       = "0.8"
 
 # ----- Crypto / Hashes (TRD §12.3 wrapping-key pattern) -----------------
 sha2    = "0.10"
-blake3  = "1.5"
+blake3  = "=1.5.5"
 zeroize = { version = "1.7", features = ["derive"] }
 subtle  = "2.5"
 

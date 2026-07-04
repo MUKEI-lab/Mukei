@@ -15,8 +15,6 @@
 //!   left in a recoverable state and the user is notified. Silently
 //!   dropping audit rows would defeat the entire chain.
 
-#![cfg(feature = "rusqlite")]
-
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 

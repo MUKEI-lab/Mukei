@@ -55,7 +55,7 @@ impl Migrator {
                 p.extension().and_then(|e| e.to_str()) == Some("sql")
                     && p.file_name()
                         .and_then(|n| n.to_str())
-                        .map(|n| n.starts_with(MIGRATION_FILE_PREFIX))
+                        .map(|n| n.starts_with(MIGRATION_FILE_PREFIX) && !n.ends_with("__down.sql"))
                         .unwrap_or(false)
             })
             .collect();
@@ -262,6 +262,24 @@ mod tests {
         let m = Migrator::new(dir.path());
         let list = m.list_available().unwrap();
         assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    fn list_available_ignores_down_migrations() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("V001__schema.sql"),
+            "CREATE TABLE t (id INTEGER);",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("V001__down.sql"), "DROP TABLE t;").unwrap();
+
+        let m = Migrator::new(dir.path());
+        let list = m.list_available().unwrap();
+
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].1, "V001__schema");
+        assert!(list[0].2.contains("CREATE TABLE"));
     }
 
     #[test]

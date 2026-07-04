@@ -7,9 +7,7 @@ PRAGMA foreign_keys = OFF;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_branches_id_conversation
     ON branches(id, conversation_id);
 
-ALTER TABLE messages RENAME TO messages__pre_v006;
-
-CREATE TABLE messages (
+CREATE TABLE messages__v006 (
     id                  INTEGER PRIMARY KEY,
     external_id         TEXT NOT NULL UNIQUE,
     conversation_id     INTEGER NOT NULL,
@@ -28,7 +26,7 @@ CREATE TABLE messages (
     FOREIGN KEY (parent_message_id) REFERENCES messages(id) ON DELETE SET NULL
 );
 
-INSERT INTO messages (
+INSERT INTO messages__v006 (
     id,
     external_id,
     conversation_id,
@@ -53,8 +51,8 @@ SELECT
         WHEN branch_id IS NULL THEN NULL
         WHEN EXISTS (
             SELECT 1 FROM branches b
-            WHERE b.id = messages__pre_v006.branch_id
-              AND b.conversation_id = messages__pre_v006.conversation_id
+            WHERE b.id = messages.branch_id
+              AND b.conversation_id = messages.conversation_id
         ) THEN branch_id
         ELSE NULL
     END,
@@ -63,9 +61,10 @@ SELECT
     tool_name,
     token_count,
     deleted
-FROM messages__pre_v006;
+FROM messages;
 
-DROP TABLE messages__pre_v006;
+DROP TABLE messages;
+ALTER TABLE messages__v006 RENAME TO messages;
 
 CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_messages_branch ON messages(conversation_id, branch_id, id);
@@ -74,9 +73,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_branch_id_pair
     ON messages(id, branch_id)
     WHERE branch_id IS NOT NULL;
 
-ALTER TABLE recovery_state RENAME TO recovery_state__pre_v006;
-
-CREATE TABLE recovery_state (
+CREATE TABLE recovery_state__v006 (
     id                    INTEGER PRIMARY KEY CHECK (id = 1),
     conversation_id       INTEGER NOT NULL,
     branch_id             INTEGER,
@@ -95,7 +92,7 @@ CREATE TABLE recovery_state (
     FOREIGN KEY (last_message_id) REFERENCES messages(id) ON DELETE CASCADE
 );
 
-INSERT INTO recovery_state (
+INSERT INTO recovery_state__v006 (
     id,
     conversation_id,
     branch_id,
@@ -116,8 +113,8 @@ SELECT
         WHEN branch_id IS NULL THEN NULL
         WHEN EXISTS (
             SELECT 1 FROM branches b
-            WHERE b.id = recovery_state__pre_v006.branch_id
-              AND b.conversation_id = recovery_state__pre_v006.conversation_id
+            WHERE b.id = recovery_state.branch_id
+              AND b.conversation_id = recovery_state.conversation_id
         ) THEN branch_id
         ELSE NULL
     END,
@@ -130,9 +127,10 @@ SELECT
     watchdog_fingerprint,
     resumed_after_kill,
     updated_at
-FROM recovery_state__pre_v006;
+FROM recovery_state;
 
-DROP TABLE recovery_state__pre_v006;
+DROP TABLE recovery_state;
+ALTER TABLE recovery_state__v006 RENAME TO recovery_state;
 
 CREATE INDEX IF NOT EXISTS idx_recovery_conv ON recovery_state(conversation_id);
 
