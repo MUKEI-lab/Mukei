@@ -29,10 +29,47 @@ use crate::storage::{AuditEntry, AuditLogWriter, DatabasePool};
 
 /// Per-tool consecutive-failure counter keyed by canonical fingerprint.
 #[derive(Default)]
-pub struct FailureTracker {
+struct FailureTrackerState {
     /// Maps `tool_name` → { fingerprint → consecutive_fail_count }.
+    counts: HashMap<String, HashMap<String, u32>>,
+}
+
+impl FailureTrackerState {
+    fn record_failure(&mut self, tool_name: &str, fingerprint: &str, threshold: u32) -> bool {
+        let per_tool: &mut HashMap<String, u32> =
+            self.counts.entry(tool_name.to_string()).or_default();
+        let count = per_tool.entry(fingerprint.to_string()).or_insert(0);
+        *count += 1;
+        *count > threshold
+    }
+
+    fn reset(&mut self, tool_name: &str) {
+        self.counts.remove(tool_name);
+    }
+
+    fn count_for(&self, tool_name: &str, fingerprint: &str) -> u32 {
+        self.counts
+            .get(tool_name)
+            .and_then(|per_tool| per_tool.get(fingerprint))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn clear_fingerprint(&mut self, tool_name: &str, fingerprint: &str) {
+        if let Some(per_tool) = self.counts.get_mut(tool_name) {
+            per_tool.remove(fingerprint);
+            if per_tool.is_empty() {
+                self.counts.remove(tool_name);
+            }
+        }
+    }
+}
+
+/// Per-tool consecutive-failure counter keyed by canonical fingerprint.
+#[derive(Default)]
+pub struct FailureTracker {
     /// `parking_lot::Mutex` keeps the hot path single-digit µs.
-    inner: Mutex<HashMap<String, HashMap<String, u32>>>,
+    inner: Mutex<FailureTrackerState>,
     /// Configurable threshold; falls back to the policy default if no
     /// custom policy is wired.
     threshold: u32,
@@ -47,7 +84,7 @@ impl FailureTracker {
     /// Construct a tracker with an explicit threshold (e.g. from config).
     pub fn with_threshold(threshold: u32) -> Self {
         Self {
-            inner: Mutex::new(HashMap::new()),
+            inner: Mutex::new(FailureTrackerState::default()),
             threshold,
         }
     }
@@ -96,33 +133,56 @@ impl FailureTracker {
     /// See [`ToolExecutionPolicy`] for the full wire contract.
     pub fn record_failure(&self, tool_name: &str, fingerprint: &str) -> bool {
         let mut g = self.inner.lock();
-        let per_tool: &mut HashMap<String, u32> = g.entry(tool_name.to_string()).or_default();
-        let count = per_tool.entry(fingerprint.to_string()).or_insert(0);
-        *count += 1;
-        *count > self.threshold
+        g.record_failure(tool_name, fingerprint, self.threshold)
     }
 
     /// Forget all recorded failures for a tool.
     pub fn reset(&self, tool_name: &str) {
-        self.inner.lock().remove(tool_name);
+        self.inner.lock().reset(tool_name);
     }
 
     /// Current consecutive-failure count for the given pair.
     pub fn count_for(&self, tool_name: &str, fingerprint: &str) -> u32 {
-        self.inner
-            .lock()
-            .get(tool_name)
-            .and_then(|per_tool| per_tool.get(fingerprint))
-            .copied()
-            .unwrap_or(0)
+        self.inner.lock().count_for(tool_name, fingerprint)
     }
 
     /// Internal accessor used by the executor's success path to clear
     /// the per-fingerprint streak after a successful call.
     pub(crate) fn clear_fingerprint(&self, tool_name: &str, fingerprint: &str) {
-        if let Some(per_tool) = self.inner.lock().get_mut(tool_name) {
-            per_tool.remove(fingerprint);
-        }
+        self.inner.lock().clear_fingerprint(tool_name, fingerprint);
+    }
+}
+
+#[cfg(test)]
+mod loom_failure_tracker_tests {
+    use super::FailureTrackerState;
+    use loom::sync::{Arc, Mutex};
+
+    #[test]
+    fn record_reset_and_count_are_mutex_safe_under_interleaving() {
+        loom::model(|| {
+            let state = Arc::new(Mutex::new(FailureTrackerState::default()));
+            let a = state.clone();
+            let b = state.clone();
+
+            let writer = loom::thread::spawn(move || {
+                let mut guard = a.lock().unwrap();
+                assert!(!guard.record_failure("tool", "fp", 2));
+                assert_eq!(guard.count_for("tool", "fp"), 1);
+            });
+
+            let resetter = loom::thread::spawn(move || {
+                let mut guard = b.lock().unwrap();
+                guard.reset("tool");
+                assert!(guard.count_for("tool", "fp") <= 1);
+            });
+
+            writer.join().unwrap();
+            resetter.join().unwrap();
+
+            let final_count = state.lock().unwrap().count_for("tool", "fp");
+            assert!(final_count <= 1);
+        });
     }
 }
 

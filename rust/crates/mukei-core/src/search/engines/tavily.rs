@@ -169,4 +169,68 @@ mod tests {
         assert!(!hits.is_empty());
         assert_eq!(hits[0].engine, SearchEngineKind::Tavily);
     }
+
+    #[cfg(feature = "network")]
+    mod network_payload_tests {
+        use super::*;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        fn request() -> SearchRequest {
+            SearchRequest::new("android lifecycle", 3).unwrap()
+        }
+
+        #[tokio::test]
+        async fn tavily_empty_payload_returns_no_hits() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/search"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "answer": null,
+                    "results": []
+                })))
+                .mount(&server)
+                .await;
+
+            let engine =
+                TavilyEngine::new("test-key").with_base_url(format!("{}/search", server.uri()));
+            let hits = engine.search(&request()).await.unwrap();
+
+            assert!(hits.is_empty());
+        }
+
+        #[tokio::test]
+        async fn tavily_http_429_is_reported_as_search_failure() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/search"))
+                .respond_with(ResponseTemplate::new(429).set_body_string("rate limited"))
+                .mount(&server)
+                .await;
+
+            let engine =
+                TavilyEngine::new("test-key").with_base_url(format!("{}/search", server.uri()));
+            let err = engine.search(&request()).await.unwrap_err();
+
+            assert!(err.to_string().contains("tavily"));
+        }
+
+        #[tokio::test]
+        async fn tavily_schema_drift_missing_results_is_error() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/search"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "answer": "summary without results field"
+                })))
+                .mount(&server)
+                .await;
+
+            let engine =
+                TavilyEngine::new("test-key").with_base_url(format!("{}/search", server.uri()));
+            let err = engine.search(&request()).await.unwrap_err();
+
+            assert!(err.to_string().contains("tavily parse"));
+        }
+    }
 }

@@ -95,3 +95,5 @@ tokio    = { workspace = true, features = ["macros", "rt-multi-thread", "time"] 
 # canonicaliser. `proptest` is also pulled in for the migration-order
 # (GH #41) and idempotency (GH #35) tests in later batches.
 proptest = "1.5"
+loom     = "0.7"
+wiremock = "0.6"

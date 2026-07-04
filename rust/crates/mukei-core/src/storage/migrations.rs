@@ -438,4 +438,58 @@ mod tests {
             "migration 4's DDL must not have run (rollback contract)"
         );
     }
+
+    #[tokio::test]
+    async fn real_migrations_enforce_branch_message_constraints() {
+        use crate::storage::pool::{DatabasePool, PooledConnectionExt};
+
+        let mig_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../migrations");
+        let db_dir = tempfile::tempdir().unwrap();
+        let db_path = db_dir.path().join("mukei-constraints-test.db");
+        let pool = DatabasePool::open(&db_path).unwrap();
+
+        Migrator::new(mig_dir).apply_pending(&pool).await.unwrap();
+
+        pool.with_conn(|c| {
+            c.execute_batch(
+                "PRAGMA foreign_keys = ON;
+                 INSERT INTO conversations (id, external_id, title, created_at, updated_at, archived)
+                    VALUES (1, 'conv-a', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0);
+                 INSERT INTO conversations (id, external_id, title, created_at, updated_at, archived)
+                    VALUES (2, 'conv-b', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0);
+                 INSERT INTO branches (id, external_id, conversation_id, title, created_at, updated_at, is_active)
+                    VALUES (10, 'branch-a', 1, '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1);",
+            )?;
+
+            let mismatched_branch = c.execute(
+                "INSERT INTO messages (
+                    id, external_id, conversation_id, role, content, created_at, branch_id
+                 ) VALUES (
+                    100, 'msg-bad-branch', 2, 'user', 'bad', '2026-01-01T00:00:00Z', 10
+                 )",
+                [],
+            );
+            assert!(
+                mismatched_branch.is_err(),
+                "message branch_id must belong to the message conversation"
+            );
+
+            let duplicate_active_branch = c.execute(
+                "INSERT INTO branches (
+                    id, external_id, conversation_id, title, created_at, updated_at, is_active
+                 ) VALUES (
+                    11, 'branch-a-2', 1, '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1
+                 )",
+                [],
+            );
+            assert!(
+                duplicate_active_branch.is_err(),
+                "only one active branch is allowed per conversation"
+            );
+
+            Ok::<_, crate::storage::pool::DbError>(())
+        })
+        .await
+        .unwrap();
+    }
 }

@@ -161,4 +161,69 @@ mod tests {
         assert!(!hits.is_empty());
         assert_eq!(hits[0].engine, SearchEngineKind::Brave);
     }
+
+    #[cfg(feature = "network")]
+    mod network_payload_tests {
+        use super::*;
+        use wiremock::matchers::{header, method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        fn request() -> SearchRequest {
+            SearchRequest::new("android lifecycle", 3).unwrap()
+        }
+
+        #[tokio::test]
+        async fn brave_empty_payload_returns_no_hits() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/res/v1/web/search"))
+                .and(header("X-Subscription-Token", "test-key"))
+                .and(query_param("q", "android lifecycle"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "web": { "results": [] }
+                })))
+                .mount(&server)
+                .await;
+
+            let engine = BraveEngine::new("test-key")
+                .with_base_url(format!("{}/res/v1/web/search", server.uri()));
+            let hits = engine.search(&request()).await.unwrap();
+
+            assert!(hits.is_empty());
+        }
+
+        #[tokio::test]
+        async fn brave_http_429_is_reported_as_search_failure() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/res/v1/web/search"))
+                .respond_with(ResponseTemplate::new(429).set_body_string("rate limited"))
+                .mount(&server)
+                .await;
+
+            let engine = BraveEngine::new("test-key")
+                .with_base_url(format!("{}/res/v1/web/search", server.uri()));
+            let err = engine.search(&request()).await.unwrap_err();
+
+            assert!(err.to_string().contains("brave"));
+        }
+
+        #[tokio::test]
+        async fn brave_schema_drift_missing_web_is_empty_not_panic() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/res/v1/web/search"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "unexpected": { "results": [{ "title": "ignored" }] }
+                })))
+                .mount(&server)
+                .await;
+
+            let engine = BraveEngine::new("test-key")
+                .with_base_url(format!("{}/res/v1/web/search", server.uri()));
+            let hits = engine.search(&request()).await.unwrap();
+
+            assert!(hits.is_empty());
+        }
+    }
 }

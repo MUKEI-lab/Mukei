@@ -12,6 +12,7 @@
 //! a typo becomes a compile error.
 
 mod agent_runtime;
+mod bridge_state;
 
 #[cfg(feature = "rusqlite")]
 use mukei_core::storage::{saf as core_saf, AuditLogWriter};
@@ -63,6 +64,7 @@ use parking_lot::Mutex as ParkingMutex;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+use bridge_state::{single_active_download, ActiveDownload, BusyGuard, DownloadSlotGuard};
 use mukei_core::agent::AgentLoop;
 use mukei_core::config::MukeiConfig;
 use mukei_core::ffi::tags::{TagEvents, TagsStreaming};
@@ -192,35 +194,6 @@ fn download_event_error(code: &'static str, message: String) -> mukei_core::erro
         "ERR_NETWORK" => mukei_core::error::MukeiError::NetworkError(message),
         "ERR_IO" => mukei_core::error::MukeiError::Io(message),
         _ => mukei_core::error::MukeiError::Internal(message),
-    }
-}
-
-/// RAII guard that removes its destination path from
-/// [`GLOBAL_DOWNLOADS_IN_FLIGHT`] on `Drop`. Pairs with the same RAII
-/// pattern used by [`BusyGuard`]: a manual remove at the end of the
-/// spawned task would be skipped on panic-unwind, leaving the slot
-/// permanently "in flight" and soft-locking every future download of
-/// the same model.
-///
-/// The handle clones an `Arc` of the registry plus an owned
-/// `PathBuf` so `Drop` can spawn an async task on the shared runtime
-/// without borrowing from the originating future. We intentionally
-/// avoid `blocking_lock()` to keep `Drop` runtime-agnostic.
-struct DownloadSlotGuard {
-    registry: Arc<Mutex<HashSet<std::path::PathBuf>>>,
-    dest: std::path::PathBuf,
-}
-
-impl Drop for DownloadSlotGuard {
-    fn drop(&mut self) {
-        // `Drop` cannot `await`. Fire-and-forget the release on the
-        // shared runtime; the path-removal is idempotent (HashSet) so
-        // a duplicate release is harmless.
-        let registry = self.registry.clone();
-        let dest = std::mem::take(&mut self.dest);
-        mukei_core::runtime::get().spawn(async move {
-            registry.lock().await.remove(&dest);
-        });
     }
 }
 
@@ -504,39 +477,6 @@ pub struct MukeiAgentRust {
     /// download is active we can honestly include its model/destination
     /// in the emitted event.
     active_downloads: Arc<ParkingMutex<Vec<ActiveDownload>>>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ActiveDownload {
-    model_id: Option<String>,
-    destination: String,
-}
-
-fn single_active_download(
-    downloads: &ParkingMutex<Vec<ActiveDownload>>,
-) -> (Option<String>, Option<String>) {
-    let downloads = downloads.lock();
-    if downloads.len() == 1 {
-        (
-            downloads[0].model_id.clone(),
-            Some(downloads[0].destination.clone()),
-        )
-    } else {
-        (None, None)
-    }
-}
-
-/// RAII guard that clears the re-entrancy flag on `Drop`. Held by the
-/// spawned `send_message` task; runs on both the normal-completion
-/// and the unwinding (panic) paths because `panic = "unwind"` is a
-/// workspace-wide invariant. Pairs `Ordering::Release` with the
-/// `compare_exchange(..., AcqRel, Acquire)` that flipped the flag.
-struct BusyGuard(Arc<AtomicBool>);
-
-impl Drop for BusyGuard {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
-    }
 }
 
 pub struct MukeiBridgeRust;
@@ -1546,6 +1486,9 @@ pub extern "C" fn Java_com_mukei_app_MukeiBridge_nativeOnSafGrantRevoked() {}
 
 #[cfg(test)]
 mod qml_contract_tests {
+    use super::MukeiAgentRust;
+    use std::sync::atomic::Ordering;
+
     const SOURCE: &str = include_str!("lib.rs");
 
     #[test]
@@ -1574,6 +1517,27 @@ mod qml_contract_tests {
     #[test]
     fn typed_event_signal_is_declared() {
         assert!(SOURCE.contains("fn event_emitted("));
+    }
+
+    #[tokio::test]
+    async fn headless_agent_constructs_with_safe_initial_bridge_state() {
+        let agent = MukeiAgentRust::default();
+
+        assert_eq!(&*agent.state.lock().await, "UNINITIALIZED");
+        assert!(!agent.busy.load(Ordering::Acquire));
+        assert_eq!(
+            agent.event_sequence.load(Ordering::Acquire),
+            1,
+            "bridge-local event sequence starts at one for a live process"
+        );
+        assert!(agent.active_downloads.lock().is_empty());
+
+        agent.cancel_token.cancel();
+        assert!(agent.cancel_token.is_cancelled());
+        assert!(
+            !agent.download_cancel.is_cancelled(),
+            "chat cancellation must not cancel model downloads"
+        );
     }
 }
 
