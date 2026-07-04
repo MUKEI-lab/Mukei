@@ -121,11 +121,18 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - uses: jurplel/install-qt-action@v4
-        with:
-          version: "6.5.3"
-          archives: "qtbase qtdeclarative qtsvg"
-          cache: true
+      - name: Install Qt + qmllint
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            qt6-declarative-dev \
+            qt6-declarative-dev-tools \
+            qt6-qmllint-plugins \
+            qt6-qpa-plugins \
+            qt6-svg-dev \
+            qml-qt6
       - name: Locate qmllint
         id: locate
         run: |
@@ -181,17 +188,19 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - uses: jurplel/install-qt-action@v4
-        with:
-          version: "6.5.3"
-          archives: "qtbase qtdeclarative qtsvg"
-          cache: true
-      - name: Install build tools
+      - name: Install Qt + build tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             cmake \
-            ninja-build
+            ninja-build \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            qt6-declarative-dev \
+            qt6-declarative-dev-tools \
+            qt6-qpa-plugins \
+            qt6-svg-dev \
+            qml-qt6
       - name: Configure only
         run: cmake -S qml -B qml/build -G Ninja
 
@@ -205,17 +214,19 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - uses: jurplel/install-qt-action@v4
-        with:
-          version: "6.5.3"
-          archives: "qtbase qtdeclarative qtsvg"
-          cache: true
-      - name: Install build tools
+      - name: Install Qt + build tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             cmake \
-            ninja-build
+            ninja-build \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            qt6-declarative-dev \
+            qt6-declarative-dev-tools \
+            qt6-qpa-plugins \
+            qt6-svg-dev \
+            qml-qt6
       - name: Build and run tst_EventDispatcher
         run: |
           set -e
@@ -238,17 +249,19 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - uses: jurplel/install-qt-action@v4
-        with:
-          version: "6.5.3"
-          archives: "qtbase qtdeclarative qtsvg"
-          cache: true
-      - name: Install build tools
+      - name: Install Qt + build tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             cmake \
-            ninja-build
+            ninja-build \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            qt6-declarative-dev \
+            qt6-declarative-dev-tools \
+            qt6-qpa-plugins \
+            qt6-svg-dev \
+            qml-qt6
       - name: Build and run QML security tests
         run: |
           set -e

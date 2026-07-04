@@ -9,9 +9,10 @@ include(CTest)
 
 option(MUKEI_USE_REAL_BRIDGE "Instantiate CXX-Qt bridge objects instead of local QML stubs" OFF)
 
-# Qt 6.5+ is required for QtQuick.Effects.MultiEffect and variable-font
-# axis handling used by the committed QML components.
-find_package(Qt6 6.5 REQUIRED COMPONENTS
+# Ubuntu 24.04 ships Qt 6.4.x; that baseline is sufficient for the checked-in
+# QML scaffold, QuickTest runners, and variable fonts used by CI smoke tests.
+# Newer Qt builds remain supported, but CI must stay green on the distro toolchain.
+find_package(Qt6 6.4 REQUIRED COMPONENTS
     Core Gui Quick Qml QuickControls2 QuickTest Widgets Svg
 )
 
