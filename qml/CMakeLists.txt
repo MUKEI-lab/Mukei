@@ -136,8 +136,26 @@ target_link_libraries(tst_EventDispatcher PRIVATE
     Qt6::QuickTest
 )
 
+qt_add_executable(tst_Security
+    tests/tst_Security.cpp
+)
+
+target_link_libraries(tst_Security PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Quick
+    Qt6::Qml
+    Qt6::QuickControls2
+    Qt6::QuickTest
+)
+
 add_test(NAME tst_EventDispatcher COMMAND tst_EventDispatcher -platform offscreen -input ${CMAKE_CURRENT_SOURCE_DIR}/tests/tst_EventDispatcher.qml)
 set_tests_properties(tst_EventDispatcher PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
+add_test(NAME tst_Security COMMAND tst_Security -platform offscreen -input ${CMAKE_CURRENT_SOURCE_DIR}/tests/tst_Security.qml)
+set_tests_properties(tst_Security PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
 

@@ -9,7 +9,8 @@ name: qml-check
 on:
   push:
     branches:
-      - codex/create-qml-directory-structure-and-files
+      - main
+      - devin/1751643270-event-dispatcher
   pull_request:
     paths:
       - "qml/**"
@@ -123,7 +124,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: "6.5.3"
-          archives: "qtbase qtsvg"
+          archives: "qtbase qtdeclarative qtsvg"
           cache: true
       - name: Locate qmllint
         id: locate
@@ -183,7 +184,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: "6.5.3"
-          archives: "qtbase qtsvg"
+          archives: "qtbase qtdeclarative qtsvg"
           cache: true
       - name: Install build tools
         run: |
@@ -207,7 +208,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: "6.5.3"
-          archives: "qtbase qtsvg"
+          archives: "qtbase qtdeclarative qtsvg"
           cache: true
       - name: Install build tools
         run: |
@@ -240,7 +241,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: "6.5.3"
-          archives: "qtbase qtsvg"
+          archives: "qtbase qtdeclarative qtsvg"
           cache: true
       - name: Install build tools
         run: |
@@ -252,15 +253,11 @@ jobs:
         run: |
           set -e
           cd qml
-          mkdir -p build && cd build
-          cmake .. -G Ninja
-          ninja
-          # Run the security test suite
-          if [ -f tst_Security ]; then
-            ./tst_Security -o security-results.xml
-          else
-            echo "::warning::Security test binary not found - ensure tests are built"
-          fi
+          cmake -S . -B build -G Ninja
+          cmake --build build --target tst_Security
+          ctest --test-dir build --output-on-failure -R tst_Security
+          result_xml=$(find build/Testing -name Test.xml -print -quit 2>/dev/null || true)
+          if [ -n "$result_xml" ]; then cp "$result_xml" build/security-results.xml; fi
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
