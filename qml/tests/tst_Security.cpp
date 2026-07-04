@@ -1,3 +1,4 @@
+#include <QFile>
 #include <QObject>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -34,6 +35,19 @@ public:
     Q_INVOKABLE void pulse(int) {}
 };
 
+class SecurityInspectorStub final : public QObject {
+    Q_OBJECT
+public:
+    Q_INVOKABLE QString readFile(const QString &relativePath) const
+    {
+        QFile file(QStringLiteral(QT_TESTCASE_SOURCEDIR) + QLatin1Char('/') + relativePath);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            return QString();
+        }
+        return QString::fromUtf8(file.readAll());
+    }
+};
+
 class SecurityQuickTestSetup final : public QObject {
     Q_OBJECT
 public slots:
@@ -41,11 +55,13 @@ public slots:
     {
         engine->rootContext()->setContextProperty(QStringLiteral("mukeiClipboard"), &m_clipboard);
         engine->rootContext()->setContextProperty(QStringLiteral("mukeiHaptics"), &m_haptics);
+        engine->rootContext()->setContextProperty(QStringLiteral("securityInspector"), &m_inspector);
     }
 
 private:
     ClipboardStub m_clipboard;
     HapticsStub m_haptics;
+    SecurityInspectorStub m_inspector;
 };
 
 QUICK_TEST_MAIN_WITH_SETUP(tst_Security, SecurityQuickTestSetup)
