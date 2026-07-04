@@ -123,7 +123,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: "6.5.3"
-          modules: "qtsvg"
+          archives: "qtsvg"
           cache: true
       - name: Locate qmllint
         id: locate
@@ -183,7 +183,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: "6.5.3"
-          modules: "qtsvg"
+          archives: "qtsvg"
           cache: true
       - name: Install build tools
         run: |
@@ -207,7 +207,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: "6.5.3"
-          modules: "qtsvg"
+          archives: "qtsvg"
           cache: true
       - name: Install build tools
         run: |
@@ -240,7 +240,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: "6.5.3"
-          modules: "qtsvg"
+          archives: "qtsvg"
           cache: true
       - name: Install build tools
         run: |
