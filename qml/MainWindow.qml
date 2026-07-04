@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import "events"
 import "theme"
 import "components"
 import "screens"
@@ -15,6 +16,7 @@ ApplicationWindow {
     minimumHeight: Spacing.huge * 5
     color: Theme.p.background
     title: qsTr("Mukei")
+    readonly property var __eventDispatcher: EventDispatcher
 
     Behavior on color {
         enabled: !Theme.reduceMotion

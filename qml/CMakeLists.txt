@@ -5,13 +5,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(QT_QUICK_CONTROLS_STYLE "Basic")
+include(CTest)
 
 option(MUKEI_USE_REAL_BRIDGE "Instantiate CXX-Qt bridge objects instead of local QML stubs" OFF)
 
 # Qt 6.5+ is required for QtQuick.Effects.MultiEffect and variable-font
 # axis handling used by the committed QML components.
 find_package(Qt6 6.5 REQUIRED COMPONENTS
-    Core Gui Quick Qml QuickControls2 QuickEffects Widgets Svg
+    Core Gui Quick Qml QuickControls2 QuickTest Widgets Svg
 )
 
 # Cargo build directory selection. Android builds still cross-compile to
@@ -40,12 +41,15 @@ add_executable(mukei
     qml.qrc
 )
 
+set_source_files_properties(events/EventDispatcher.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+
 qt_add_qml_module(mukei
     URI com.mukei.app
     VERSION 1.0
     RESOURCE_PREFIX /
     QML_FILES
         MainWindow.qml
+        events/EventDispatcher.qml
         theme/Theme.qml
         theme/Type.qml
         theme/Spacing.qml
@@ -102,7 +106,6 @@ target_link_libraries(mukei PRIVATE
     Qt6::Quick
     Qt6::Qml
     Qt6::QuickControls2
-    Qt6::QuickEffects
     Qt6::Widgets
     Qt6::Svg
 )
@@ -116,6 +119,27 @@ endif()
 if(MUKEI_USE_REAL_BRIDGE)
     target_compile_definitions(mukei PRIVATE MUKEI_USE_REAL_BRIDGE=1)
 endif()
+
+qt_add_executable(tst_EventDispatcher
+    tests/tst_EventDispatcher.cpp
+)
+
+target_compile_definitions(tst_EventDispatcher PRIVATE
+    EVENT_DISPATCHER_QML_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/tst_EventDispatcher.qml"
+)
+
+target_link_libraries(tst_EventDispatcher PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Quick
+    Qt6::Qml
+    Qt6::QuickTest
+)
+
+add_test(NAME tst_EventDispatcher COMMAND tst_EventDispatcher -platform offscreen -input ${CMAKE_CURRENT_SOURCE_DIR}/tests/tst_EventDispatcher.qml)
+set_tests_properties(tst_EventDispatcher PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
 
 if(ANDROID)
     set_property(TARGET mukei PROPERTY QT_ANDROID_MIN_SDK_VERSION 29)

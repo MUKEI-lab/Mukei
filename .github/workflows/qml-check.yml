@@ -195,6 +195,37 @@ jobs:
         run: cmake -S qml -B qml/build -G Ninja
 
   # ---------------------------------------------------------------------
+  # Event-dispatcher integration test. Builds the dedicated QML runner
+  # and executes tst_EventDispatcher headless so the bridge envelope
+  # boundary is CI-enforced instead of advisory.
+  # ---------------------------------------------------------------------
+  event-dispatcher-tests:
+    name: EventDispatcher QML test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.5.3"
+          modules: "qtsvg"
+          cache: true
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build
+      - name: Build and run tst_EventDispatcher
+        run: |
+          set -e
+          cd qml
+          cmake -S . -B build -G Ninja
+          cmake --build build --target mukei tst_EventDispatcher
+          ctest --test-dir build --output-on-failure -R tst_EventDispatcher
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+  # ---------------------------------------------------------------------
   # QML Security Tests. Runs security-focused QML tests including:
   # - Clipboard bridge functionality verification
   # - Console logging absence checks  
