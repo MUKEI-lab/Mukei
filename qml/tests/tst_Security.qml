@@ -11,13 +11,13 @@ TestCase {
     function test_clipboard_bridge_exists() {
         verify(typeof mukeiClipboard !== "undefined", "mukeiClipboard bridge should be registered")
         verify(typeof mukeiClipboard.setText === "function", "mukeiClipboard.setText should be available")
-        verify(typeof mukeiClipboard.text === "function", "mukeiClipboard.text should be available")
+        verify(typeof mukeiClipboard.text !== "undefined", "mukeiClipboard.text property should be available")
     }
 
     function test_clipboard_round_trip() {
         var testText = "security test content 2026-07-04"
         mukeiClipboard.setText(testText)
-        compare(mukeiClipboard.text(), testText, "clipboard bridge should preserve exact text")
+        compare(mukeiClipboard.text, testText, "clipboard bridge should preserve exact text")
     }
 
     function test_copyButton_uses_clipboard_without_console_logging() {
