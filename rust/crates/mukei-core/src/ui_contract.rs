@@ -226,6 +226,10 @@ pub struct CapabilitySnapshot {
 }
 
 impl CapabilitySnapshot {
+    fn network_enabled() -> bool {
+        cfg!(feature = "network")
+    }
+
     /// Conservative uninitialized capability set.
     pub fn uninitialized() -> Self {
         Self {
@@ -256,7 +260,7 @@ impl CapabilitySnapshot {
             can_initialize: false,
             can_send_message: true,
             can_stop_generation: false,
-            can_download_model: true,
+            can_download_model: Self::network_enabled(),
             can_stop_download: false,
             can_switch_model: true,
             can_delete_model: true,
@@ -280,7 +284,7 @@ impl CapabilitySnapshot {
             can_initialize: false,
             can_send_message: false,
             can_stop_generation: true,
-            can_download_model: true,
+            can_download_model: Self::network_enabled(),
             can_stop_download: false,
             can_switch_model: false,
             can_delete_model: false,
@@ -305,8 +309,8 @@ impl CapabilitySnapshot {
             can_initialize: false,
             can_send_message: active_model_ready,
             can_stop_generation: false,
-            can_download_model: true,
-            can_stop_download: true,
+            can_download_model: Self::network_enabled(),
+            can_stop_download: Self::network_enabled(),
             can_switch_model: false,
             can_delete_model: false,
             can_clear_conversation: active_model_ready,
@@ -672,6 +676,10 @@ mod tests {
 
         let ready = CapabilitySnapshot::ready();
         assert!(ready.can_send_message);
+        assert_eq!(
+            ready.can_download_model,
+            CapabilitySnapshot::network_enabled()
+        );
         assert!(!ready.active_model_ready);
         assert!(!ready.is_busy);
 
@@ -682,7 +690,10 @@ mod tests {
         assert!(!inferencing.active_model_ready);
 
         let downloading = CapabilitySnapshot::downloading(false);
-        assert!(downloading.can_stop_download);
+        assert_eq!(
+            downloading.can_stop_download,
+            CapabilitySnapshot::network_enabled()
+        );
         assert!(downloading.is_downloading);
         assert!(!downloading.can_send_message);
     }
