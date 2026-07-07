@@ -16,7 +16,8 @@ mod bridge_state;
 
 #[cfg(feature = "rusqlite")]
 use mukei_core::storage::{
-    saf as core_saf, AuditLogWriter, ConversationRepository, MessageStatus, PersistedTurn,
+    saf as core_saf, AuditChainStatus, AuditLogReader, AuditLogWriter, ConversationRepository,
+    MessageStatus, PersistedTurn,
 };
 
 #[cfg(not(feature = "rusqlite"))]
@@ -681,6 +682,40 @@ impl ffi::MukeiAgent {
                         );
                     }
                     Ok(_) => {}
+                    Err(e) => {
+                        let code = e.error_code().to_string();
+                        let msg = e.to_string();
+                        let event = error_bridge_event(&e, "initialize");
+                        let _ = qt.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(event));
+                            qobject
+                                .as_mut()
+                                .error_occurred(QString::from(&code), QString::from(&msg));
+                        });
+                        return;
+                    }
+                }
+
+                match AuditLogReader::verify_chain(&pool).await {
+                    Ok(AuditChainStatus::Ok { rows_checked, .. }) => {
+                        tracing::info!(
+                            rows_checked,
+                            "audit log hash chain verified during bridge boot"
+                        );
+                    }
+                    Ok(AuditChainStatus::Tampered { row_id, .. }) => {
+                        let err = mukei_core::error::MukeiError::AuditLogTampered { row_id };
+                        let code = err.error_code().to_string();
+                        let msg = err.to_string();
+                        let event = error_bridge_event(&err, "initialize");
+                        let _ = qt.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(event));
+                            qobject
+                                .as_mut()
+                                .error_occurred(QString::from(&code), QString::from(&msg));
+                        });
+                        return;
+                    }
                     Err(e) => {
                         let code = e.error_code().to_string();
                         let msg = e.to_string();

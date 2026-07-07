@@ -407,4 +407,69 @@ mod tests {
             }
         );
     }
+
+    #[tokio::test]
+    async fn verify_chain_detects_tampered_row() {
+        use crate::storage::pool::{DatabasePool, PooledConnectionExt};
+
+        let dir = tempfile::tempdir().unwrap();
+        let pool = DatabasePool::open(&dir.path().join("audit.db")).unwrap();
+        pool.with_conn(|c| {
+            c.execute_batch(
+                r#"CREATE TABLE tool_audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conversation_id INTEGER,
+                    message_id INTEGER,
+                    tool_call_id TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    args_json TEXT NOT NULL,
+                    result_preview TEXT NOT NULL,
+                    success INTEGER NOT NULL,
+                    duration_ms INTEGER NOT NULL,
+                    error_code TEXT,
+                    fingerprint_sha256 TEXT NOT NULL,
+                    previous_hash TEXT,
+                    entry_hash TEXT NOT NULL
+                 );"#,
+            )?;
+            Ok::<_, DbError>(())
+        })
+        .await
+        .unwrap();
+
+        let writer = AuditLogWriter::new();
+        writer
+            .record(
+                &pool,
+                AuditEntry {
+                    conversation_id: Some(1),
+                    message_id: Some(1),
+                    tool_call_id: "a".to_string(),
+                    tool_name: "test_tool".into(),
+                    args_json: "{}".into(),
+                    result_preview: "ok".into(),
+                    success: true,
+                    duration_ms: 1,
+                    error_code: None,
+                    fingerprint_sha256: "fp-a".into(),
+                },
+            )
+            .await
+            .unwrap();
+
+        pool.with_conn(|c| {
+            c.execute(
+                "UPDATE tool_audit_log SET tool_name = 'tampered' WHERE id = 1",
+                [],
+            )?;
+            Ok::<_, DbError>(())
+        })
+        .await
+        .unwrap();
+
+        match AuditLogReader::verify_chain(&pool).await.unwrap() {
+            AuditChainStatus::Tampered { row_id, .. } => assert_eq!(row_id, 1),
+            other => panic!("expected tamper detection, got {other:?}"),
+        }
+    }
 }

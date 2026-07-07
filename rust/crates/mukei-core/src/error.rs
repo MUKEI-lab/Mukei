@@ -111,6 +111,14 @@ pub enum MukeiError {
         /// The full applied set as found on disk.
         applied: Vec<u32>,
     },
+    /// The append-only audit hash chain failed verification during boot.
+    /// Normal startup must stop so the app cannot append over a tampered
+    /// local security log.
+    #[error("audit log tamper detected at row {row_id}")]
+    AuditLogTampered {
+        /// First row whose stored chain values failed verification.
+        row_id: i64,
+    },
 
     // ------------------------------------------------------------------
     // Config (TRD §12.5)
@@ -305,6 +313,7 @@ impl MukeiError {
             Self::DatabaseCorruption => "ERR_DB_CORRUPTION",
             Self::MigrationFailed(_, _) => "ERR_MIGRATION",
             Self::MigrationOrderConflict { .. } => "ERR_MIGRATION_ORDER",
+            Self::AuditLogTampered { .. } => "ERR_AUDIT_TAMPERED",
 
             Self::ConfigMissingField(_) => "ERR_CONFIG_MISSING",
             Self::ConfigInvalid { .. } => "ERR_CONFIG_INVALID",
@@ -360,7 +369,8 @@ impl MukeiError {
             Self::DatabaseCorruption
             | Self::DatabaseInitFailed(_)
             | Self::MigrationFailed(_, _)
-            | Self::MigrationOrderConflict { .. } => ErrorClass::Storage,
+            | Self::MigrationOrderConflict { .. }
+            | Self::AuditLogTampered { .. } => ErrorClass::Storage,
             Self::ConfigInvalid { .. }
             | Self::ConfigMissingField(_)
             | Self::ConfigUnknownField(_) => ErrorClass::Config,

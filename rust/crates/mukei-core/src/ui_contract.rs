@@ -495,6 +495,7 @@ fn severity_for(error: &MukeiError) -> ErrorSeverity {
         | MukeiError::SecretLeaked(_)
         | MukeiError::DatabaseCorruption
         | MukeiError::MigrationOrderConflict { .. }
+        | MukeiError::AuditLogTampered { .. }
         | MukeiError::CrashLoopDetected { .. }
         | MukeiError::Invariant(_) => ErrorSeverity::Fatal,
         MukeiError::Cancelled | MukeiError::BridgeBusy | MukeiError::DownloadBusy { .. } => {
@@ -518,6 +519,7 @@ fn recoverable_for(error: &MukeiError) -> bool {
             | MukeiError::SecretLeaked(_)
             | MukeiError::DatabaseCorruption
             | MukeiError::MigrationOrderConflict { .. }
+            | MukeiError::AuditLogTampered { .. }
             | MukeiError::CrashLoopDetected { .. }
             | MukeiError::Invariant(_)
     )
@@ -548,6 +550,7 @@ fn suggested_action_for(error: &MukeiError) -> SuggestedUiAction {
         MukeiError::FFIPanic
         | MukeiError::DatabaseCorruption
         | MukeiError::MigrationOrderConflict { .. }
+        | MukeiError::AuditLogTampered { .. }
         | MukeiError::CrashLoopDetected { .. } => SuggestedUiAction::RestartApp,
         MukeiError::SecretLeaked(_) | MukeiError::PromptLeakage | MukeiError::Invariant(_) => {
             SuggestedUiAction::ReportIssue
@@ -564,7 +567,8 @@ fn user_message_for(error: &MukeiError) -> String {
         MukeiError::DatabaseInitFailed(_)
         | MukeiError::DatabaseCorruption
         | MukeiError::MigrationFailed(_, _)
-        | MukeiError::MigrationOrderConflict { .. } => {
+        | MukeiError::MigrationOrderConflict { .. }
+        | MukeiError::AuditLogTampered { .. } => {
             "Local storage could not be opened safely.".to_string()
         }
         MukeiError::SafRequired => "Storage permission is required for this file.".to_string(),
@@ -739,5 +743,17 @@ mod tests {
         assert_eq!(value["category"], "error");
         assert_eq!(value["error"]["code"], "ERR_NETWORK");
         assert_eq!(value["error"]["source"], "download_model");
+    }
+
+    #[test]
+    fn audit_tamper_error_is_fatal_and_stable() {
+        let ui =
+            UiError::from_mukei_error(&MukeiError::AuditLogTampered { row_id: 7 }, "initialize");
+        assert_eq!(ui.code, "ERR_AUDIT_TAMPERED");
+        assert_eq!(ui.class, "storage");
+        assert_eq!(ui.severity, ErrorSeverity::Fatal);
+        assert!(!ui.recoverable);
+        assert_eq!(ui.suggested_action, SuggestedUiAction::RestartApp);
+        assert_eq!(ui.user_message, "Local storage could not be opened safely.");
     }
 }
