@@ -92,7 +92,11 @@ pub async fn open_pool(
         .join(MIGRATIONS_DIR);
     let migrator = Migrator::new(&migrations_dir);
     migrator.apply_pending(&pool).await?;
-    tracing::info!(?migrations_dir, db_path = ?cfg.database_path, "migrations applied during bridge boot");
+    tracing::info!(
+        migrations_dir = %mukei_core::diagnostics::redact_path(&migrations_dir),
+        db_path = %mukei_core::diagnostics::redact_path(&cfg.database_path),
+        "migrations applied during bridge boot"
+    );
     Ok(pool)
 }
 

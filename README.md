@@ -360,4 +360,5 @@ For the Qt-integrated bridge build, follow the dedicated guide in [`rust/README.
 
 ## License
 
-Proprietary. © 2026 Mukei. All rights reserved.
+Proprietary. Copyright (c) 2026 Mukei. All rights reserved. See
+[LICENSE](LICENSE).

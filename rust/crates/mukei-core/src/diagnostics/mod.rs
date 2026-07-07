@@ -15,7 +15,11 @@
 pub mod crash_logger;
 pub mod logger;
 pub mod panic_hook;
+pub mod redaction;
 
 pub use crash_logger::{CrashFingerprint, CrashRecord, CrashSink};
 pub use logger::{initialize_tracing, log_error};
 pub use panic_hook::{install_panic_hook, PanicSink};
+pub use redaction::{
+    redact_content, redact_path, redact_secret, sanitize_error_message, sanitize_log_value,
+};

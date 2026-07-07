@@ -215,6 +215,25 @@ fn download_event_error(code: &'static str, message: String) -> mukei_core::erro
             }
         }
         "ERR_NETWORK" => mukei_core::error::MukeiError::NetworkError(message),
+        "ERR_NETWORK_TIMEOUT" => mukei_core::error::MukeiError::NetworkTimeout {
+            operation: "download_model".into(),
+        },
+        "ERR_NETWORK_UNAVAILABLE" => mukei_core::error::MukeiError::NetworkUnavailable {
+            operation: "download_model".into(),
+        },
+        "ERR_NETWORK_TLS" => mukei_core::error::MukeiError::NetworkTls {
+            operation: "download_model".into(),
+        },
+        "ERR_NETWORK_INVALID_RESPONSE" => mukei_core::error::MukeiError::NetworkInvalidResponse {
+            operation: "download_model".into(),
+        },
+        "ERR_NETWORK_RATE_LIMITED" => mukei_core::error::MukeiError::NetworkRateLimited {
+            operation: "download_model".into(),
+        },
+        "ERR_NETWORK_SERVER" => mukei_core::error::MukeiError::NetworkServerError {
+            status: 0,
+            operation: "download_model".into(),
+        },
         "ERR_IO" => mukei_core::error::MukeiError::Io(message),
         _ => mukei_core::error::MukeiError::Internal(message),
     }
@@ -1426,10 +1445,17 @@ impl ffi::MukeiAgent {
 
             match dl_handle.await {
                 Ok(Ok(())) => {
-                    tracing::info!(path = %dest_for_status.display(), "model download finalised");
+                    tracing::info!(
+                        path = %mukei_core::diagnostics::redact_path(&dest_for_status),
+                        "model download finalised"
+                    );
                 }
                 Ok(Err(e)) => {
-                    tracing::warn!(error = %e, "model download failed");
+                    tracing::warn!(
+                        error = %mukei_core::diagnostics::sanitize_error_message(e.to_string()),
+                        code = e.error_code(),
+                        "model download failed"
+                    );
                     if !terminal_download_event_seen {
                         let code = e.error_code().to_string();
                         let message = e.to_string();

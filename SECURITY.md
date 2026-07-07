@@ -258,8 +258,7 @@ proptest! {
 ### Reporting Security Issues
 
 For external security researchers:
-- Use GitHub's private vulnerability reporting feature
-- Or email: security@mukei.example.com (replace with actual)
+- Use GitHub's private vulnerability reporting feature for this repository
 - Include: affected version, reproduction steps, impact assessment
 
 ## 8. Checklist for Contributors

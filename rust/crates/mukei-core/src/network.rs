@@ -56,6 +56,47 @@ pub fn build_network_client(policy: NetworkClientPolicy) -> Result<reqwest::Clie
         .map_err(|e| MukeiError::HttpClientFailed(e.to_string()))
 }
 
+pub fn map_reqwest_error(operation: &str, error: reqwest::Error) -> MukeiError {
+    let operation = crate::diagnostics::sanitize_log_value(operation);
+    if error.is_timeout() {
+        return MukeiError::NetworkTimeout { operation };
+    }
+    if let Some(status) = error.status() {
+        return http_status_error(&operation, status);
+    }
+    if error.is_decode() {
+        return MukeiError::NetworkInvalidResponse { operation };
+    }
+    let lower = error.to_string().to_ascii_lowercase();
+    if lower.contains("tls") || lower.contains("certificate") || lower.contains("cert") {
+        return MukeiError::NetworkTls { operation };
+    }
+    if error.is_connect()
+        || lower.contains("dns")
+        || lower.contains("resolve")
+        || lower.contains("connection")
+    {
+        return MukeiError::NetworkUnavailable { operation };
+    }
+    MukeiError::NetworkError(format!(
+        "{operation}: {}",
+        crate::diagnostics::sanitize_error_message(error.to_string())
+    ))
+}
+
+pub fn http_status_error(operation: &str, status: reqwest::StatusCode) -> MukeiError {
+    let operation = crate::diagnostics::sanitize_log_value(operation);
+    match status.as_u16() {
+        408 => MukeiError::NetworkTimeout { operation },
+        429 => MukeiError::NetworkRateLimited { operation },
+        500..=599 => MukeiError::NetworkServerError {
+            status: status.as_u16(),
+            operation,
+        },
+        _ => MukeiError::NetworkError(format!("HTTP {status} during {operation}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,5 +118,18 @@ mod tests {
         assert_eq!(policy.connect_timeout, Duration::from_secs(3));
         assert_eq!(policy.read_timeout, Duration::from_secs(3));
         assert!(policy.user_agent.starts_with("mukei-core/"));
+    }
+
+    #[test]
+    fn http_status_mapping_is_typed_and_redacted() {
+        let rate_limited = http_status_error(
+            "/sdcard/private/model.gguf",
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+        );
+        assert_eq!(rate_limited.error_code(), "ERR_NETWORK_RATE_LIMITED");
+        assert!(rate_limited.to_string().contains("[redacted-path]"));
+
+        let server = http_status_error("model download", reqwest::StatusCode::BAD_GATEWAY);
+        assert_eq!(server.error_code(), "ERR_NETWORK_SERVER");
     }
 }

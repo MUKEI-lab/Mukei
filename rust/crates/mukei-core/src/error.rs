@@ -250,6 +250,44 @@ pub enum MukeiError {
     /// A network request failed at the transport layer.
     #[error("network request failed: {0}")]
     NetworkError(String),
+    /// A network request timed out.
+    #[error("network request timed out during {operation}")]
+    NetworkTimeout {
+        /// Redacted operation label, never a URL or prompt.
+        operation: String,
+    },
+    /// A network request could not connect or the device appears offline.
+    #[error("network unavailable during {operation}")]
+    NetworkUnavailable {
+        /// Redacted operation label, never a URL or prompt.
+        operation: String,
+    },
+    /// TLS or certificate validation failed.
+    #[error("TLS validation failed during {operation}")]
+    NetworkTls {
+        /// Redacted operation label, never a URL or prompt.
+        operation: String,
+    },
+    /// The server returned an invalid or undecodable response.
+    #[error("invalid network response during {operation}")]
+    NetworkInvalidResponse {
+        /// Redacted operation label, never a URL or prompt.
+        operation: String,
+    },
+    /// The server rate-limited the request.
+    #[error("network request rate-limited during {operation}")]
+    NetworkRateLimited {
+        /// Redacted operation label, never a URL or prompt.
+        operation: String,
+    },
+    /// The server returned a 5xx response.
+    #[error("server error {status} during {operation}")]
+    NetworkServerError {
+        /// HTTP status code.
+        status: u16,
+        /// Redacted operation label, never a URL or prompt.
+        operation: String,
+    },
     /// Generic I/O failure (file system, network adapter).
     #[error("io failure: {0}")]
     Io(String),
@@ -356,6 +394,12 @@ impl MukeiError {
             Self::SafRequired => "ERR_SAF_REQUIRED",
 
             Self::NetworkError(_) => "ERR_NETWORK",
+            Self::NetworkTimeout { .. } => "ERR_NETWORK_TIMEOUT",
+            Self::NetworkUnavailable { .. } => "ERR_NETWORK_UNAVAILABLE",
+            Self::NetworkTls { .. } => "ERR_NETWORK_TLS",
+            Self::NetworkInvalidResponse { .. } => "ERR_NETWORK_INVALID_RESPONSE",
+            Self::NetworkRateLimited { .. } => "ERR_NETWORK_RATE_LIMITED",
+            Self::NetworkServerError { .. } => "ERR_NETWORK_SERVER",
             Self::Io(_) => "ERR_IO",
             Self::DownloadHashMismatch => "ERR_DOWNLOAD_HASH",
             Self::DownloadSizeMissing => "ERR_DOWNLOAD_SIZE_MISSING",
@@ -404,6 +448,12 @@ impl MukeiError {
             | Self::SandboxViolation => ErrorClass::Agent,
             Self::SafRevoked | Self::SafRequired | Self::PermissionDenied => ErrorClass::Permission,
             Self::NetworkError(_)
+            | Self::NetworkTimeout { .. }
+            | Self::NetworkUnavailable { .. }
+            | Self::NetworkTls { .. }
+            | Self::NetworkInvalidResponse { .. }
+            | Self::NetworkRateLimited { .. }
+            | Self::NetworkServerError { .. }
             | Self::DownloadHashMismatch
             | Self::DownloadSizeMissing
             | Self::DownloadTooLarge { .. }
@@ -604,5 +654,53 @@ mod tests {
         let rendered = too_large.to_string();
         assert!(rendered.contains("17 bytes"));
         assert!(rendered.contains("16 bytes"));
+    }
+
+    #[test]
+    fn typed_network_errors_have_stable_codes() {
+        let cases = [
+            (
+                MukeiError::NetworkTimeout {
+                    operation: "download".into(),
+                },
+                "ERR_NETWORK_TIMEOUT",
+            ),
+            (
+                MukeiError::NetworkUnavailable {
+                    operation: "download".into(),
+                },
+                "ERR_NETWORK_UNAVAILABLE",
+            ),
+            (
+                MukeiError::NetworkTls {
+                    operation: "download".into(),
+                },
+                "ERR_NETWORK_TLS",
+            ),
+            (
+                MukeiError::NetworkInvalidResponse {
+                    operation: "download".into(),
+                },
+                "ERR_NETWORK_INVALID_RESPONSE",
+            ),
+            (
+                MukeiError::NetworkRateLimited {
+                    operation: "download".into(),
+                },
+                "ERR_NETWORK_RATE_LIMITED",
+            ),
+            (
+                MukeiError::NetworkServerError {
+                    status: 502,
+                    operation: "download".into(),
+                },
+                "ERR_NETWORK_SERVER",
+            ),
+        ];
+
+        for (err, code) in cases {
+            assert_eq!(err.error_code(), code);
+            assert_eq!(err.classification(), ErrorClass::Network);
+        }
     }
 }

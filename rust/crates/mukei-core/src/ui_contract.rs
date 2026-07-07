@@ -547,6 +547,12 @@ fn suggested_action_for(error: &MukeiError) -> SuggestedUiAction {
         | MukeiError::DownloadTooLarge { .. }
         | MukeiError::MemoryPreflightRejected(_) => SuggestedUiAction::OpenModelManager,
         MukeiError::NetworkError(_)
+        | MukeiError::NetworkTimeout { .. }
+        | MukeiError::NetworkUnavailable { .. }
+        | MukeiError::NetworkTls { .. }
+        | MukeiError::NetworkInvalidResponse { .. }
+        | MukeiError::NetworkRateLimited { .. }
+        | MukeiError::NetworkServerError { .. }
         | MukeiError::HttpClientFailed(_)
         | MukeiError::Io(_)
         | MukeiError::ToolTimeout(_)
@@ -589,9 +595,14 @@ fn user_message_for(error: &MukeiError) -> String {
         MukeiError::DownloadSizeMissing | MukeiError::DownloadTooLarge { .. } => {
             "The model download could not be accepted safely.".to_string()
         }
-        MukeiError::NetworkError(_) | MukeiError::HttpClientFailed(_) => {
-            "Network request failed.".to_string()
-        }
+        MukeiError::NetworkError(_)
+        | MukeiError::NetworkTimeout { .. }
+        | MukeiError::NetworkUnavailable { .. }
+        | MukeiError::NetworkTls { .. }
+        | MukeiError::NetworkInvalidResponse { .. }
+        | MukeiError::NetworkRateLimited { .. }
+        | MukeiError::NetworkServerError { .. }
+        | MukeiError::HttpClientFailed(_) => "Network request failed.".to_string(),
         MukeiError::BridgeBusy => "A response is already running.".to_string(),
         MukeiError::DownloadBusy { .. } => "That model is already downloading.".to_string(),
         MukeiError::Cancelled => "Operation cancelled.".to_string(),
@@ -691,6 +702,28 @@ mod tests {
                 ui.user_message,
                 "The model download could not be accepted safely."
             );
+        }
+    }
+
+    #[test]
+    fn typed_network_errors_are_retryable_for_ui() {
+        for err in [
+            MukeiError::NetworkTimeout {
+                operation: "download".into(),
+            },
+            MukeiError::NetworkRateLimited {
+                operation: "download".into(),
+            },
+            MukeiError::NetworkServerError {
+                status: 503,
+                operation: "download".into(),
+            },
+        ] {
+            let ui = UiError::from_mukei_error(&err, "download_model");
+            assert_eq!(ui.class, "network");
+            assert!(ui.recoverable);
+            assert_eq!(ui.suggested_action, SuggestedUiAction::Retry);
+            assert_eq!(ui.user_message, "Network request failed.");
         }
     }
 

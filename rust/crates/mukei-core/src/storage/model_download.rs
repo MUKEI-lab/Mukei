@@ -312,7 +312,7 @@ mod real {
         let mut resp = request
             .send()
             .await
-            .map_err(|e| MukeiError::NetworkError(format!("GET {}: {e}", req.url)))?;
+            .map_err(|e| crate::network::map_reqwest_error("model download", e))?;
 
         let status = resp.status();
 
@@ -347,31 +347,32 @@ mod real {
 
             // Re-issue the request without a `Range` header.
             drop(resp);
-            let resp_retry =
-                client.get(&req.url).send().await.map_err(|e| {
-                    MukeiError::NetworkError(format!("GET {} (restart): {e}", req.url))
-                })?;
+            let resp_retry = client
+                .get(&req.url)
+                .send()
+                .await
+                .map_err(|e| crate::network::map_reqwest_error("model download restart", e))?;
             let retry_status = resp_retry.status();
             if !retry_status.is_success() {
-                let msg = format!("HTTP {retry_status} for {} (restart)", req.url);
+                let err = crate::network::http_status_error("model download restart", retry_status);
                 let _ = events
                     .send(DownloadEvent::Error {
-                        code: "ERR_NETWORK",
-                        message: msg.clone(),
+                        code: err.error_code(),
+                        message: err.to_string(),
                     })
                     .await;
-                return Err(MukeiError::NetworkError(msg));
+                return Err(err);
             }
             resp = resp_retry;
         } else if !status.is_success() {
-            let msg = format!("HTTP {status} for {}", req.url);
+            let err = crate::network::http_status_error("model download", status);
             let _ = events
                 .send(DownloadEvent::Error {
-                    code: "ERR_NETWORK",
-                    message: msg.clone(),
+                    code: err.error_code(),
+                    message: err.to_string(),
                 })
                 .await;
-            return Err(MukeiError::NetworkError(msg));
+            return Err(err);
         }
 
         let Some(remaining_bytes) = resp.content_length() else {
@@ -467,7 +468,7 @@ mod real {
                 return Err(MukeiError::Cancelled);
             }
             let bytes =
-                chunk.map_err(|e| MukeiError::NetworkError(format!("stream chunk: {e}")))?;
+                chunk.map_err(|e| crate::network::map_reqwest_error("model download stream", e))?;
             hasher.update(&bytes);
             out.write_all(&bytes)
                 .await
