@@ -1,0 +1,28 @@
+[package]
+name               = "mukei-ffi-shim"
+version            = "0.7.5"
+edition            = "2021"
+rust-version       = "1.78"
+description        = "Mukei manual-C FFI escape hatch — paired with CXX-Qt, used when QML binding codegen fails (TRD §1.3 fallback)"
+license            = "LicenseRef-Mukei-Proprietary"
+authors            = ["Mukei AI Architecture Pass"]
+# First-party proprietary crate; see mukei-core/Cargo.toml for why
+# `publish = false` is also required for cargo-deny.
+publish            = false
+
+[lib]
+crate-type         = ["staticlib"]
+path               = "src/lib.rs"
+
+[dependencies]
+mukei-core      = { path = "../mukei-core", default-features = false, features = ["std", "tokio"] }
+zeroize         = { workspace = true }
+subtle          = { workspace = true }
+parking_lot     = { workspace = true }
+once_cell       = { workspace = true }
+thiserror       = { workspace = true }
+tracing         = { workspace = true }
+tokio-util      = { workspace = true }
+
+[dev-dependencies]
+tokio           = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }

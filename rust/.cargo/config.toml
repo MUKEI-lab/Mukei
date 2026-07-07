@@ -1,0 +1,36 @@
+# Rust workspace-scoped Cargo config for Mukei.
+#
+# Purpose: security hardening flags for the Android release surface.
+# These moved out of `Cargo.toml` (`profile.release-hardening.rustflags`)
+# because that key requires the unstable `profile-rustflags` Cargo
+# feature, which fails `cargo check` on stable-Cargo consumers and
+# consequently every workspace command in CI. `.cargo/config.toml`
+# supports `[target.'cfg(...)'].rustflags` on stable Cargo, so the same
+# hardening flags now activate cleanly whenever the Android ABI is the
+# build target.
+#
+# Threat model:
+#   * +stack-protector-all      — canary on every function frame; blunts
+#                                  linear stack buffer overflows in the
+#                                  llama.cpp FFI boundary and the fuzz
+#                                  target parsers.
+#   * -Wl,-z,relro,-z,now       — full RELRO + bind-now; hardens the
+#                                  Android release .so against GOT
+#                                  overwrite exploitation.
+#
+# Desktop / macOS / sandbox builds keep the default rustflags (fast to
+# link, no penalty). The flags only apply when the compilation target
+# is aarch64-linux-android, i.e. `cargo ndk` / `cargo apk` runs.
+
+[env]
+# CXX-Qt 0.9's build scripts do not always discover Qt 6 via PATH on
+# Linux/Termux hosts even when `qmake6` is installed. Pin the workspace
+# build to the Qt 6 qmake binary so cargo builds do not require callers
+# to remember `QMAKE=qmake6`.
+QMAKE = "qmake6"
+
+[target.'cfg(all(target_arch = "aarch64", target_os = "android"))']
+rustflags = [
+    "-C", "target-feature=+stack-protector-all",
+    "-C", "link-arg=-Wl,-z,relro,-z,now",
+]

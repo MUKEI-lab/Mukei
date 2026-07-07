@@ -1,0 +1,27 @@
+[package]
+name    = "llama-cpp-rs"
+version = "0.1.0-stub"
+edition = "2021"
+description = "Mukei-internal placeholder for llama-cpp-rs. Replaced at build time by the prebuilt static archive under rust/llama-cpp-prebuilt/. See TRD §8.2."
+license = "LicenseRef-Mukei-Proprietary"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+# Architect review GH #4: explicit acknowledgement gate.
+#
+# The workspace's `llama_cpp` feature still links THIS stub by default
+# (workspace dep is `path = "llama-cpp-stub"`). Without the gate below,
+# a release build with `--features release-hardening,llama_cpp` would
+# silently ship a LLM-less agent. Tests / sandbox builds must opt in to
+# the stub via `--features llama-cpp-rs/stub-acknowledged` (or the
+# workspace-level alias added at the same time).
+[features]
+default              = []
+# Opt-in feature: caller acknowledges they want the stub (unit tests,
+# sandbox builds). Required when `release-hardening` is on.
+stub-acknowledged    = []
+# Mirrors the workspace `release-hardening` flag so the compile_error!
+# tripwire in src/lib.rs can resolve it.
+release-hardening    = []

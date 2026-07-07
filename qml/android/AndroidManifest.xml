@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Minimal Android manifest for the Mukei QML shell. `QT_ANDROID_PACKAGE_SOURCE_DIR`
+  in qml/CMakeLists.txt points at this directory, so androiddeployqt uses
+  this file as the base manifest and overlays Qt's generated attributes on
+  top of it. Real permissions (INTERNET for Brave/Tavily, FOREGROUND_SERVICE
+  for the download slot) come from the runtime — this scaffold just gives
+  Qt a valid starting point.
+
+  minSdk 29 aligns with QT_ANDROID_MIN_SDK_VERSION in CMakeLists.txt;
+  targetSdk 35 aligns with QT_ANDROID_TARGET_SDK_VERSION.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          package="app.mukei">
+    <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="35"/>
+
+    <!-- No INTERNET permission by default. The privacy manifest keeps the
+         shell offline until the user opts a search engine key in through
+         Settings; the bridge then requests INTERNET at that point. -->
+
+    <application
+        android:label="Mukei"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:hasFragileUserData="true">
+        <activity
+            android:name="org.qtproject.qt.android.bindings.QtActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|density|uiMode">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

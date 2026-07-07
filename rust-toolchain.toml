@@ -1,0 +1,31 @@
+# Architect review GH #21: pinned toolchain so every contributor and
+# every CI runner builds against the same compiler. The workspace MSRV
+# is declared as `rust-version = "1.78"` in `rust/Cargo.toml`; we pin
+# the channel at the same value so a contributor on stable 1.86 cannot
+# accidentally land a 1.86-only construct that breaks the MSRV claim.
+#
+# Update procedure:
+#   1. Decide on a new MSRV (Major/Minor only).
+#   2. Update `rust-version` in `rust/Cargo.toml` and rust/crates/*.toml.
+#   3. Update the `channel` below.
+#   4. Update the rust badge in README.md.
+#   5. Run cargo test under the new toolchain before merging.
+# NOTE: the workspace's declared MSRV is 1.78 (cxx-qt 0.6 minimum),
+# but several transitive deps (notably the cpufeatures family pulled
+# by sha2 / blake3) have moved to edition2024 and require a much
+# newer Cargo. We therefore pin `stable` for CI/dev and verify the
+# 1.78 floor in a dedicated `msrv-check` CI job that runs
+# `cargo +1.78 check --no-default-features --features 'std,tokio'`.
+# Bumping the floor below stable requires that MSRV job to go green.
+[toolchain]
+channel    = "stable"
+components = ["rustfmt", "clippy"]
+# Targets we cross-compile for. `rustup` will install these on first
+# build so a contributor running `cargo check --target aarch64-...`
+# does not need a manual install step.
+targets    = [
+    "aarch64-linux-android",      # primary target (mobile)
+    "x86_64-unknown-linux-gnu",   # CI / dev sandbox
+    "aarch64-apple-darwin",       # macOS desktop (Apple Silicon)
+]
+profile    = "minimal"

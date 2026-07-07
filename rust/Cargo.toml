@@ -1,0 +1,157 @@
+# =====================================================================
+# Mukei Rust Workspace — TRD v0.7.5
+#   * mukei-core       → pure-Rust agent / engine / RAG / storage
+#   * mukei-bridge     → cdylib exposing the QML QObject via CXX-Qt + JNI
+#   * mukei-ffi-shim   → plain `extern "C"` escape-hatch FFI (TRD §1.3)
+# =====================================================================
+[workspace]
+resolver = "2"
+members  = [
+    "crates/mukei-core",
+    "crates/mukei-bridge",
+    "crates/mukei-ffi-shim",
+    "llama-cpp-stub",
+]
+exclude  = [
+    "target",
+    "llama-cpp-prebuilt",
+]
+
+[workspace.package]
+version     = "0.7.5"
+edition     = "2021"
+rust-version = "1.78"           # ≥ MSRV required by cxx-qt 0.6
+license     = "LicenseRef-Mukei-Proprietary"
+authors     = ["Mukei AI Architecture Pass"]
+
+[workspace.dependencies]
+# ----- Concurrency / Runtime --------------------------------------------
+tokio       = { version = "1.40", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tokio-util  = { version = "0.7",  features = ["rt"] }
+futures     = "0.3"
+async-trait = "0.1"
+
+# ----- CXX-Qt Bridge (TRD §1.2) -----------------------------------------
+cxx         = "1.0"
+cxx-qt      = "0.9"
+cxx-qt-lib  = "0.9"
+cxx-qt-build = "0.9"
+
+# ----- LLM Inference -----------------------------------------------------
+# TRD §1.2.2 — pinned rev of llama-cpp-rs; only resolved when the
+# `llama_cpp` feature is enabled (bridge crate / native Android build).
+# The placeholder is a local stub path; flip to git when wiring the real
+# llama.cpp prebuild (see llama-cpp-prebuilt/CMakeLists.txt and TRD §8.2).
+llama-cpp-rs = { path = "llama-cpp-stub" }
+
+# ----- RAG / Embeddings (TRD §4.1) --------------------------------------
+# `half` is pinned below the newest 2.x line because candle 0.7.x still
+# compiles against the rand-0.8-backed trait impls; newer `half` releases
+# also pull rand 0.9, which breaks `SampleUniform` for f16/bf16 in the
+# `--all-features` matrix.
+half                = "=2.4.1"
+candle-core         = "0.7"
+candle-nn           = "0.7"
+candle-transformers = "0.7"
+usearch             = "2.15"
+tokenizers          = "0.19"
+
+# ----- Database (TRD §6 / BS v1.2) --------------------------------------
+rusqlite    = { version = "0.31", features = ["bundled"] }
+r2d2        = "0.8"
+r2d2_sqlite = "0.24"
+
+# ----- HTTP & parsing (TRD §5.1) ---------------------------------------
+# NOTE on `scraper`: the v0.7.0 plan listed `scraper` for streaming HTML
+# parsing of search-engine result pages. The current implementation
+# (search/engines/{brave,tavily}.rs) uses JSON-only APIs, so `scraper`
+# is not referenced from any source file. It also pulls in MPL-2.0
+# transitive crates (`cssparser`, `selectors`, `dtoa-short`,
+# `cssparser-macros`) which violate the Apache/MIT-only license policy
+# in `deny.toml`. The dependency is removed in v0.7.5; re-add behind a
+# dedicated `html_scraping` feature with an MPL-2.0 exception entry
+# when an HTML-scraping engine is actually wired up.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+url     = "2.5"
+
+# ----- Serialisation (TRD §12.5 strict config) -------------------------
+serde      = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml       = "0.8"
+
+# ----- Crypto / Hashes (TRD §12.3 wrapping-key pattern) -----------------
+sha2    = "0.10"
+blake3  = "=1.5.5"
+zeroize = { version = "1.7", features = ["derive"] }
+subtle  = "2.5"
+
+# ----- Diagnostics ------------------------------------------------------
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-panic      = "0.1"
+
+# ----- Error ------------------------------------------------------------
+thiserror = "1.0"
+anyhow    = "1.0"
+
+# ----- Sync primitives --------------------------------------------------
+parking_lot = "0.12"
+once_cell   = "1.19"
+bloomfilter = "1.0"
+
+# ----- Misc -------------------------------------------------------------
+uuid       = { version = "1.10", features = ["v4", "serde"] }
+chrono     = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+meval      = "0.2"
+
+# ============================================================================
+# Workspace metadata
+# ============================================================================
+# IMPORTANT (TRD §1.3 / PRD G1 / REQ-ARCH-01 / REQ-DIA-04):
+#   `panic = "unwind"` is MANDATORY for every shipped profile.
+#   `std::panic::catch_unwind` (used by `mukei_core::guard::callback_with_guard!`,
+#   the `mukei-ffi-shim` callback wrapper, and the panic-hook sink) is a no-op
+#   under `panic = "abort"` — a single panic anywhere in the agent loop would
+#   then SIGABRT the entire process instead of being caught at the FFI boundary.
+#   Do NOT switch any profile back to `panic = "abort"`.
+[profile.release]
+lto              = "thin"
+codegen-units    = 1
+panic            = "unwind"   # REQUIRED — see note above
+strip            = true
+opt-level        = 3
+
+[profile.dev]
+opt-level        = 0
+debug            = true
+incremental      = true
+panic            = "unwind"   # REQUIRED — see note above
+
+# Android target uses the cheaper `z` because `wasm`-time profiling is off.
+[profile.android-release]
+inherits  = "release"
+opt-level = "z"
+lto       = "fat"
+panic     = "unwind"          # REQUIRED — inherited but pinned explicitly
+
+# Release hardening profile with additional security flags.
+#
+# NOTE: the previous revision on the security branch declared
+#   rustflags = ["-C", "target-feature=+stack-protector-all",
+#                "-C", "link-arg=-Wl,-z,relro,-z,now"]
+# inline here. That requires the unstable `profile-rustflags` Cargo
+# feature (nightly-only, RFC 3128), which fails `cargo check` on stable
+# for every workspace consumer — breaking CI on `main`.
+#
+# The same hardening flags now live in `.cargo/config.toml` under
+# `[target.'cfg(all(target_arch = "aarch64", target_os = "android"))']`
+# so they only activate for the Android release build (the surface
+# actually shipped to end users). Desktop / sandbox builds remain
+# stable-Cargo-friendly.
+[profile.release-hardening]
+inherits         = "release"
+lto              = "fat"
+codegen-units    = 1
+panic            = "unwind"
+strip            = "symbols"  # Keep some symbols for debugging
+opt-level        = 3

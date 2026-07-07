@@ -1,0 +1,185 @@
+# Architect review GH #7: supply-chain gates (cargo-deny config).
+#
+# Run via `cargo deny check advisories sources licenses bans`.
+#
+# The matrix below intentionally errs on the strict side; loosen only
+# with explicit sign-off — this is a privacy-critical, zero-telemetry,
+# proprietary product and every dep is a supply-chain attack surface.
+#
+# Policy intent (PRD §III + user sign-off):
+#   * First-party code:           LicenseRef-Mukei-Proprietary
+#   * Allowed third-party FOSS:   permissive only (Apache-2.0 / MIT
+#                                 family + a few well-known permissive
+#                                 data licenses for trust roots).
+#   * Disallowed:                 MPL-2.0 and any other copyleft. Each
+#                                 added crate MUST be reviewed against
+#                                 this list before merge.
+
+[graph]
+# Only audit the targets Mukei actually ships for. This prevents
+# target-only crates for unrelated platforms from poisoning the graph.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-linux-android",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+all-features = true
+exclude-dev = true
+
+[advisories]
+# Pull the latest RustSec advisory db on every run.
+db-urls       = ["https://github.com/rustsec/advisory-db"]
+yanked        = "deny"
+# New cargo-deny schema: these fields are scope selectors, not lint levels.
+# We only gate unmaintained crates at the workspace boundary; transitive
+# maintenance churn is tracked via explicit refresh work, not by breaking
+# every PR on deep optional trees.
+unmaintained  = "workspace"
+# Unsound crates remain forbidden anywhere in the graph.
+# cargo-deny removed the legacy `notice` severity key; notice advisories
+# are errors by default now and must be handled via `ignore` if accepted.
+unsound       = "all"
+
+# Granular allow-list for advisories we knowingly accept (must include
+# an issue link + an ETA for the swap). Empty by policy: any vendored
+# crate that gains an advisory blocks the next release.
+ignore = []
+
+[licenses]
+# Mukei itself uses a private custom SPDX identifier.
+unused-allowed-license = "allow"
+allow      = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    "0BSD",
+    # `webpki-roots` v1.x ships the Mozilla CCADB trust-root data under
+    # CDLA-Permissive-2.0. This is a permissive (Open Definition–compliant,
+    # non-copyleft) data licence; it only governs the embedded root-cert
+    # blob, not any Rust source we extend. Approved for shipping the
+    # rustls TLS trust store. Upstream:
+    #   https://github.com/rustls/webpki-roots
+    #   https://cdla.dev/permissive-2-0/
+    "CDLA-Permissive-2.0",
+    # Private first-party workspace crates.
+    "LicenseRef-Mukei-Proprietary",
+]
+confidence-threshold = 0.93
+private = { ignore = true }
+exceptions = []
+
+[bans]
+# Block known-evil / unmaintained crates by name. Add aliases as we
+# discover them in the dependency tree.
+#
+# `multiple-versions = "warn"` matches the policy intent — duplicate
+# versions are a code-smell we want surfaced, not a hard release
+# blocker. The supply-chain workflow runs with `-D warnings` so the
+# warn-level still becomes a CI error UNLESS an entry below explicitly
+# documents the duplicate. Each `skip` MUST cite the upstream gap that
+# forces the duplicate; remove it the moment upstream catches up.
+multiple-versions = "warn"
+wildcards = "deny"
+# The workspace uses path-based intra-workspace dependencies (e.g.
+# `mukei-core = { path = "../mukei-core", ... }`). Without this flag
+# cargo-deny treats those path entries as wildcard public deps. Per
+# cargo-deny 0.14+ semantics, this allows wildcards inside private /
+# workspace crates only — public, registry-style wildcards remain
+# denied.
+allow-wildcard-paths = true
+highlight = "all"
+
+# Deny list — extend cautiously.
+deny = [
+    # `openssl-sys` is the classic supply-chain attack surface. We
+    # standardise on rustls everywhere.
+    { crate = "openssl-sys", reason = "TRD §11.5 — Mukei is rustls-only." },
+]
+
+# Skip duplicate-version warnings for these specific crates if a
+# transitive needs the older line. Each entry must cite the path that
+# forces the duplicate; revisit on every quarterly refresh.
+skip = [
+    # `tokenizers` v0.19 still pins `base64 = 0.13`; `reqwest`/`hyper`
+    # use the current `0.22`. Upstream tokenizers 0.20+ moves to 0.22.
+    { crate = "base64@0.13.1",            reason = "tokenizers 0.19 transitive — fixed in tokenizers >= 0.20" },
+    # `fancy-regex` (candle-transformers) keeps `bit-set 0.5` ⇒ `bit-vec 0.6`.
+    { crate = "bit-vec@0.6.3",            reason = "candle-transformers transitive via fancy-regex 0.13" },
+    # `raw-cpuid` (used by gemm/candle) still pins `bitflags 1.x`.
+    { crate = "bitflags@1.3.2",           reason = "candle-core/gemm transitive via raw-cpuid 10.x" },
+    # `cxx-qt-build` 0.9 still carries the older diagnostics stack; `cxx-build`
+    # is already on codespan-reporting 0.13 / unicode-width 0.2.
+    { crate = "codespan-reporting@0.11.1", reason = "cxx-qt-build 0.9 transitive — clears when upstream moves to codespan-reporting 0.13+" },
+    # `sha2` 0.10 lags one minor behind `blake3`/`chacha20` for cpufeatures.
+    { crate = "cpufeatures@0.2.17",       reason = "sha2 0.10 transitive; blake3/chacha20 already on 0.3" },
+    # The 0.2/0.3/0.4 split tracks the rand/uuid major bump cycle.
+    { crate = "getrandom@0.2.17",         reason = "rand 0.8/rustls 0.23 transitive — clears with rand 0.10 rollout" },
+    { crate = "getrandom@0.4.3",          reason = "uuid 1.10+ pulls rand 0.10 → getrandom 0.4" },
+    # `rusqlite` 0.31 pins `hashlink 0.9` → `hashbrown 0.14`; cxx-build is on 0.17.
+    { crate = "hashbrown@0.14.5",         reason = "rusqlite 0.31 transitive via hashlink 0.9" },
+    # `tokenizers` v0.19 mixes `itertools 0.11` and `0.12`.
+    { crate = "itertools@0.11.0",         reason = "tokenizers 0.19 transitive — clears with 0.20" },
+    # `meval` 0.2 (the math evaluator from TRD §5.5) still uses `nom 1.x`.
+    { crate = "nom@1.2.4",                reason = "meval 0.2 transitive; meval is unmaintained but small and audited (TRD §5.5)" },
+    # NOTE: the `phf@0.10` / `phf_codegen@0.10` / `phf_generator@0.10` /
+    # `phf_shared@0.10` / `siphasher@0.3` skip entries were removed in
+    # the same supply-chain pass that dropped `scraper`. Those crates
+    # are no longer in the lockfile, so cargo-deny would (correctly)
+    # raise `unmatched-skip` errors if we kept them.
+    # `candle-core`, `tokenizers`, `uuid` span the rand 0.8 lifecycle. Once
+    # the workspace pinned `half = =2.4.1` to break the candle/rand-0.9
+    # SampleUniform conflict (see rust/Cargo.toml), the 0.9 line of
+    # `rand`/`rand_core` disappeared from the lockfile. The duplicate-
+    # version risk that motivated the skip list is therefore narrower:
+    # only `rand@0.8` + `rand_core@0.6` are still multi-version pinned by
+    # upstreams we do not control.
+    { crate = "rand@0.8.6",               reason = "candle/tokenizers transitive — pinned to 0.8 by upstream" },
+    { crate = "rand_core@0.6.4",          reason = "rand 0.8 + rustls 0.23 transitive" },
+    # `toml` 0.8 still uses `toml_edit 0.22`/`toml_datetime 0.6`; cxx-build chain
+    # is on the 1.x line.
+    { crate = "toml_datetime@0.6.11",     reason = "toml 0.8 transitive — clears with toml 1.0 rollout" },
+    { crate = "toml_edit@0.22.27",        reason = "toml 0.8 transitive — clears with toml 1.0 rollout" },
+    { crate = "unicode-width@0.1.14",      reason = "cxx-qt-build 0.9 transitive via codespan-reporting 0.11" },
+    # `indicatif` / `console` keep windows-sys 0.59 while mio/socket2 use 0.61.
+    { crate = "windows-sys@0.59.0",       reason = "indicatif/console transitive — clears with indicatif 0.18" },
+    # `toml_edit 0.22` keeps `winnow 0.7`; the cxx-build chain is on 1.x.
+    { crate = "winnow@0.7.15",            reason = "toml 0.8 transitive — clears with toml 1.0 rollout" },
+]
+skip-tree = []
+
+# Workspace-dependency lint policy. MUST stay AFTER the scalar keys of
+# [bans] (TOML sub-table semantics: once we open [bans.workspace-dependencies]
+# every subsequent key would be parsed as a member of the sub-table).
+#
+# `unused` defaults to `deny`, which breaks builds for feature-gated
+# optional workspace deps such as `llama-cpp-rs` (only resolved when the
+# `llama_cpp` feature is enabled — see TRD §8.2 / GH #4). cargo-deny
+# sees the entry as "unused" on the default build matrix and refuses
+# to validate. Set to `allow`: the optional-feature pattern is
+# intentional and the supply-chain workflow runs `--all-features` so
+# any genuinely unused workspace entry will still show up in the
+# matrix as a stale dep that needs trimming.
+[bans.workspace-dependencies]
+unused = "allow"
+# Path deps are intentionally excluded from the duplicate check —
+# our intra-workspace crates (mukei-core, mukei-bridge, mukei-ffi-shim)
+# share dependencies on purpose.
+include-path-dependencies = false
+
+[sources]
+unknown-registry = "deny"
+unknown-git      = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# Whitelist for vendored git deps (intentionally empty in this repo —
+# our llama.cpp lives via the prebuilt submodule, not as a cargo dep).
+allow-git = []
