@@ -557,6 +557,7 @@ fn suggested_action_for(error: &MukeiError) -> SuggestedUiAction {
         | MukeiError::Io(_)
         | MukeiError::ToolTimeout(_)
         | MukeiError::WebSearchFailed(_) => SuggestedUiAction::Retry,
+        MukeiError::RemoteFeatureDisabled { .. } => SuggestedUiAction::OpenSettings,
         MukeiError::BridgeBusy => SuggestedUiAction::StopGeneration,
         MukeiError::DownloadBusy { .. } | MukeiError::Cancelled => SuggestedUiAction::ClearDownload,
         MukeiError::FFIPanic
@@ -603,6 +604,9 @@ fn user_message_for(error: &MukeiError) -> String {
         | MukeiError::NetworkRateLimited { .. }
         | MukeiError::NetworkServerError { .. }
         | MukeiError::HttpClientFailed(_) => "Network request failed.".to_string(),
+        MukeiError::RemoteFeatureDisabled { .. } => {
+            "Remote features are disabled by privacy settings.".to_string()
+        }
         MukeiError::BridgeBusy => "A response is already running.".to_string(),
         MukeiError::DownloadBusy { .. } => "That model is already downloading.".to_string(),
         MukeiError::Cancelled => "Operation cancelled.".to_string(),
@@ -725,6 +729,23 @@ mod tests {
             assert_eq!(ui.suggested_action, SuggestedUiAction::Retry);
             assert_eq!(ui.user_message, "Network request failed.");
         }
+    }
+
+    #[test]
+    fn remote_disabled_error_routes_to_settings() {
+        let err = MukeiError::RemoteFeatureDisabled {
+            feature: "web_search",
+            policy: "local_only".into(),
+        };
+        let ui = UiError::from_mukei_error(&err, "web_search");
+        assert_eq!(ui.code, "ERR_REMOTE_DISABLED");
+        assert_eq!(ui.class, "permission");
+        assert!(ui.recoverable);
+        assert_eq!(ui.suggested_action, SuggestedUiAction::OpenSettings);
+        assert_eq!(
+            ui.user_message,
+            "Remote features are disabled by privacy settings."
+        );
     }
 
     #[test]

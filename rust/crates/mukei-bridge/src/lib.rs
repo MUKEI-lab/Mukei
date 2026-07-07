@@ -72,7 +72,7 @@ use bridge_state::{single_active_download, ActiveDownload, BusyGuard, DownloadSl
 use mukei_core::agent::AgentLoop;
 use mukei_core::config::MukeiConfig;
 use mukei_core::ffi::tags::{TagEvents, TagsStreaming};
-use mukei_core::tools::ToolRegistry;
+use mukei_core::tools::{RemoteFeaturePolicy, ToolRegistry};
 use mukei_core::types::{BranchId, ConversationId, MessageId};
 use mukei_core::ui_contract::{
     AndroidStorageState, AppLifecycleState, BridgeEvent, BridgeEventKind, CapabilitySnapshot,
@@ -90,6 +90,8 @@ static GLOBAL_BRAVE_API_KEY: Lazy<Arc<Mutex<Option<Zeroizing<String>>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
 static GLOBAL_TAVILY_API_KEY: Lazy<Arc<Mutex<Option<Zeroizing<String>>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
+static GLOBAL_REMOTE_FEATURE_POLICY: Lazy<Arc<Mutex<RemoteFeaturePolicy>>> =
+    Lazy::new(|| Arc::new(Mutex::new(RemoteFeaturePolicy::default())));
 #[cfg(feature = "sqlcipher")]
 static GLOBAL_DATABASE_CIPHER_KEY: Lazy<Arc<Mutex<Option<Vec<u8>>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
@@ -98,10 +100,13 @@ static GLOBAL_DATABASE_CIPHER_KEY: Lazy<Arc<Mutex<Option<Vec<u8>>>>> =
 /// whenever the Brave or Tavily key changes so the next tool call sees
 /// the new credentials without restarting the agent loop.
 static GLOBAL_TOOL_REGISTRY: Lazy<Arc<Mutex<Arc<ToolRegistry>>>> = Lazy::new(|| {
-    Arc::new(Mutex::new(Arc::new(ToolRegistry::with_web_search_keys(
-        "missing-brave-key",
-        "missing-tavily-key",
-    ))))
+    Arc::new(Mutex::new(Arc::new(
+        ToolRegistry::with_web_search_keys_and_policy(
+            "missing-brave-key",
+            "missing-tavily-key",
+            RemoteFeaturePolicy::default(),
+        ),
+    )))
 });
 
 #[cfg(feature = "sqlcipher")]
@@ -378,7 +383,12 @@ async fn rebuild_tool_registry_from_secrets() {
         .as_ref()
         .map(|key| key.to_string())
         .unwrap_or_else(|| "missing-tavily-key".to_string());
-    let registry = Arc::new(ToolRegistry::with_web_search_keys(brave, tavily));
+    let remote_policy = *GLOBAL_REMOTE_FEATURE_POLICY.lock().await;
+    let registry = Arc::new(ToolRegistry::with_web_search_keys_and_policy(
+        brave,
+        tavily,
+        remote_policy,
+    ));
     *GLOBAL_TOOL_REGISTRY.lock().await = registry.clone();
     tracing::info!("tool registry rebuilt with wrapped-secrets keys");
 
@@ -481,6 +491,8 @@ pub mod ffi {
         fn set_brave_api_key(self: Pin<&mut MukeiBridge>, api_key: QString);
         #[qinvokable]
         fn set_tavily_api_key(self: Pin<&mut MukeiBridge>, api_key: QString);
+        #[qinvokable]
+        fn set_remote_feature_policy(self: Pin<&mut MukeiBridge>, policy: QString);
         /// Inject the hex-encoded unwrapped SQLCipher database key
         /// before `MukeiAgent.initialize()` opens storage. Raw key
         /// bytes must never be passed through QString.
@@ -1571,6 +1583,35 @@ impl ffi::MukeiBridge {
             *store.lock().await = Some(api_key);
             rebuild_tool_registry_from_secrets().await;
         });
+    }
+
+    /// Set the privacy policy for remote features. The default is
+    /// `local_only`, so web search cannot send queries off-device until
+    /// this is explicitly set to `remote_allowed`.
+    pub fn set_remote_feature_policy(self: Pin<&mut Self>, policy: QString) {
+        let qt = self.as_ref().get_ref().qt_thread();
+        let raw_policy = policy.to_string();
+        let parsed = raw_policy.parse::<RemoteFeaturePolicy>();
+        match parsed {
+            Ok(policy) => {
+                let store = GLOBAL_REMOTE_FEATURE_POLICY.clone();
+                mukei_core::runtime::get().spawn(async move {
+                    *store.lock().await = policy;
+                    rebuild_tool_registry_from_secrets().await;
+                });
+            }
+            Err(err) => {
+                let event = error_bridge_event(&err, "set_remote_feature_policy");
+                let code = err.error_code().to_string();
+                let message = err.to_string();
+                let _ = qt.queue(move |mut qobject| {
+                    qobject.as_mut().event_emitted(event_json(event));
+                    qobject
+                        .as_mut()
+                        .error_occurred(QString::from(&code), QString::from(&message));
+                });
+            }
+        }
     }
 
     /// Inject the hex-encoded unwrapped SQLCipher key that protects the

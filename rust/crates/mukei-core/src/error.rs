@@ -201,6 +201,14 @@ pub enum MukeiError {
         /// Tool name.
         tool_name: String,
     },
+    /// A remote feature was blocked by the current privacy policy.
+    #[error("remote feature '{feature}' blocked by policy {policy}")]
+    RemoteFeatureDisabled {
+        /// Feature name, such as `web_search`.
+        feature: &'static str,
+        /// Active policy tag.
+        policy: String,
+    },
     /// Could not parse the LLM output into a tool-call payload at all.
     #[error("tool payload could not be parsed: {0}")]
     ToolParseFailed(String),
@@ -380,6 +388,7 @@ impl MukeiError {
             Self::ToolArgsRejected { .. } => "ERR_TOOL_ARGS",
             Self::ToolAbuseBlocked { .. } => "ERR_TOOL_ABUSE",
             Self::ToolPermanentlyDisabled { .. } => "ERR_TOOL_DISABLED",
+            Self::RemoteFeatureDisabled { .. } => "ERR_REMOTE_DISABLED",
             Self::ToolParseFailed(_) => "ERR_TOOL_PARSE",
             Self::ToolArgumentInvalid { .. } => "ERR_TOOL_ARGUMENT",
             Self::ToolExecutionFailed(_) => "ERR_TOOL_EXEC",
@@ -432,6 +441,7 @@ impl MukeiError {
             Self::ConfigInvalid { .. }
             | Self::ConfigMissingField(_)
             | Self::ConfigUnknownField(_) => ErrorClass::Config,
+            Self::RemoteFeatureDisabled { .. } => ErrorClass::Permission,
             Self::ToolLoopDetected(_)
             | Self::ToolTimeout(_)
             | Self::ToolAbuseBlocked { .. }
@@ -702,5 +712,17 @@ mod tests {
             assert_eq!(err.error_code(), code);
             assert_eq!(err.classification(), ErrorClass::Network);
         }
+    }
+
+    #[test]
+    fn remote_feature_disabled_has_stable_code() {
+        let err = MukeiError::RemoteFeatureDisabled {
+            feature: "web_search",
+            policy: "local_only".into(),
+        };
+        assert_eq!(err.error_code(), "ERR_REMOTE_DISABLED");
+        assert_eq!(err.classification(), ErrorClass::Permission);
+        assert!(err.to_string().contains("web_search"));
+        assert!(err.to_string().contains("local_only"));
     }
 }

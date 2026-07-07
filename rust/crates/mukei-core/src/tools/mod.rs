@@ -31,9 +31,12 @@ pub mod file_tool;
 pub mod hardware;
 pub mod math;
 pub mod permission;
+pub mod remote_policy;
 pub mod sentinel;
 pub mod validator;
 pub mod web_search;
+
+pub use remote_policy::RemoteFeaturePolicy;
 
 // NOTE: the `MAX_FAILURES_PER_TOOL` constant that used to live here held a
 // stale value (`2`) that disagreed with the audit-recommended threshold
@@ -83,10 +86,22 @@ impl ToolRegistry {
         brave_key: impl Into<String>,
         tavily_key: impl Into<String>,
     ) -> Self {
+        Self::with_web_search_keys_and_policy(brave_key, tavily_key, RemoteFeaturePolicy::default())
+    }
+
+    pub fn with_web_search_keys_and_policy(
+        brave_key: impl Into<String>,
+        tavily_key: impl Into<String>,
+        remote_policy: RemoteFeaturePolicy,
+    ) -> Self {
         let mut registry = Self {
             inner: HashMap::new(),
         };
-        registry.register(web_search::WebSearchTool::with_keys(brave_key, tavily_key));
+        registry.register(web_search::WebSearchTool::with_keys_and_policy(
+            brave_key,
+            tavily_key,
+            remote_policy,
+        ));
         registry.register(file_tool::FileTool::default());
         registry.register(hardware::HardwareTool);
         registry.register(math::MathTool);
