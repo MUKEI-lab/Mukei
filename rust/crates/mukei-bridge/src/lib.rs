@@ -66,6 +66,7 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex as ParkingMutex;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+use zeroize::{Zeroize, Zeroizing};
 
 use bridge_state::{single_active_download, ActiveDownload, BusyGuard, DownloadSlotGuard};
 use mukei_core::agent::AgentLoop;
@@ -83,12 +84,11 @@ static GLOBAL_SAF_REGISTRY: Lazy<Arc<core_saf::SafRegistry>> =
 static GLOBAL_THERMAL_STATUS: Lazy<Arc<Mutex<i32>>> = Lazy::new(|| Arc::new(Mutex::new(0)));
 
 /// Wrapped-secrets registry. The unwrap step (`feature = "android_keystore"`)
-/// happens in the bridge and the *plaintext* lives only inside this
-/// mutex — the QString that arrives from QML is overwritten before
-/// being passed any further.
-static GLOBAL_BRAVE_API_KEY: Lazy<Arc<Mutex<Option<String>>>> =
+/// happens in the bridge and provider keys are kept in zeroizing memory
+/// until the tool registry is rebuilt.
+static GLOBAL_BRAVE_API_KEY: Lazy<Arc<Mutex<Option<Zeroizing<String>>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
-static GLOBAL_TAVILY_API_KEY: Lazy<Arc<Mutex<Option<String>>>> =
+static GLOBAL_TAVILY_API_KEY: Lazy<Arc<Mutex<Option<Zeroizing<String>>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
 #[cfg(feature = "sqlcipher")]
 static GLOBAL_DATABASE_CIPHER_KEY: Lazy<Arc<Mutex<Option<Vec<u8>>>>> =
@@ -331,17 +331,20 @@ async fn resolve_download_request(
 /// Bridge-side wrapped-secrets helper. The bridge crate is responsible
 /// for unwrapping the Keystore-protected ciphertext that arrives over
 /// the JNI boundary and handing the plaintext to the core; the
-/// plaintext never returns to Java.
+/// plaintext never returns to Java and old bridge copies are zeroized
+/// when replaced.
 async fn rebuild_tool_registry_from_secrets() {
     let brave = GLOBAL_BRAVE_API_KEY
         .lock()
         .await
-        .clone()
+        .as_ref()
+        .map(|key| key.to_string())
         .unwrap_or_else(|| "missing-brave-key".to_string());
     let tavily = GLOBAL_TAVILY_API_KEY
         .lock()
         .await
-        .clone()
+        .as_ref()
+        .map(|key| key.to_string())
         .unwrap_or_else(|| "missing-tavily-key".to_string());
     let registry = Arc::new(ToolRegistry::with_web_search_keys(brave, tavily));
     *GLOBAL_TOOL_REGISTRY.lock().await = registry.clone();
@@ -1512,7 +1515,7 @@ impl ffi::MukeiBridge {
     /// (Issue #3.)
     pub fn set_brave_api_key(self: Pin<&mut Self>, api_key: QString) {
         let store = GLOBAL_BRAVE_API_KEY.clone();
-        let api_key = api_key.to_string();
+        let api_key = Zeroizing::new(api_key.to_string());
         mukei_core::runtime::get().spawn(async move {
             *store.lock().await = Some(api_key);
             rebuild_tool_registry_from_secrets().await;
@@ -1524,7 +1527,7 @@ impl ffi::MukeiBridge {
     /// at all.
     pub fn set_tavily_api_key(self: Pin<&mut Self>, api_key: QString) {
         let store = GLOBAL_TAVILY_API_KEY.clone();
-        let api_key = api_key.to_string();
+        let api_key = Zeroizing::new(api_key.to_string());
         mukei_core::runtime::get().spawn(async move {
             *store.lock().await = Some(api_key);
             rebuild_tool_registry_from_secrets().await;
@@ -1539,11 +1542,15 @@ impl ffi::MukeiBridge {
     pub fn set_database_cipher_key(self: Pin<&mut Self>, key: QString) {
         let qt = self.as_ref().get_ref().qt_thread();
         let store = GLOBAL_DATABASE_CIPHER_KEY.clone();
-        let key_hex = key.to_string();
+        let key_hex = Zeroizing::new(key.to_string());
         mukei_core::runtime::get().spawn(async move {
             match decode_hex_key(&key_hex) {
                 Ok(key_bytes) => {
-                    *store.lock().await = Some(key_bytes);
+                    let mut guard = store.lock().await;
+                    if let Some(mut old_key) = guard.take() {
+                        old_key.zeroize();
+                    }
+                    *guard = Some(key_bytes);
                 }
                 Err(message) => {
                     let err = mukei_core::error::MukeiError::ConfigInvalid {
