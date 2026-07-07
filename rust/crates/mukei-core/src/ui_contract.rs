@@ -543,6 +543,8 @@ fn suggested_action_for(error: &MukeiError) -> SuggestedUiAction {
         MukeiError::ModelLoadFailed(_)
         | MukeiError::ModelCorrupted
         | MukeiError::DownloadHashMismatch
+        | MukeiError::DownloadSizeMissing
+        | MukeiError::DownloadTooLarge { .. }
         | MukeiError::MemoryPreflightRejected(_) => SuggestedUiAction::OpenModelManager,
         MukeiError::NetworkError(_)
         | MukeiError::HttpClientFailed(_)
@@ -583,6 +585,9 @@ fn user_message_for(error: &MukeiError) -> String {
         }
         MukeiError::DownloadHashMismatch => {
             "The downloaded model did not pass verification.".to_string()
+        }
+        MukeiError::DownloadSizeMissing | MukeiError::DownloadTooLarge { .. } => {
+            "The model download could not be accepted safely.".to_string()
         }
         MukeiError::NetworkError(_) | MukeiError::HttpClientFailed(_) => {
             "Network request failed.".to_string()
@@ -666,6 +671,27 @@ mod tests {
         assert!(ui.recoverable);
         assert!(ui.technical_message.contains("n_ctx"));
         assert_eq!(ui.suggested_action, SuggestedUiAction::OpenSettings);
+    }
+
+    #[test]
+    fn unsafe_download_size_errors_route_to_model_manager() {
+        for err in [
+            MukeiError::DownloadSizeMissing,
+            MukeiError::DownloadTooLarge {
+                max_bytes: 16,
+                actual_bytes: 17,
+            },
+        ] {
+            let ui = UiError::from_mukei_error(&err, "download_model");
+            assert_eq!(ui.class, "network");
+            assert_eq!(ui.severity, ErrorSeverity::Error);
+            assert!(ui.recoverable);
+            assert_eq!(ui.suggested_action, SuggestedUiAction::OpenModelManager);
+            assert_eq!(
+                ui.user_message,
+                "The model download could not be accepted safely."
+            );
+        }
     }
 
     #[test]

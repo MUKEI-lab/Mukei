@@ -66,7 +66,7 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex as ParkingMutex;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use bridge_state::{single_active_download, ActiveDownload, BusyGuard, DownloadSlotGuard};
 use mukei_core::agent::AgentLoop;
@@ -201,6 +201,19 @@ fn download_event_error(code: &'static str, message: String) -> mukei_core::erro
     match code {
         "ERR_CANCELLED" => mukei_core::error::MukeiError::Cancelled,
         "ERR_DOWNLOAD_HASH" => mukei_core::error::MukeiError::DownloadHashMismatch,
+        "ERR_DOWNLOAD_SIZE_MISSING" => mukei_core::error::MukeiError::DownloadSizeMissing,
+        "ERR_DOWNLOAD_TOO_LARGE" => {
+            let mut numbers = message
+                .split(|c: char| !c.is_ascii_digit())
+                .filter(|part| !part.is_empty())
+                .filter_map(|part| part.parse::<u64>().ok());
+            let actual_bytes = numbers.next().unwrap_or_default();
+            let max_bytes = numbers.next().unwrap_or_default();
+            mukei_core::error::MukeiError::DownloadTooLarge {
+                max_bytes,
+                actual_bytes,
+            }
+        }
         "ERR_NETWORK" => mukei_core::error::MukeiError::NetworkError(message),
         "ERR_IO" => mukei_core::error::MukeiError::Io(message),
         _ => mukei_core::error::MukeiError::Internal(message),
@@ -1540,6 +1553,8 @@ impl ffi::MukeiBridge {
     /// method decodes it back to bytes before storage initialization.
     #[cfg(feature = "sqlcipher")]
     pub fn set_database_cipher_key(self: Pin<&mut Self>, key: QString) {
+        use zeroize::Zeroize;
+
         let qt = self.as_ref().get_ref().qt_thread();
         let store = GLOBAL_DATABASE_CIPHER_KEY.clone();
         let key_hex = Zeroizing::new(key.to_string());

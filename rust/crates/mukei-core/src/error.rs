@@ -256,6 +256,18 @@ pub enum MukeiError {
     /// A resumable download saw a SHA-256 mismatch on truncated resume.
     #[error("resumable download hash mismatch on truncated resume")]
     DownloadHashMismatch,
+    /// A model download response omitted Content-Length, so the app
+    /// cannot preflight storage or enforce a trustworthy upper bound.
+    #[error("download response is missing Content-Length")]
+    DownloadSizeMissing,
+    /// A model download exceeded the configured byte cap.
+    #[error("download too large ({actual_bytes} bytes > {max_bytes} bytes)")]
+    DownloadTooLarge {
+        /// Configured maximum accepted bytes.
+        max_bytes: u64,
+        /// Advertised or streamed byte count that exceeded the cap.
+        actual_bytes: u64,
+    },
 
     // ------------------------------------------------------------------
     // Domain-specific / diagnostics
@@ -346,6 +358,8 @@ impl MukeiError {
             Self::NetworkError(_) => "ERR_NETWORK",
             Self::Io(_) => "ERR_IO",
             Self::DownloadHashMismatch => "ERR_DOWNLOAD_HASH",
+            Self::DownloadSizeMissing => "ERR_DOWNLOAD_SIZE_MISSING",
+            Self::DownloadTooLarge { .. } => "ERR_DOWNLOAD_TOO_LARGE",
 
             Self::PromptLeakage => "ERR_PROMPT_LEAKAGE",
             Self::WatchdogExceeded { .. } => "ERR_WATCHDOG",
@@ -389,7 +403,11 @@ impl MukeiError {
             | Self::BinaryFile
             | Self::SandboxViolation => ErrorClass::Agent,
             Self::SafRevoked | Self::SafRequired | Self::PermissionDenied => ErrorClass::Permission,
-            Self::NetworkError(_) | Self::DownloadHashMismatch | Self::Io(_) => ErrorClass::Network,
+            Self::NetworkError(_)
+            | Self::DownloadHashMismatch
+            | Self::DownloadSizeMissing
+            | Self::DownloadTooLarge { .. }
+            | Self::Io(_) => ErrorClass::Network,
             Self::SecretLeaked(_)
             | Self::UnwrapFailed
             | Self::WrappedKeyMalformed(_)
@@ -569,5 +587,22 @@ mod tests {
         let rendered = format!("{err}");
         assert!(rendered.contains("already in flight"));
         assert!(rendered.contains("gemma-4-E2B-it-Q4_K_M.gguf"));
+    }
+
+    #[test]
+    fn unsafe_download_size_errors_have_stable_codes() {
+        let missing = MukeiError::DownloadSizeMissing;
+        assert_eq!(missing.error_code(), "ERR_DOWNLOAD_SIZE_MISSING");
+        assert_eq!(missing.classification(), ErrorClass::Network);
+
+        let too_large = MukeiError::DownloadTooLarge {
+            max_bytes: 16,
+            actual_bytes: 17,
+        };
+        assert_eq!(too_large.error_code(), "ERR_DOWNLOAD_TOO_LARGE");
+        assert_eq!(too_large.classification(), ErrorClass::Network);
+        let rendered = too_large.to_string();
+        assert!(rendered.contains("17 bytes"));
+        assert!(rendered.contains("16 bytes"));
     }
 }

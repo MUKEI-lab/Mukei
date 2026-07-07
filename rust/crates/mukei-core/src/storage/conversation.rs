@@ -75,6 +75,17 @@ pub struct PersistedTurn {
     pub assistant_external_id: MessageId,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppendMessage {
+    pub conversation_id: i64,
+    pub branch_id: Option<i64>,
+    pub parent_message_id: Option<i64>,
+    pub external_id: MessageId,
+    pub role: Role,
+    pub content: String,
+    pub status: MessageStatus,
+}
+
 pub struct ConversationRepository;
 
 impl ConversationRepository {
@@ -250,13 +261,7 @@ impl ConversationRepository {
 
     pub async fn append_message(
         pool: &DatabasePool,
-        conversation_id: i64,
-        branch_id: Option<i64>,
-        parent_message_id: Option<i64>,
-        external_id: MessageId,
-        role: Role,
-        content: String,
-        status: MessageStatus,
+        message: AppendMessage,
     ) -> Result<MessageRecord> {
         pool.with_conn(move |c| {
             let now = chrono::Utc::now().to_rfc3339();
@@ -266,14 +271,14 @@ impl ConversationRepository {
                      branch_id, parent_message_id, token_count, deleted, status) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, 0, 0, ?8)",
                 rusqlite::params![
-                    external_id.0.to_string(),
-                    conversation_id,
-                    role_to_sql(role),
-                    content,
+                    message.external_id.0.to_string(),
+                    message.conversation_id,
+                    role_to_sql(message.role),
+                    message.content,
                     now,
-                    branch_id,
-                    parent_message_id,
-                    status.as_str(),
+                    message.branch_id,
+                    message.parent_message_id,
+                    message.status.as_str(),
                 ],
             )?;
             let id = c.last_insert_rowid();
