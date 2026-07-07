@@ -100,32 +100,37 @@ impl DatabasePool {
     ///   crate is responsible for that step.
     /// - The key bytes are bound via `PRAGMA key = x'<hex>'` so they
     ///   never appear in a query plan / log line.
-    /// - The buffer is **zeroised** immediately after `PRAGMA key`
-    ///   succeeds, so a heap-inspecting attacker (or panic-handler core
-    ///   dump) cannot recover the key.
+    /// - Every pooled connection receives the key inside `with_init`.
+    ///   SQLCipher requires this per connection; keying only the first
+    ///   r2d2 connection leaves later pool members unable to read the DB.
+    /// - The pool holds the key in a zeroizing wrapper for its lifetime
+    ///   and zeroizes per-connection hex renderings immediately after use.
     /// - Only gated behind `feature = "sqlcipher"` because plain
     ///   `rusqlite` builds do not understand `PRAGMA key`. On non-cipher
     ///   builds the bridge should call [`Self::open`] instead.
     #[cfg(feature = "sqlcipher")]
     pub fn open_with_cipher_key(path: &Path, unwrapped_key: Vec<u8>) -> Result<Self> {
-        use zeroize::Zeroize;
+        use zeroize::Zeroizing;
 
-        // Move the key into a slot shared with the `with_init` closure;
-        // the first connection consumes + zeroises it. Subsequent
-        // pooled connections are derived from the same database file
-        // and SQLCipher unwraps internally without the key again.
-        let key_slot: std::sync::Arc<parking_lot::Mutex<Option<Vec<u8>>>> =
-            std::sync::Arc::new(parking_lot::Mutex::new(Some(unwrapped_key)));
+        if unwrapped_key.is_empty() {
+            return Err(MukeiError::DatabaseInitFailed(
+                "SQLCipher key must not be empty".to_string(),
+            ));
+        }
 
-        let key_slot_for_init = key_slot.clone();
+        let key = std::sync::Arc::new(Zeroizing::new(unwrapped_key));
+
+        let key_for_init = key.clone();
         let manager = r2d2_sqlite::SqliteConnectionManager::file(path).with_init(move |c| {
-            if let Some(mut key) = key_slot_for_init.lock().take() {
-                let hex_key: String = key.iter().map(|b| format!("{b:02x}")).collect();
-                c.pragma_update(None, "key", format!("x'{hex_key}'"))?;
-                // Zeroise the in-memory copy BEFORE drop.
-                key.zeroize();
-                drop(hex_key);
-            }
+            let hex_key = Zeroizing::new(
+                key_for_init
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>(),
+            );
+            let pragma_value = Zeroizing::new(format!("x'{}'", &*hex_key));
+            c.pragma_update(None, "key", &*pragma_value)?;
+            c.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(()))?;
             c.pragma_update(None, "journal_mode", "WAL")?;
             c.pragma_update(None, "synchronous", "NORMAL")?;
             c.pragma_update(None, "foreign_keys", "ON")?;

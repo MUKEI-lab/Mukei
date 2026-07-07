@@ -28,6 +28,8 @@
 #[cfg(feature = "rusqlite")]
 pub mod audit_log;
 #[cfg(feature = "rusqlite")]
+pub mod conversation;
+#[cfg(feature = "rusqlite")]
 pub mod migrations;
 #[cfg(feature = "rusqlite")]
 pub mod pool;
@@ -38,6 +40,10 @@ pub mod saf;
 
 #[cfg(feature = "rusqlite")]
 pub use audit_log::{AuditChainStatus, AuditEntry, AuditLogReader, AuditLogWriter};
+#[cfg(feature = "rusqlite")]
+pub use conversation::{
+    ConversationRecord, ConversationRepository, MessageRecord, MessageStatus, PersistedTurn,
+};
 #[cfg(feature = "rusqlite")]
 pub use migrations::{MigrationRecord, Migrator, MIGRATIONS_DIR, MIGRATION_FILE_PREFIX};
 #[cfg(feature = "rusqlite")]
