@@ -83,7 +83,12 @@ pub async fn open_pool(
     use mukei_core::storage::{DatabasePool, Migrator, MIGRATIONS_DIR};
 
     #[cfg(feature = "sqlcipher")]
-    let pool = DatabasePool::open_with_cipher_key(&cfg.database_path, unwrapped_database_key)?;
+    let open_result =
+        DatabasePool::open_with_cipher_key_result(&cfg.database_path, unwrapped_database_key)?;
+    #[cfg(feature = "sqlcipher")]
+    let encryption_status = open_result.encryption_status;
+    #[cfg(feature = "sqlcipher")]
+    let pool = open_result.pool;
     #[cfg(not(feature = "sqlcipher"))]
     let pool = DatabasePool::open(&cfg.database_path)?;
 
@@ -92,6 +97,14 @@ pub async fn open_pool(
         .join(MIGRATIONS_DIR);
     let migrator = Migrator::new(&migrations_dir);
     migrator.apply_pending(&pool).await?;
+    #[cfg(feature = "sqlcipher")]
+    tracing::info!(
+        migrations_dir = %mukei_core::diagnostics::redact_path(&migrations_dir),
+        db_path = %mukei_core::diagnostics::redact_path(&cfg.database_path),
+        encryption_status = ?encryption_status,
+        "migrations applied during bridge boot"
+    );
+    #[cfg(not(feature = "sqlcipher"))]
     tracing::info!(
         migrations_dir = %mukei_core::diagnostics::redact_path(&migrations_dir),
         db_path = %mukei_core::diagnostics::redact_path(&cfg.database_path),

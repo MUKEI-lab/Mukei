@@ -47,7 +47,9 @@ pub use conversation::{
 #[cfg(feature = "rusqlite")]
 pub use migrations::{MigrationRecord, Migrator, MIGRATIONS_DIR, MIGRATION_FILE_PREFIX};
 #[cfg(feature = "rusqlite")]
-pub use pool::{DatabasePool, DbError, PooledConnectionExt};
+pub use pool::{
+    DatabaseEncryptionStatus, DatabaseOpenResult, DatabasePool, DbError, PooledConnectionExt,
+};
 #[cfg(feature = "rusqlite")]
 pub use recovery::{RecoveryState, RecoveryStore};
 #[cfg(feature = "rusqlite")]

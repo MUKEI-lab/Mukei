@@ -581,7 +581,11 @@ fn user_message_for(error: &MukeiError) -> String {
         | MukeiError::DatabaseCorruption
         | MukeiError::MigrationFailed(_, _)
         | MukeiError::MigrationOrderConflict { .. }
-        | MukeiError::AuditLogTampered { .. } => {
+        | MukeiError::AuditLogTampered { .. }
+        | MukeiError::DatabaseEncryptionUnavailable
+        | MukeiError::DatabaseEncryptionMigrationRequired
+        | MukeiError::DatabaseEncryptionInvalidKey
+        | MukeiError::DatabaseEncryptionCorrupted => {
             "Local storage could not be opened safely.".to_string()
         }
         MukeiError::SafRequired => "Storage permission is required for this file.".to_string(),

@@ -119,6 +119,19 @@ pub enum MukeiError {
         /// First row whose stored chain values failed verification.
         row_id: i64,
     },
+    /// SQLCipher support is not available in the linked SQLite library.
+    #[error("database encryption is unavailable in this build")]
+    DatabaseEncryptionUnavailable,
+    /// Existing database is plain SQLite and requires an explicit secure
+    /// migration before encrypted production startup can continue.
+    #[error("unencrypted database requires explicit secure migration")]
+    DatabaseEncryptionMigrationRequired,
+    /// SQLCipher key did not unlock the encrypted database.
+    #[error("database encryption key is invalid")]
+    DatabaseEncryptionInvalidKey,
+    /// Encrypted database header/body could not be interpreted safely.
+    #[error("encrypted database appears corrupted")]
+    DatabaseEncryptionCorrupted,
 
     // ------------------------------------------------------------------
     // Config (TRD §12.5)
@@ -372,6 +385,10 @@ impl MukeiError {
             Self::MigrationFailed(_, _) => "ERR_MIGRATION",
             Self::MigrationOrderConflict { .. } => "ERR_MIGRATION_ORDER",
             Self::AuditLogTampered { .. } => "ERR_AUDIT_TAMPERED",
+            Self::DatabaseEncryptionUnavailable => "ERR_DB_ENCRYPTION_UNAVAILABLE",
+            Self::DatabaseEncryptionMigrationRequired => "ERR_DB_ENCRYPTION_MIGRATION_REQUIRED",
+            Self::DatabaseEncryptionInvalidKey => "ERR_DB_ENCRYPTION_INVALID_KEY",
+            Self::DatabaseEncryptionCorrupted => "ERR_DB_ENCRYPTION_CORRUPTED",
 
             Self::ConfigMissingField(_) => "ERR_CONFIG_MISSING",
             Self::ConfigInvalid { .. } => "ERR_CONFIG_INVALID",
@@ -437,7 +454,11 @@ impl MukeiError {
             | Self::DatabaseInitFailed(_)
             | Self::MigrationFailed(_, _)
             | Self::MigrationOrderConflict { .. }
-            | Self::AuditLogTampered { .. } => ErrorClass::Storage,
+            | Self::AuditLogTampered { .. }
+            | Self::DatabaseEncryptionUnavailable
+            | Self::DatabaseEncryptionMigrationRequired
+            | Self::DatabaseEncryptionInvalidKey
+            | Self::DatabaseEncryptionCorrupted => ErrorClass::Storage,
             Self::ConfigInvalid { .. }
             | Self::ConfigMissingField(_)
             | Self::ConfigUnknownField(_) => ErrorClass::Config,
@@ -724,5 +745,32 @@ mod tests {
         assert_eq!(err.classification(), ErrorClass::Permission);
         assert!(err.to_string().contains("web_search"));
         assert!(err.to_string().contains("local_only"));
+    }
+
+    #[test]
+    fn database_encryption_errors_have_stable_codes() {
+        let cases = [
+            (
+                MukeiError::DatabaseEncryptionUnavailable,
+                "ERR_DB_ENCRYPTION_UNAVAILABLE",
+            ),
+            (
+                MukeiError::DatabaseEncryptionMigrationRequired,
+                "ERR_DB_ENCRYPTION_MIGRATION_REQUIRED",
+            ),
+            (
+                MukeiError::DatabaseEncryptionInvalidKey,
+                "ERR_DB_ENCRYPTION_INVALID_KEY",
+            ),
+            (
+                MukeiError::DatabaseEncryptionCorrupted,
+                "ERR_DB_ENCRYPTION_CORRUPTED",
+            ),
+        ];
+
+        for (err, code) in cases {
+            assert_eq!(err.error_code(), code);
+            assert_eq!(err.classification(), ErrorClass::Storage);
+        }
     }
 }
