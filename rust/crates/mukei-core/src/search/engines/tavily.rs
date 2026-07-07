@@ -54,7 +54,6 @@ impl SearchEngine for TavilyEngine {
 
 #[cfg(feature = "network")]
 async fn execute_tavily(engine: &TavilyEngine, request: &SearchRequest) -> Result<Vec<SearchHit>> {
-    use reqwest::Client;
     use serde::Deserialize;
     use serde_json::json;
 
@@ -84,12 +83,11 @@ async fn execute_tavily(engine: &TavilyEngine, request: &SearchRequest) -> Resul
         published_date: Option<String>,
     }
 
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(
+    let client = crate::network::build_network_client(
+        crate::network::NetworkClientPolicy::search(std::time::Duration::from_secs(
             crate::search::policy::PlannerPolicy::DEFAULT_TAVILY_TIMEOUT_SECS,
-        ))
-        .build()
-        .map_err(|e| MukeiError::HttpClientFailed(e.to_string()))?;
+        )),
+    )?;
 
     let mut body = json!({
         "api_key": &*engine.api_key,

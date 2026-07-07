@@ -55,7 +55,6 @@ impl SearchEngine for BraveEngine {
 
 #[cfg(feature = "network")]
 async fn execute_brave(engine: &BraveEngine, request: &SearchRequest) -> Result<Vec<SearchHit>> {
-    use reqwest::Client;
     use serde::Deserialize;
 
     #[cfg(test)]
@@ -86,12 +85,11 @@ async fn execute_brave(engine: &BraveEngine, request: &SearchRequest) -> Result<
         age: Option<String>,
     }
 
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(
+    let client = crate::network::build_network_client(
+        crate::network::NetworkClientPolicy::search(std::time::Duration::from_secs(
             crate::search::policy::PlannerPolicy::DEFAULT_BRAVE_TIMEOUT_SECS,
-        ))
-        .build()
-        .map_err(|e| MukeiError::HttpClientFailed(e.to_string()))?;
+        )),
+    )?;
 
     let mut params = vec![("q", request.query.as_str()), ("count", "5")];
     let count_str = request.count.to_string();

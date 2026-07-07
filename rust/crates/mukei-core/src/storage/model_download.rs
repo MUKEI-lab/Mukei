@@ -300,10 +300,9 @@ mod real {
             Err(_) => 0,
         };
 
-        let client = reqwest::Client::builder()
-            .user_agent(concat!("mukei-bridge/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|e| MukeiError::HttpClientFailed(e.to_string()))?;
+        let client = crate::network::build_network_client(
+            crate::network::NetworkClientPolicy::model_download(),
+        )?;
 
         let mut request = client.get(&req.url);
         if resume_from > 0 {

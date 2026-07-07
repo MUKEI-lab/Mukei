@@ -51,6 +51,9 @@ pub mod config;
 pub mod diagnostics;
 #[allow(missing_docs)]
 pub mod engine;
+#[cfg(feature = "network")]
+#[allow(missing_docs)]
+pub mod network;
 #[allow(missing_docs)]
 pub mod rag;
 #[cfg(feature = "tokio")]
