@@ -397,4 +397,28 @@ mod tests {
             MukeiError::DatabaseEncryptionMigrationRequired
         ));
     }
+
+    #[cfg(feature = "sqlcipher")]
+    #[test]
+    fn sqlcipher_open_creates_non_plain_database_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("encrypted.db");
+
+        let opened = DatabasePool::open_with_cipher_key_result(&path, vec![9_u8; 32]).unwrap();
+        assert_eq!(
+            opened.encryption_status,
+            DatabaseEncryptionStatus::Encrypted
+        );
+
+        {
+            let conn = opened.pool.blocking_acquire().unwrap();
+            conn.execute_batch("CREATE TABLE encrypted_probe (id INTEGER PRIMARY KEY);")
+                .unwrap();
+        }
+
+        assert_eq!(
+            inspect_database_header(&path).unwrap(),
+            DatabaseHeaderState::NotPlainSqlite
+        );
+    }
 }
