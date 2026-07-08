@@ -467,11 +467,29 @@ impl ConversationRepository {
             let now = chrono::Utc::now().to_rfc3339();
             let changed = tx.execute(
                 "UPDATE messages \
-                 SET status = 'failed', updated_at = ?1 \
+                 SET content = COALESCE( \
+                        NULLIF(( \
+                            SELECT generated_prefix \
+                            FROM recovery_state \
+                            WHERE recovery_state.last_message_id = messages.id \
+                        ), ''), \
+                        content \
+                     ), \
+                     status = 'failed', \
+                     updated_at = ?1 \
                  WHERE status IN ('pending', 'streaming')",
-                [now],
+                [now.as_str()],
             )?;
-            tx.execute("DELETE FROM recovery_state", [])?;
+            tx.execute(
+                "UPDATE recovery_state \
+                 SET resumed_after_kill = 1, updated_at = ?1 \
+                 WHERE EXISTS ( \
+                    SELECT 1 FROM messages \
+                    WHERE messages.id = recovery_state.last_message_id \
+                      AND messages.status = 'failed' \
+                 )",
+                [now.as_str()],
+            )?;
             tx.commit()?;
             Ok::<_, DbError>(changed)
         })
@@ -582,7 +600,7 @@ fn estimate_tokens(content: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{DatabasePool, Migrator};
+    use crate::storage::{DatabasePool, Migrator, RecoveryStore};
 
     async fn migrated_pool() -> DatabasePool {
         let dir = tempfile::tempdir().unwrap();
@@ -658,7 +676,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn boot_recovery_marks_incomplete_turn_failed() {
+    async fn boot_recovery_marks_incomplete_turn_failed_and_preserves_snapshot() {
         let pool = migrated_pool().await;
         let conversation = ConversationId::new();
         let turn = ConversationRepository::begin_turn(
@@ -685,5 +703,13 @@ mod tests {
             .unwrap();
         assert_eq!(messages[1].content, "interrupted");
         assert_eq!(messages[1].status, MessageStatus::Failed);
+
+        let recovery = RecoveryStore::load(&pool)
+            .await
+            .unwrap()
+            .expect("interrupted recovery snapshot must be preserved");
+        assert_eq!(recovery.last_message_id, messages[1].id);
+        assert_eq!(recovery.generated_prefix, "interrupted");
+        assert!(recovery.resumed_after_kill);
     }
 }

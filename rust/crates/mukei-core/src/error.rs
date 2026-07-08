@@ -327,6 +327,18 @@ pub enum MukeiError {
         /// Advertised or streamed byte count that exceeded the cap.
         actual_bytes: u64,
     },
+    /// App/model storage quota would be exceeded by the requested write.
+    #[error(
+        "storage quota exceeded ({used_bytes} used + {requested_bytes} requested > {max_bytes} max)"
+    )]
+    StorageQuotaExceeded {
+        /// Configured maximum accepted bytes for the storage class.
+        max_bytes: u64,
+        /// Bytes requested by the operation that was rejected.
+        requested_bytes: u64,
+        /// Bytes already used under the managed storage root.
+        used_bytes: u64,
+    },
 
     // ------------------------------------------------------------------
     // Domain-specific / diagnostics
@@ -430,6 +442,7 @@ impl MukeiError {
             Self::DownloadHashMismatch => "ERR_DOWNLOAD_HASH",
             Self::DownloadSizeMissing => "ERR_DOWNLOAD_SIZE_MISSING",
             Self::DownloadTooLarge { .. } => "ERR_DOWNLOAD_TOO_LARGE",
+            Self::StorageQuotaExceeded { .. } => "ERR_STORAGE_QUOTA",
 
             Self::PromptLeakage => "ERR_PROMPT_LEAKAGE",
             Self::WatchdogExceeded { .. } => "ERR_WATCHDOG",
@@ -487,8 +500,10 @@ impl MukeiError {
             | Self::NetworkServerError { .. }
             | Self::DownloadHashMismatch
             | Self::DownloadSizeMissing
-            | Self::DownloadTooLarge { .. }
             | Self::Io(_) => ErrorClass::Network,
+            Self::DownloadTooLarge { .. } | Self::StorageQuotaExceeded { .. } => {
+                ErrorClass::Resource
+            }
             Self::SecretLeaked(_)
             | Self::UnwrapFailed
             | Self::WrappedKeyMalformed(_)
@@ -681,10 +696,25 @@ mod tests {
             actual_bytes: 17,
         };
         assert_eq!(too_large.error_code(), "ERR_DOWNLOAD_TOO_LARGE");
-        assert_eq!(too_large.classification(), ErrorClass::Network);
+        assert_eq!(too_large.classification(), ErrorClass::Resource);
         let rendered = too_large.to_string();
         assert!(rendered.contains("17 bytes"));
         assert!(rendered.contains("16 bytes"));
+    }
+
+    #[test]
+    fn storage_quota_error_has_stable_code() {
+        let err = MukeiError::StorageQuotaExceeded {
+            max_bytes: 100,
+            requested_bytes: 40,
+            used_bytes: 80,
+        };
+        assert_eq!(err.error_code(), "ERR_STORAGE_QUOTA");
+        assert_eq!(err.classification(), ErrorClass::Resource);
+        let rendered = err.to_string();
+        assert!(rendered.contains("80 used"));
+        assert!(rendered.contains("40 requested"));
+        assert!(rendered.contains("100 max"));
     }
 
     #[test]

@@ -402,6 +402,20 @@ mod real {
             return Err(err);
         }
 
+        if let Some(parent) = req.dest.parent() {
+            let quota = crate::storage::StorageQuotaManager::new(parent);
+            if let Err(err) = quota.ensure_model_download_allowed(total_bytes) {
+                let _ = tokio::fs::remove_file(&partial).await;
+                let _ = events
+                    .send(DownloadEvent::Error {
+                        code: err.error_code(),
+                        message: err.to_string(),
+                    })
+                    .await;
+                return Err(err);
+            }
+        }
+
         let _ = events
             .send(DownloadEvent::Started {
                 total_bytes: Some(total_bytes),

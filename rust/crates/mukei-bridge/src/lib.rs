@@ -219,6 +219,20 @@ fn download_event_error(code: &'static str, message: String) -> mukei_core::erro
                 actual_bytes,
             }
         }
+        "ERR_STORAGE_QUOTA" => {
+            let mut numbers = message
+                .split(|c: char| !c.is_ascii_digit())
+                .filter(|part| !part.is_empty())
+                .filter_map(|part| part.parse::<u64>().ok());
+            let used_bytes = numbers.next().unwrap_or_default();
+            let requested_bytes = numbers.next().unwrap_or_default();
+            let max_bytes = numbers.next().unwrap_or_default();
+            mukei_core::error::MukeiError::StorageQuotaExceeded {
+                max_bytes,
+                requested_bytes,
+                used_bytes,
+            }
+        }
         "ERR_NETWORK" => mukei_core::error::MukeiError::NetworkError(message),
         "ERR_NETWORK_TIMEOUT" => mukei_core::error::MukeiError::NetworkTimeout {
             operation: "download_model".into(),
@@ -255,8 +269,14 @@ fn download_event_error(code: &'static str, message: String) -> mukei_core::erro
 ///
 /// Stored as `Mutex<PathBuf>` so the QML / JNI side can rewrite it at
 /// any time.
-static GLOBAL_MODEL_DIR: Lazy<Mutex<std::path::PathBuf>> = Lazy::new(|| {
-    let p = std::env::var("XDG_DATA_HOME")
+static GLOBAL_MODEL_BASE_DIR: Lazy<Mutex<std::path::PathBuf>> =
+    Lazy::new(|| Mutex::new(default_model_base_dir()));
+
+static GLOBAL_MODEL_DIR: Lazy<Mutex<std::path::PathBuf>> =
+    Lazy::new(|| Mutex::new(default_model_base_dir().join("models")));
+
+fn default_model_base_dir() -> std::path::PathBuf {
+    std::env::var("XDG_DATA_HOME")
         .ok()
         .map(std::path::PathBuf::from)
         .or_else(|| {
@@ -268,11 +288,23 @@ static GLOBAL_MODEL_DIR: Lazy<Mutex<std::path::PathBuf>> = Lazy::new(|| {
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
         })
         .join("mukei")
-        .join("models");
-    Mutex::new(p)
-});
+}
 
-fn validate_model_dir(path: std::path::PathBuf) -> mukei_core::error::Result<std::path::PathBuf> {
+#[derive(Debug)]
+struct ValidatedModelDir {
+    canonical_dir: std::path::PathBuf,
+    canonical_base: std::path::PathBuf,
+}
+
+fn validate_model_dir(path: std::path::PathBuf) -> mukei_core::error::Result<ValidatedModelDir> {
+    let base = GLOBAL_MODEL_BASE_DIR.blocking_lock().clone();
+    validate_model_dir_against_base(path, base)
+}
+
+fn validate_model_dir_against_base(
+    path: std::path::PathBuf,
+    base: std::path::PathBuf,
+) -> mukei_core::error::Result<ValidatedModelDir> {
     if !path.is_absolute() {
         return Err(mukei_core::error::MukeiError::ToolArgumentInvalid {
             field: "model_dir",
@@ -288,7 +320,56 @@ fn validate_model_dir(path: std::path::PathBuf) -> mukei_core::error::Result<std
             reason: "model directory must not contain parent-directory components".to_string(),
         });
     }
-    Ok(path)
+
+    let canonical_dir = canonicalize_existing_model_dir(&path)?;
+    let canonical_base = canonicalize_existing_model_dir(&base)?;
+    if canonical_dir.starts_with(&canonical_base) {
+        return Ok(ValidatedModelDir {
+            canonical_dir,
+            canonical_base,
+        });
+    }
+
+    if is_android_app_specific_files_path(&canonical_dir) {
+        return Ok(ValidatedModelDir {
+            canonical_base: canonical_dir.clone(),
+            canonical_dir,
+        });
+    }
+
+    Err(mukei_core::error::MukeiError::ToolArgumentInvalid {
+        field: "model_dir",
+        reason: "model directory must stay inside app-private storage".to_string(),
+    })
+}
+
+fn canonicalize_existing_model_dir(
+    path: &std::path::Path,
+) -> mukei_core::error::Result<std::path::PathBuf> {
+    std::fs::create_dir_all(path).map_err(|err| {
+        mukei_core::error::MukeiError::Io(format!("create model directory: {err}"))
+    })?;
+    path.canonicalize().map_err(|err| {
+        mukei_core::error::MukeiError::Io(format!("canonicalize model directory: {err}"))
+    })
+}
+
+fn is_android_app_specific_files_path(path: &std::path::Path) -> bool {
+    let parts: Vec<String> = path
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(part) => Some(part.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect();
+
+    parts.windows(4).any(|window| {
+        window[0] == "Android"
+            && window[1] == "data"
+            && !window[2].is_empty()
+            && window[2].contains('.')
+            && window[3] == "files"
+    })
 }
 
 fn safe_model_filename(filename: &str) -> mukei_core::error::Result<&str> {
@@ -1689,7 +1770,7 @@ impl ffi::MukeiBridge {
 
     pub fn set_model_dir(self: Pin<&mut Self>, path: QString) {
         let qt = self.as_ref().get_ref().qt_thread();
-        let new_path = match validate_model_dir(std::path::PathBuf::from(path.to_string())) {
+        let validated = match validate_model_dir(std::path::PathBuf::from(path.to_string())) {
             Ok(path) => path,
             Err(err) => {
                 let code = err.error_code().to_string();
@@ -1705,8 +1786,9 @@ impl ffi::MukeiBridge {
             }
         };
         mukei_core::runtime::get().spawn(async move {
-            *GLOBAL_MODEL_DIR.lock().await = new_path;
-            tracing::info!("model directory updated");
+            *GLOBAL_MODEL_BASE_DIR.lock().await = validated.canonical_base;
+            *GLOBAL_MODEL_DIR.lock().await = validated.canonical_dir;
+            tracing::info!("model directory updated inside app-private base");
         });
     }
 
@@ -1824,7 +1906,10 @@ pub extern "C" fn Java_com_mukei_app_MukeiBridge_nativeOnSafGrantRevoked() {}
 
 #[cfg(test)]
 mod qml_contract_tests {
-    use super::{safe_model_filename, validate_model_dir, MukeiAgentRust};
+    use super::{
+        is_android_app_specific_files_path, safe_model_filename, validate_model_dir_against_base,
+        MukeiAgentRust,
+    };
     use std::sync::atomic::Ordering;
 
     const SOURCE: &str = include_str!("lib.rs");
@@ -1858,10 +1943,46 @@ mod qml_contract_tests {
     }
 
     #[test]
-    fn model_dir_rejects_relative_and_parent_paths() {
-        assert!(validate_model_dir(std::path::PathBuf::from("models")).is_err());
-        assert!(validate_model_dir(std::path::PathBuf::from("/tmp/mukei/../models")).is_err());
-        assert!(validate_model_dir(std::path::PathBuf::from("/tmp/mukei/models")).is_ok());
+    fn model_dir_must_stay_under_canonical_app_private_base() {
+        let base = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let models = base.path().join("models");
+
+        assert!(validate_model_dir_against_base(
+            std::path::PathBuf::from("models"),
+            base.path().into()
+        )
+        .is_err());
+        assert!(
+            validate_model_dir_against_base(base.path().join("../models"), base.path().into())
+                .is_err()
+        );
+        assert!(validate_model_dir_against_base(models.clone(), base.path().into()).is_ok());
+        assert!(
+            validate_model_dir_against_base(outside.path().join("models"), base.path().into())
+                .is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn model_dir_rejects_symlink_escape_from_app_private_base() {
+        let base = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let link = base.path().join("models");
+        std::os::unix::fs::symlink(outside.path(), &link).unwrap();
+
+        assert!(validate_model_dir_against_base(link, base.path().into()).is_err());
+    }
+
+    #[test]
+    fn android_model_dir_policy_accepts_only_app_specific_files_root() {
+        assert!(is_android_app_specific_files_path(std::path::Path::new(
+            "/storage/emulated/0/Android/data/com.mukei.app/files/models"
+        )));
+        assert!(!is_android_app_specific_files_path(std::path::Path::new(
+            "/storage/emulated/0/Download/models"
+        )));
     }
 
     #[test]

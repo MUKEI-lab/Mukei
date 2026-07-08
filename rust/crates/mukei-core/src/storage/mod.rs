@@ -65,3 +65,7 @@ pub use saf::{SafRegistry, SafTokenRow};
 pub mod model_download;
 #[cfg(feature = "tokio")]
 pub use model_download::{run_download, verify_file_sha256, DownloadEvent, DownloadRequest};
+#[cfg(feature = "tokio")]
+pub mod quota;
+#[cfg(feature = "tokio")]
+pub use quota::{StorageQuotaManager, StorageQuotaPolicy, StorageUsage};
