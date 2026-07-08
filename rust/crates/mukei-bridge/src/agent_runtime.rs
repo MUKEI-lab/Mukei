@@ -135,22 +135,38 @@ impl ContextBackend for BridgeContextBackend {
     async fn load_history(&self, active_history: &[ChatMessage]) -> Result<Vec<ChatMessage>> {
         use mukei_core::storage::PooledConnectionExt;
 
-        let Some(branch_id) = active_history.last().map(|message| message.branch) else {
+        let Some(branch_external_id) = active_history.last().map(|message| message.branch) else {
             return Ok(Vec::new());
         };
-        let branch_id = branch_id.0.to_string();
+        let branch_external_id = branch_external_id.0.to_string();
+        let branch_external_id_for_query = branch_external_id.clone();
         let limit = self.limit;
-        let rows: Vec<(String, String)> = self
+        let rows: Vec<(String, String, String, String, Option<String>, i64)> = self
             .pool
             .with_conn(move |c| {
                 let mut stmt = c.prepare(
-                    "SELECT role, content FROM messages \
-                     WHERE branch_id = ?1 AND deleted = 0 \
-                     ORDER BY id DESC LIMIT ?2",
+                    "SELECT m.external_id, m.role, m.content, m.created_at, \
+                            parent.external_id, m.token_count \
+                     FROM messages m \
+                     JOIN branches b ON b.id = m.branch_id \
+                                    AND b.conversation_id = m.conversation_id \
+                     LEFT JOIN messages parent ON parent.id = m.parent_message_id \
+                     WHERE b.external_id = ?1 \
+                       AND m.conversation_id = b.conversation_id \
+                       AND m.branch_id = b.id \
+                       AND m.deleted = 0 \
+                     ORDER BY m.created_at DESC, m.id DESC LIMIT ?2",
                 )?;
                 let mapped = stmt
-                    .query_map((&branch_id, limit), |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    .query_map((&branch_external_id_for_query, limit), |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                        ))
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 Ok::<_, mukei_core::storage::DbError>(mapped)
@@ -160,15 +176,26 @@ impl ContextBackend for BridgeContextBackend {
         let messages: Vec<ChatMessage> = rows
             .into_iter()
             .rev()
-            .map(|(role, content)| ChatMessage {
-                id: mukei_core::types::MessageId::default(),
-                role: parse_role(&role),
-                branch: mukei_core::types::BranchId::default(),
-                is_active: true,
-                created_at: chrono::Utc::now(),
-                content,
-                parent: None,
-                token_count: None,
+            .filter_map(|(id, role, content, created_at, parent, token_count)| {
+                let id = uuid::Uuid::parse_str(&id).ok()?;
+                let created_at = chrono::DateTime::parse_from_rfc3339(&created_at)
+                    .ok()?
+                    .with_timezone(&chrono::Utc);
+                let parent = parent
+                    .and_then(|value| uuid::Uuid::parse_str(&value).ok())
+                    .map(mukei_core::types::MessageId);
+                Some(ChatMessage {
+                    id: mukei_core::types::MessageId(id),
+                    role: parse_role(&role),
+                    branch: mukei_core::types::BranchId(
+                        uuid::Uuid::parse_str(&branch_external_id).ok()?,
+                    ),
+                    is_active: true,
+                    created_at,
+                    content,
+                    parent,
+                    token_count: u32::try_from(token_count).ok(),
+                })
             })
             .collect();
         Ok(messages)
@@ -296,6 +323,26 @@ pub async fn reconcile_vector_store(
     .map_err(|e| MukeiError::BlockingJoinFailed(e.to_string()))??;
 
     mukei_core::rag::indexer::reconcile(pool, &store).await
+}
+
+#[cfg(feature = "rusqlite")]
+pub async fn purge_vector_chunks(cfg: &MukeiConfig, chunk_ids: Vec<u64>) -> Result<usize> {
+    use mukei_core::error::MukeiError;
+    use mukei_core::rag::VectorStore;
+
+    if chunk_ids.is_empty() {
+        return Ok(0);
+    }
+    let store_path = cfg.vectors_dir.join("mukei.usearch");
+    tokio::task::spawn_blocking(move || {
+        let store = VectorStore::open(store_path);
+        store.load()?;
+        let removed = store.shred_many(&chunk_ids);
+        store.save()?;
+        Ok::<_, MukeiError>(removed)
+    })
+    .await
+    .map_err(|e| MukeiError::BlockingJoinFailed(e.to_string()))?
 }
 
 #[cfg(not(feature = "rusqlite"))]

@@ -242,6 +242,50 @@ impl MukeiConfig {
         Ok(cfg)
     }
 
+    /// Android production storage must stay below the app-private
+    /// directory that owns the config file. This rejects server-style
+    /// defaults such as `/var/mukei` and lexical `..` escapes before any
+    /// directory or database is opened.
+    pub fn validate_android_storage_paths(&self, config_path: &Path) -> Result<()> {
+        use std::path::Component;
+
+        let base = config_path
+            .parent()
+            .ok_or_else(|| MukeiError::ConfigInvalid {
+                field: "config_path".into(),
+                reason: "must have an app-private parent directory".into(),
+            })?;
+        if !base.is_absolute() {
+            return Err(MukeiError::ConfigInvalid {
+                field: "config_path".into(),
+                reason: "must be absolute on Android".into(),
+            });
+        }
+
+        let paths = [
+            ("models_dir", &self.models_dir),
+            ("vectors_dir", &self.vectors_dir),
+            ("database_path", &self.database_path),
+            ("saf_tokens_db", &self.saf_tokens_db),
+            ("crashes_dir", &self.crashes_dir),
+            ("logs_dir", &self.logs_dir),
+        ];
+        for (field, path) in paths {
+            if !path.is_absolute()
+                || path
+                    .components()
+                    .any(|component| matches!(component, Component::ParentDir))
+                || !path.starts_with(base)
+            {
+                return Err(MukeiError::ConfigInvalid {
+                    field: field.into(),
+                    reason: "must stay inside the Android app-private config directory".into(),
+                });
+            }
+        }
+        Ok(())
+    }
+
     fn validate_toml_keys(bytes: &[u8]) -> Result<()> {
         let raw: raw::RawRoot =
             toml::from_str(
@@ -394,5 +438,52 @@ first_run_completed    = false
         let cfg_text = VALID_TOML.replace("n_ctx             = 4096", "n_ctx             = 64");
         let err = MukeiConfig::load_and_validate_from_str(&cfg_text).unwrap_err();
         assert!(matches!(err, MukeiError::ConfigInvalid { .. }));
+    }
+
+    #[test]
+    fn android_storage_validation_rejects_paths_outside_config_parent() {
+        let cfg: MukeiConfig = toml::from_str(VALID_TOML).expect("valid config");
+        let err = cfg
+            .validate_android_storage_paths(Path::new("/data/data/app.mukei/files/mukei.toml"))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            MukeiError::ConfigInvalid { field, .. } if field == "models_dir"
+        ));
+    }
+
+    #[test]
+    fn android_storage_validation_accepts_app_private_paths() {
+        let mut cfg: MukeiConfig = toml::from_str(VALID_TOML).expect("valid config");
+        let base = Path::new("/data/data/app.mukei/files");
+        cfg.models_dir = base.join("models");
+        cfg.vectors_dir = base.join("vectors");
+        cfg.database_path = base.join("db/mukei.db");
+        cfg.saf_tokens_db = base.join("db/saf_tokens.db");
+        cfg.crashes_dir = base.join("crashes");
+        cfg.logs_dir = base.join("logs");
+
+        cfg.validate_android_storage_paths(&base.join("mukei.toml"))
+            .unwrap();
+    }
+
+    #[test]
+    fn android_storage_validation_rejects_parent_dir_escape() {
+        let mut cfg: MukeiConfig = toml::from_str(VALID_TOML).expect("valid config");
+        let base = Path::new("/data/data/app.mukei/files");
+        cfg.models_dir = base.join("models");
+        cfg.vectors_dir = base.join("../escape");
+        cfg.database_path = base.join("db/mukei.db");
+        cfg.saf_tokens_db = base.join("db/saf_tokens.db");
+        cfg.crashes_dir = base.join("crashes");
+        cfg.logs_dir = base.join("logs");
+
+        let err = cfg
+            .validate_android_storage_paths(&base.join("mukei.toml"))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            MukeiError::ConfigInvalid { field, .. } if field == "vectors_dir"
+        ));
     }
 }

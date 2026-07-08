@@ -702,7 +702,11 @@ mod tests {
             },
         ] {
             let ui = UiError::from_mukei_error(&err, "download_model");
-            assert_eq!(ui.class, "network");
+            let expected_class = match err {
+                MukeiError::DownloadTooLarge { .. } => "resource",
+                _ => "network",
+            };
+            assert_eq!(ui.class, expected_class);
             assert_eq!(ui.severity, ErrorSeverity::Error);
             assert!(ui.recoverable);
             assert_eq!(ui.suggested_action, SuggestedUiAction::OpenModelManager);

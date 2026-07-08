@@ -745,13 +745,24 @@ impl ffi::MukeiAgent {
                     return;
                 }
             };
+            #[cfg(target_os = "android")]
+            if let Err(e) = cfg.validate_android_storage_paths(&cfg_path) {
+                let code = e.error_code().to_string();
+                let msg = e.to_string();
+                let event = error_bridge_event(&e, "initialize");
+                let _ = qt.queue(move |mut qobject| {
+                    qobject.as_mut().event_emitted(event_json(event));
+                    qobject
+                        .as_mut()
+                        .error_occurred(QString::from(&code), QString::from(&msg));
+                });
+                return;
+            }
             tracing::info!(
                 ?cfg.gpu_layers, n_ctx = cfg.n_ctx,
                 max_iterations = cfg.watchdog.max_iterations,
                 "config loaded"
             );
-            *GLOBAL_CONFIG.lock().await = Some(cfg.clone());
-
             rebuild_tool_registry_from_secrets().await;
 
             #[cfg(feature = "rusqlite")]
@@ -807,8 +818,6 @@ impl ffi::MukeiAgent {
                         return;
                     }
                 };
-                *GLOBAL_DATABASE_POOL.lock().await = Some(pool.clone());
-
                 match AuditLogReader::verify_chain(&pool).await {
                     Ok(AuditChainStatus::Ok { rows_checked, .. }) => {
                         tracing::info!(
@@ -928,6 +937,7 @@ impl ffi::MukeiAgent {
                     GLOBAL_AUDIT_LOG_WRITER.clone(),
                 );
                 *GLOBAL_AGENT_LOOP.lock().await = Some(loop_handle);
+                *GLOBAL_DATABASE_POOL.lock().await = Some(pool);
             }
             #[cfg(not(feature = "rusqlite"))]
             {
@@ -936,6 +946,7 @@ impl ffi::MukeiAgent {
                 *GLOBAL_AGENT_LOOP.lock().await = Some(loop_handle);
             }
 
+            *GLOBAL_CONFIG.lock().await = Some(cfg);
             *state.lock().await = "IDLE_READY".to_string();
             let _ = qt.queue(|mut qobject| {
                 qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
@@ -1849,13 +1860,12 @@ impl ffi::SafRegistry {
             created: chrono::Utc::now(),
         };
         mukei_core::runtime::get().spawn(async move {
-            let _ = GLOBAL_SAF_REGISTRY.upsert(row.clone());
             #[cfg(feature = "rusqlite")]
             {
                 let pool = GLOBAL_DATABASE_POOL.lock().await.clone();
                 if let Some(p) = pool {
                     if let Err(e) = GLOBAL_SAF_REGISTRY.persist_upsert(&p, row).await {
-                        tracing::warn!(error = %e, "SAF grant persist_upsert failed; in-memory mirror will diverge until restart");
+                        tracing::warn!(error = %e, "SAF grant persist_upsert failed; in-memory state unchanged");
                     }
                 }
             }
@@ -1875,17 +1885,36 @@ impl ffi::SafRegistry {
         let token_string = token.to_string();
         let qt_clone = qt.clone();
         mukei_core::runtime::get().spawn(async move {
-            let _ = GLOBAL_SAF_REGISTRY.revoke(&token_string);
             #[cfg(feature = "rusqlite")]
             {
                 let pool = GLOBAL_DATABASE_POOL.lock().await.clone();
                 if let Some(p) = pool {
-                    if let Err(e) = GLOBAL_SAF_REGISTRY
+                    match GLOBAL_SAF_REGISTRY
                         .persist_revoke(&p, &token_string, "user_revoke")
                         .await
                     {
-                        tracing::warn!(error = %e, "SAF token persist_revoke failed; in-memory mirror will diverge until restart");
+                        Ok(chunk_ids) => {
+                            if let Some(cfg) = GLOBAL_CONFIG.lock().await.clone() {
+                                if let Err(e) =
+                                    agent_runtime::purge_vector_chunks(&cfg, chunk_ids).await
+                                {
+                                    tracing::warn!(
+                                        error = %e,
+                                        "SAF revoke removed SQL chunks but vector cleanup failed"
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "SAF token persist_revoke failed; in-memory state unchanged"
+                            );
+                            return;
+                        }
                     }
+                } else {
+                    return;
                 }
             }
             let _ = qt_clone.queue(move |mut qobject| {
