@@ -606,13 +606,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("chat.db");
         let pool = DatabasePool::open(&db_path).unwrap();
-        let migrations_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../")
-            .join(crate::storage::MIGRATIONS_DIR);
-        Migrator::new(migrations_dir)
-            .apply_pending(&pool)
-            .await
-            .unwrap();
+        Migrator::embedded().apply_pending(&pool).await.unwrap();
         std::mem::forget(dir);
         pool
     }

@@ -111,6 +111,18 @@ pub enum MukeiError {
         /// The full applied set as found on disk.
         applied: Vec<u32>,
     },
+    /// An already-applied migration no longer matches the bundled SQL body.
+    #[error(
+        "migration checksum mismatch at version {version}: applied {applied}, bundled {bundled}"
+    )]
+    MigrationChecksumMismatch {
+        /// Version whose recorded checksum differs from the bundled migration.
+        version: u32,
+        /// Checksum recorded in `migrations_applied`.
+        applied: String,
+        /// Checksum computed from the bundled migration body.
+        bundled: String,
+    },
     /// The append-only audit hash chain failed verification during boot.
     /// Normal startup must stop so the app cannot append over a tampered
     /// local security log.
@@ -396,6 +408,7 @@ impl MukeiError {
             Self::DatabaseCorruption => "ERR_DB_CORRUPTION",
             Self::MigrationFailed(_, _) => "ERR_MIGRATION",
             Self::MigrationOrderConflict { .. } => "ERR_MIGRATION_ORDER",
+            Self::MigrationChecksumMismatch { .. } => "ERR_MIGRATION_CHECKSUM",
             Self::AuditLogTampered { .. } => "ERR_AUDIT_TAMPERED",
             Self::DatabaseEncryptionUnavailable => "ERR_DB_ENCRYPTION_UNAVAILABLE",
             Self::DatabaseEncryptionMigrationRequired => "ERR_DB_ENCRYPTION_MIGRATION_REQUIRED",
@@ -467,6 +480,7 @@ impl MukeiError {
             | Self::DatabaseInitFailed(_)
             | Self::MigrationFailed(_, _)
             | Self::MigrationOrderConflict { .. }
+            | Self::MigrationChecksumMismatch { .. }
             | Self::AuditLogTampered { .. }
             | Self::DatabaseEncryptionUnavailable
             | Self::DatabaseEncryptionMigrationRequired

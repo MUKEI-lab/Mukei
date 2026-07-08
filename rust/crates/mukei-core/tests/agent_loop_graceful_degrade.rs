@@ -42,7 +42,10 @@ struct StaticBackend;
 
 #[async_trait]
 impl ContextBackend for StaticBackend {
-    async fn load_history(&self) -> Result<Vec<ChatMessage>, mukei_core::error::MukeiError> {
+    async fn load_history(
+        &self,
+        _active_history: &[ChatMessage],
+    ) -> Result<Vec<ChatMessage>, mukei_core::error::MukeiError> {
         Ok(Vec::new())
     }
     async fn rag_lookup(

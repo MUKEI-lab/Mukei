@@ -19,7 +19,7 @@ path               = "src/lib.rs"
 # stack so the QML `download_model` flow actually downloads on a
 # tester's phone (TRD §8.1 / REQ-MOD-01). Drop `network` only when
 # building a lab variant that explicitly forbids egress.
-default            = ["android_keystore", "network"]
+default            = ["android_keystore", "network", "sqlcipher"]
 android_keystore   = []
 desktop            = []
 rusqlite           = ["mukei-core/rusqlite"]

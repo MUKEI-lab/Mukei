@@ -80,7 +80,7 @@ pub async fn open_pool(
     cfg: &MukeiConfig,
     #[cfg(feature = "sqlcipher")] unwrapped_database_key: Vec<u8>,
 ) -> Result<mukei_core::storage::DatabasePool> {
-    use mukei_core::storage::{DatabasePool, Migrator, MIGRATIONS_DIR};
+    use mukei_core::storage::{DatabasePool, Migrator};
 
     #[cfg(feature = "sqlcipher")]
     let open_result =
@@ -92,23 +92,18 @@ pub async fn open_pool(
     #[cfg(not(feature = "sqlcipher"))]
     let pool = DatabasePool::open(&cfg.database_path)?;
 
-    let migrations_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../")
-        .join(MIGRATIONS_DIR);
-    let migrator = Migrator::new(&migrations_dir);
+    let migrator = Migrator::embedded();
     migrator.apply_pending(&pool).await?;
     #[cfg(feature = "sqlcipher")]
     tracing::info!(
-        migrations_dir = %mukei_core::diagnostics::redact_path(&migrations_dir),
         db_path = %mukei_core::diagnostics::redact_path(&cfg.database_path),
         encryption_status = ?encryption_status,
-        "migrations applied during bridge boot"
+        "embedded migrations applied during bridge boot"
     );
     #[cfg(not(feature = "sqlcipher"))]
     tracing::info!(
-        migrations_dir = %mukei_core::diagnostics::redact_path(&migrations_dir),
         db_path = %mukei_core::diagnostics::redact_path(&cfg.database_path),
-        "migrations applied during bridge boot"
+        "embedded migrations applied during bridge boot"
     );
     Ok(pool)
 }
@@ -137,20 +132,24 @@ impl BridgeContextBackend {
 #[cfg(feature = "rusqlite")]
 #[async_trait::async_trait]
 impl ContextBackend for BridgeContextBackend {
-    async fn load_history(&self) -> Result<Vec<ChatMessage>> {
+    async fn load_history(&self, active_history: &[ChatMessage]) -> Result<Vec<ChatMessage>> {
         use mukei_core::storage::PooledConnectionExt;
 
+        let Some(branch_id) = active_history.last().map(|message| message.branch) else {
+            return Ok(Vec::new());
+        };
+        let branch_id = branch_id.0.to_string();
         let limit = self.limit;
         let rows: Vec<(String, String)> = self
             .pool
             .with_conn(move |c| {
                 let mut stmt = c.prepare(
                     "SELECT role, content FROM messages \
-                     WHERE deleted = 0 \
-                     ORDER BY id DESC LIMIT ?1",
+                     WHERE branch_id = ?1 AND deleted = 0 \
+                     ORDER BY id DESC LIMIT ?2",
                 )?;
                 let mapped = stmt
-                    .query_map([limit], |row| {
+                    .query_map((&branch_id, limit), |row| {
                         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -195,7 +194,7 @@ impl BridgeContextBackend {
 #[cfg(not(feature = "rusqlite"))]
 #[async_trait::async_trait]
 impl ContextBackend for BridgeContextBackend {
-    async fn load_history(&self) -> Result<Vec<ChatMessage>> {
+    async fn load_history(&self, _active_history: &[ChatMessage]) -> Result<Vec<ChatMessage>> {
         let _ = self.limit;
         Ok(Vec::new())
     }

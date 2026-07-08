@@ -14,6 +14,13 @@
 mod agent_runtime;
 mod bridge_state;
 
+#[cfg(all(
+    target_os = "android",
+    not(debug_assertions),
+    not(feature = "sqlcipher")
+))]
+compile_error!("Android release builds must enable the mukei-bridge/sqlcipher feature");
+
 #[cfg(feature = "rusqlite")]
 use mukei_core::storage::{
     saf as core_saf, AuditChainStatus, AuditLogReader, AuditLogWriter, ConversationRepository,
@@ -93,8 +100,8 @@ static GLOBAL_TAVILY_API_KEY: Lazy<Arc<Mutex<Option<Zeroizing<String>>>>> =
 static GLOBAL_REMOTE_FEATURE_POLICY: Lazy<Arc<Mutex<RemoteFeaturePolicy>>> =
     Lazy::new(|| Arc::new(Mutex::new(RemoteFeaturePolicy::default())));
 #[cfg(feature = "sqlcipher")]
-static GLOBAL_DATABASE_CIPHER_KEY: Lazy<Arc<Mutex<Option<Vec<u8>>>>> =
-    Lazy::new(|| Arc::new(Mutex::new(None)));
+static GLOBAL_DATABASE_CIPHER_KEY: Lazy<ParkingMutex<Option<Vec<u8>>>> =
+    Lazy::new(|| ParkingMutex::new(None));
 
 /// Tool registry shared across every `send_message` invocation. Rebuilt
 /// whenever the Brave or Tavily key changes so the next tool call sees
@@ -759,7 +766,7 @@ impl ffi::MukeiAgent {
                     )));
                 });
                 #[cfg(feature = "sqlcipher")]
-                let database_key = match GLOBAL_DATABASE_CIPHER_KEY.lock().await.take() {
+                let database_key = match GLOBAL_DATABASE_CIPHER_KEY.lock().take() {
                     Some(key) if !key.is_empty() => key,
                     _ => {
                         let err = mukei_core::error::MukeiError::DatabaseInitFailed(
@@ -802,28 +809,6 @@ impl ffi::MukeiAgent {
                 };
                 *GLOBAL_DATABASE_POOL.lock().await = Some(pool.clone());
 
-                match ConversationRepository::mark_incomplete_turns_failed(&pool).await {
-                    Ok(count) if count > 0 => {
-                        tracing::warn!(
-                            incomplete_turns = count,
-                            "marked interrupted chat turns as failed during bridge boot"
-                        );
-                    }
-                    Ok(_) => {}
-                    Err(e) => {
-                        let code = e.error_code().to_string();
-                        let msg = e.to_string();
-                        let event = error_bridge_event(&e, "initialize");
-                        let _ = qt.queue(move |mut qobject| {
-                            qobject.as_mut().event_emitted(event_json(event));
-                            qobject
-                                .as_mut()
-                                .error_occurred(QString::from(&code), QString::from(&msg));
-                        });
-                        return;
-                    }
-                }
-
                 match AuditLogReader::verify_chain(&pool).await {
                     Ok(AuditChainStatus::Ok { rows_checked, .. }) => {
                         tracing::info!(
@@ -844,6 +829,28 @@ impl ffi::MukeiAgent {
                         });
                         return;
                     }
+                    Err(e) => {
+                        let code = e.error_code().to_string();
+                        let msg = e.to_string();
+                        let event = error_bridge_event(&e, "initialize");
+                        let _ = qt.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(event));
+                            qobject
+                                .as_mut()
+                                .error_occurred(QString::from(&code), QString::from(&msg));
+                        });
+                        return;
+                    }
+                }
+
+                match ConversationRepository::mark_incomplete_turns_failed(&pool).await {
+                    Ok(count) if count > 0 => {
+                        tracing::warn!(
+                            incomplete_turns = count,
+                            "marked interrupted chat turns as failed during bridge boot"
+                        );
+                    }
+                    Ok(_) => {}
                     Err(e) => {
                         let code = e.error_code().to_string();
                         let msg = e.to_string();
@@ -1704,33 +1711,30 @@ impl ffi::MukeiBridge {
         use zeroize::Zeroize;
 
         let qt = self.as_ref().get_ref().qt_thread();
-        let store = GLOBAL_DATABASE_CIPHER_KEY.clone();
         let key_hex = Zeroizing::new(key.to_string());
-        mukei_core::runtime::get().spawn(async move {
-            match decode_hex_key(&key_hex) {
-                Ok(key_bytes) => {
-                    let mut guard = store.lock().await;
-                    if let Some(mut old_key) = guard.take() {
-                        old_key.zeroize();
-                    }
-                    *guard = Some(key_bytes);
+        match decode_hex_key(&key_hex) {
+            Ok(key_bytes) => {
+                let mut guard = GLOBAL_DATABASE_CIPHER_KEY.lock();
+                if let Some(mut old_key) = guard.take() {
+                    old_key.zeroize();
                 }
-                Err(message) => {
-                    let err = mukei_core::error::MukeiError::ConfigInvalid {
-                        field: "database_cipher_key".to_string(),
-                        reason: message.clone(),
-                    };
-                    let event = error_bridge_event(&err, "set_database_cipher_key");
-                    let _ = qt.queue(move |mut qobject| {
-                        qobject.as_mut().event_emitted(event_json(event));
-                        qobject.as_mut().error_occurred(
-                            QString::from("ERR_DATABASE_KEY_INVALID"),
-                            QString::from(&message),
-                        );
-                    });
-                }
+                *guard = Some(key_bytes);
             }
-        });
+            Err(message) => {
+                let err = mukei_core::error::MukeiError::ConfigInvalid {
+                    field: "database_cipher_key".to_string(),
+                    reason: message.clone(),
+                };
+                let event = error_bridge_event(&err, "set_database_cipher_key");
+                let _ = qt.queue(move |mut qobject| {
+                    qobject.as_mut().event_emitted(event_json(event));
+                    qobject.as_mut().error_occurred(
+                        QString::from("ERR_DATABASE_KEY_INVALID"),
+                        QString::from(&message),
+                    );
+                });
+            }
+        }
     }
 
     #[cfg(not(feature = "sqlcipher"))]
