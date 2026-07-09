@@ -97,6 +97,151 @@ pub fn http_status_error(operation: &str, status: reqwest::StatusCode) -> MukeiE
     }
 }
 
+// =====================================================================
+// RetryPolicy — v0.8 review followup (issue #4: "Full retry/backoff/jitter
+// helper missing").
+//
+// Design constraints:
+//   * Pure data — no async, no clock, no side effects. Callers drive
+//     the loop using `next_delay(attempt)` and `is_retryable(err)`.
+//   * Backoff must be capped so a flap loop cannot burn an unbounded
+//     amount of wall-clock time.
+//   * Jitter must be bounded and decentralised enough that two
+//     coordinated clients do not synchronise their storms. Full-jitter
+//     exponential backoff per AWS' "exponential backoff and jitter".
+//   * Decision logic for "can we retry this error?" must consult the
+//     existing typed error taxonomy (rate-limit → yes, terminal auth
+//     → no). The v0.8 review flagged "Retryable vs fatal behavior
+//     not consistently modeled" — this is the single place that
+//     classifies that for the network module.
+// =====================================================================
+
+/// Maximum number of retry attempts after the initial try.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct RetryPolicy {
+    pub max_attempts: u32,
+    pub base_delay: Duration,
+    pub max_delay: Duration,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self::web_search()
+    }
+}
+
+impl RetryPolicy {
+    /// Conservative policy for web search engines. 3 retries with
+    /// 500 ms base — short enough that a flaky cell tower does not
+    /// cascade into visible UI lag.
+    pub const fn web_search() -> Self {
+        Self {
+            max_attempts: 3,
+            base_delay: Duration::from_millis(500),
+            max_delay: Duration::from_secs(8),
+        }
+    }
+
+    /// Patient policy for model downloads. 4 retries with 2 s base
+    /// and a 30 s ceiling so a transient 502 can recover before we
+    /// give up on a multi-gigabyte download.
+    pub const fn model_download() -> Self {
+        Self {
+            max_attempts: 4,
+            base_delay: Duration::from_secs(2),
+            max_delay: Duration::from_secs(30),
+        }
+    }
+
+    /// Compute the delay BEFORE attempt `n` (1-indexed). Uses
+    /// full-jitter exponential backoff capped at `max_delay`.
+    /// `attempt == 0` collapses to 0.
+    pub fn next_delay(&self, attempt: u32) -> Duration {
+        if attempt == 0 {
+            return Duration::ZERO;
+        }
+        let shift = attempt.saturating_sub(1).min(20);
+        let factor: u32 = 1u32.checked_shl(shift).unwrap_or(u32::MAX);
+        let candidate = self.base_delay.checked_mul(factor).unwrap_or(self.max_delay);
+        let capped = candidate.min(self.max_delay);
+        let nanos = capped.as_nanos().min(u64::MAX as u128) as u64;
+        if nanos == 0 {
+            return Duration::ZERO;
+        }
+        // Full-jitter: random in [0, capped]. Deterministic-quality
+        // splitmix64 step — uniform-in-range is sufficient for de-
+        // syncing retries and avoids the rand crate dependency here.
+        let mut state = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos() as u64)
+            .unwrap_or(0)
+            ^ attempt as u64
+            ^ nanos;
+        state = state.wrapping_add(0x9E3779B97F4A7C15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+        z ^= z >> 31;
+        Duration::from_nanos(z % (nanos + 1))
+    }
+
+    /// Map a typed network error to a retryable Yes/No answer.
+    /// Conservative by design: anything we are unsure about returns
+    /// `false`. The caller can still re-classify manually when it has
+    /// more context (e.g. offline / quota / maintenance screens).
+    pub fn is_retryable(err: &MukeiError) -> bool {
+        use MukeiError::*;
+        match err {
+            NetworkTimeout { .. }
+            | NetworkUnavailable { .. }
+            | NetworkTls { .. }
+            | NetworkRateLimited { .. }
+            | NetworkServerError { .. }
+            | NetworkInvalidResponse { .. } => true,
+            NetworkError(_) => false,
+            _ => false,
+        }
+    }
+
+    /// Convenience: returns `Ok(())` if the error is retryable and
+    /// attempts remain, `Err(clone)` otherwise.
+    pub fn check_attempt(&self, attempt: u32, err: &MukeiError) -> Result<(), MukeiError> {
+        if attempt >= self.max_attempts || !Self::is_retryable(err) {
+            return Err(clone_network_error(err));
+        }
+        Ok(())
+    }
+}
+
+fn clone_network_error(err: &MukeiError) -> MukeiError {
+    use MukeiError::*;
+    match err {
+        NetworkError(s) => NetworkError(s.clone()),
+        NetworkTimeout { operation } => NetworkTimeout {
+            operation: operation.clone(),
+        },
+        NetworkUnavailable { operation } => NetworkUnavailable {
+            operation: operation.clone(),
+        },
+        NetworkTls { operation } => NetworkTls {
+            operation: operation.clone(),
+        },
+        NetworkInvalidResponse { operation } => NetworkInvalidResponse {
+            operation: operation.clone(),
+        },
+        NetworkRateLimited { operation } => NetworkRateLimited {
+            operation: operation.clone(),
+        },
+        NetworkServerError { status, operation } => NetworkServerError {
+            status: *status,
+            operation: operation.clone(),
+        },
+        other => MukeiError::NetworkError(crate::diagnostics::sanitize_log_value(
+            other.error_code(),
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,5 +276,67 @@ mod tests {
 
         let server = http_status_error("model download", reqwest::StatusCode::BAD_GATEWAY);
         assert_eq!(server.error_code(), "ERR_NETWORK_SERVER");
+    }
+
+    // ---- RetryPolicy tests (v0.8 review followup, issue #4) ----
+
+    #[test]
+    fn retry_policy_default_is_web_search_shaped() {
+        let p = RetryPolicy::default();
+        assert_eq!(p.max_attempts, RetryPolicy::web_search().max_attempts);
+        assert_eq!(p.base_delay, RetryPolicy::web_search().base_delay);
+    }
+
+    #[test]
+    fn retry_policy_zero_attempt_is_zero_delay() {
+        let p = RetryPolicy::model_download();
+        assert_eq!(p.next_delay(0), Duration::ZERO);
+    }
+
+    #[test]
+    fn retry_policy_caps_at_max_delay() {
+        let p = RetryPolicy {
+            max_attempts: 4,
+            base_delay: Duration::from_secs(1),
+            max_delay: Duration::from_secs(4),
+        };
+        // attempt=6 would want 32s — must cap at 4s and jitter within it.
+        let d = p.next_delay(6);
+        assert!(d <= p.max_delay);
+    }
+
+    #[test]
+    fn retry_policy_classifies_typed_errors() {
+        assert!(RetryPolicy::is_retryable(&MukeiError::NetworkTimeout {
+            operation: "dl".into()
+        }));
+        assert!(RetryPolicy::is_retryable(&MukeiError::NetworkRateLimited {
+            operation: "search".into()
+        }));
+        assert!(RetryPolicy::is_retryable(&MukeiError::NetworkServerError {
+            status: 502,
+            operation: "dl".into()
+        }));
+        assert!(!RetryPolicy::is_retryable(&MukeiError::NetworkError(
+            "dns".into()
+        )));
+        assert!(!RetryPolicy::is_retryable(&MukeiError::Internal(
+            "weird".into()
+        )));
+    }
+
+    #[test]
+    fn retry_policy_check_attempt_short_circuits_on_exhaustion() {
+        let p = RetryPolicy {
+            max_attempts: 2,
+            base_delay: Duration::from_millis(1),
+            max_delay: Duration::from_millis(2),
+        };
+        let timeout_err = MukeiError::NetworkTimeout {
+            operation: "dl".into(),
+        };
+        assert!(p.check_attempt(0, &timeout_err).is_ok());
+        assert!(p.check_attempt(1, &timeout_err).is_ok());
+        assert!(p.check_attempt(2, &timeout_err).is_err());
     }
 }

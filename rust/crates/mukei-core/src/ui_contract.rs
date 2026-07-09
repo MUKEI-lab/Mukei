@@ -172,11 +172,55 @@ pub struct UiError {
 
 impl UiError {
     /// Build a UI error from an existing core error and bridge/core source label.
+    ///
+    /// Security: `technical_message` is the only field that the UI may
+    /// surface to advanced / debug panels — and it is the field most
+    /// likely to embed a raw filesystem path, an Authorization header,
+    /// an `api_key=...` token, or a prompt fragment when an upstream
+    /// crate's error formatting leaks it. We therefore funnel
+    /// `error.to_string()` through the diagnostics redactor before it
+    /// crosses the bridge boundary. `sanitize_error_message` uses
+    /// cheap structural checks (looks_like_secret / looks_like_path /
+    /// redact_inline_secrets) so the cost on the error-hot path is
+    /// negligible.
+    ///
+    /// Full diagnostic detail is still preserved on the server side
+    /// via `tracing` events that have been written through the same
+    /// redactor (see `crate::diagnostics::sanitize_error_message`).
     pub fn from_mukei_error(error: &MukeiError, source: impl Into<String>) -> Self {
         let severity = severity_for(error);
         let suggested_action = suggested_action_for(error);
         let recoverable = recoverable_for(error);
-        let technical_message = error.to_string();
+        let technical_message =
+            crate::diagnostics::sanitize_error_message(error.to_string());
+        Self {
+            code: error.error_code().to_string(),
+            class: error.classification().to_string(),
+            severity,
+            recoverable,
+            user_message: user_message_for(error),
+            technical_message,
+            suggested_action,
+            source: source.into(),
+        }
+    }
+
+    /// Variant that lets callers pre-redact the technical message (e.g.
+    /// because they want to combine the error with a structured
+    /// diagnostic blob). Defaults `from_mukei_error` already redacts,
+    /// but this entry point is convenient when an embedder has its own
+    /// adapter that wants to surface only a substr of the original
+    /// error string.
+    pub fn from_mukei_error_redacted(
+        error: &MukeiError,
+        source: impl Into<String>,
+        technical_message: impl Into<String>,
+    ) -> Self {
+        let severity = severity_for(error);
+        let suggested_action = suggested_action_for(error);
+        let recoverable = recoverable_for(error);
+        let technical_message =
+            crate::diagnostics::sanitize_error_message(technical_message.into());
         Self {
             code: error.error_code().to_string(),
             class: error.classification().to_string(),
@@ -690,6 +734,49 @@ mod tests {
         assert!(ui.recoverable);
         assert!(ui.technical_message.contains("n_ctx"));
         assert_eq!(ui.suggested_action, SuggestedUiAction::OpenSettings);
+    }
+
+    #[test]
+    fn ui_error_technical_message_redacts_secrets_and_paths() {
+        // Simulate an upstream crate whose Display impl embeds a raw
+        // path AND a leaked bearer token. Without sanitization the
+        // exact strings would pass verbatim into the QML diagnostics
+        // panel — exactly the case the v0.8 review flagged.
+        let err = MukeiError::Internal(String::from(
+            "upstream: Authorization: Bearer abc123 path=/sdcard/Documents/private.txt",
+        ));
+        let ui = UiError::from_mukei_error(&err, "boot");
+        assert!(
+            !ui.technical_message.contains("Bearer abc123"),
+            "technical_message must redact leaked bearer token: {}",
+            ui.technical_message
+        );
+        assert!(
+            !ui.technical_message.contains("/sdcard/Documents/private.txt"),
+            "technical_message must redact leaked absolute path: {}",
+            ui.technical_message
+        );
+        assert!(
+            ui.technical_message.contains("[redacted-"),
+            "technical_message should clearly mark redactions: {}",
+            ui.technical_message
+        );
+    }
+
+    #[test]
+    fn ui_error_pre_redacted_entry_point_still_sanitises() {
+        let err = MukeiError::NetworkError(String::new());
+        let ui = UiError::from_mukei_error_redacted(
+            &err,
+            "boot",
+            "context=/tmp/foo api_key=leaked",
+        );
+        assert!(!ui.technical_message.contains("leaked"));
+        assert!(
+            ui.technical_message.contains("[redacted-"),
+            "sanitizer output should mark redactions: {}",
+            ui.technical_message
+        );
     }
 
     #[test]

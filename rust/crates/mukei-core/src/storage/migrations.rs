@@ -75,6 +75,13 @@ const EMBEDDED_MIGRATIONS: &[(u32, &str, &str)] = &[
         "V007__message_status",
         include_str!("../../../../migrations/V007__message_status.sql"),
     ),
+    (
+        8,
+        "V008__schema_metadata_and_rag_tombstones",
+        include_str!(
+            "../../../../migrations/V008__schema_metadata_and_rag_tombstones.sql"
+        ),
+    ),
 ];
 
 impl Migrator {
@@ -380,9 +387,15 @@ mod tests {
     fn embedded_migrations_are_available_without_source_tree_scan() {
         let list = Migrator::embedded().list_available().unwrap();
         let ids: Vec<_> = list.iter().map(|(id, _, _)| *id).collect();
-        assert_eq!(ids, vec![1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(ids, vec![1, 2, 3, 4, 5, 6, 7, 8]);
         assert!(list.iter().any(|(_, name, body)| {
             name == "V007__message_status" && body.contains("ALTER TABLE messages")
+        }));
+        assert!(list.iter().any(|(_, name, body)| {
+            name == "V008__schema_metadata_and_rag_tombstones"
+                && body.contains("CREATE TABLE IF NOT EXISTS schema_metadata")
+                && body.contains("CREATE TABLE IF NOT EXISTS migration_lock")
+                && body.contains("CREATE TABLE IF NOT EXISTS document_tombstone")
         }));
     }
 
