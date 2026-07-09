@@ -1,4 +1,3 @@
-```
 # Compiled and build artifacts
 *.o
 *.obj
@@ -8,6 +7,11 @@
 *.a
 *.out
 
+# Rust
+target/
+Cargo.lock.bak
+**/*.rs.bk
+
 # Dependencies
 node_modules/
 venv/
@@ -15,7 +19,6 @@ venv/
 __pycache__/
 .mypy_cache/
 .pytest_cache/
-target/
 .gradle/
 
 # Logs and temp files
@@ -23,21 +26,48 @@ target/
 *.tmp
 *.swp
 
-# Environment
+# Environment / secrets
 .env
 .env.local
 *.env.*
+*.pem
+*.key
 
 # Editors
 .vscode/
 .idea/
+*.iml
+.DS_Store
 
 # Build directories
 build/
 dist/
+out/
 
 # Coverage
 coverage/
 htmlcov/
 .coverage
-```
+lcov.info
+
+# Android build artifacts
+qml/android/build/
+qml/android/.gradle/
+qml/android/local.properties
+qml/android/gradle/
+*.apk
+*.aab
+*.keystore
+
+# Qt/QML
+*.moc
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+*.pro.user
+CMakeCache.txt
+CMakeFiles/
+cmake-build-*/
+
+# OS/tooling
+Thumbs.db

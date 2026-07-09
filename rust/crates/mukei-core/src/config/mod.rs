@@ -486,4 +486,57 @@ first_run_completed    = false
             MukeiError::ConfigInvalid { field, .. } if field == "vectors_dir"
         ));
     }
+
+    // ------------------------------------------------------------------
+    // Regression: v0.8 static review flagged that the shipped default
+    // config (`migrations/000_default_config.toml`) used `;` for
+    // comments, which TOML does NOT accept — first-run boot would
+    // therefore write a file that `load_and_validate` immediately
+    // rejects. This test guards against future regressions by round-
+    // tripping the exact bytes that `write_default` embeds via
+    // `include_str!` through the strict validator.
+    // ------------------------------------------------------------------
+    const SHIPPED_DEFAULT_CONFIG: &str =
+        include_str!("../../../../migrations/000_default_config.toml");
+
+    #[test]
+    fn shipped_default_config_is_valid_toml_and_passes_validator() {
+        // Parse first so a TOML syntax error (e.g. `;` comment) fails
+        // this test with a clear message instead of a generic
+        // ConfigInvalid at the logical-validate stage.
+        let _: toml::Value = toml::from_str(SHIPPED_DEFAULT_CONFIG)
+            .expect("shipped default config must be syntactically valid TOML");
+
+        // Then run the same strict pipeline the boot path uses.
+        MukeiConfig::load_and_validate_from_str(SHIPPED_DEFAULT_CONFIG)
+            .expect("shipped default config must pass load_and_validate");
+    }
+
+    #[test]
+    fn shipped_default_config_uses_only_hash_comments() {
+        // Belt-and-braces: even if the TOML parser one day tolerates
+        // `;`-prefixed lines, our shipped default must never contain
+        // one, because the reference file is copied verbatim into user
+        // installs and semicolon comments are a well-known footgun.
+        for (idx, line) in SHIPPED_DEFAULT_CONFIG.lines().enumerate() {
+            let trimmed = line.trim_start();
+            assert!(
+                !trimmed.starts_with(';'),
+                "line {} of shipped default config starts with ';': {:?}",
+                idx + 1,
+                line
+            );
+            if let Some(hash_pos) = line.find('#') {
+                // Inline comments are fine; but there must be no `;`
+                // sitting between a value and a trailing comment either.
+                let before_hash = &line[..hash_pos];
+                assert!(
+                    !before_hash.contains(';') || before_hash.contains('"'),
+                    "line {} of shipped default config has a stray ';': {:?}",
+                    idx + 1,
+                    line
+                );
+            }
+        }
+    }
 }
