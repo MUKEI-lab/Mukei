@@ -78,9 +78,7 @@ const EMBEDDED_MIGRATIONS: &[(u32, &str, &str)] = &[
     (
         8,
         "V008__schema_metadata_and_rag_tombstones",
-        include_str!(
-            "../../../../migrations/V008__schema_metadata_and_rag_tombstones.sql"
-        ),
+        include_str!("../../../../migrations/V008__schema_metadata_and_rag_tombstones.sql"),
     ),
 ];
 

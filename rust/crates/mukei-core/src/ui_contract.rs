@@ -191,8 +191,7 @@ impl UiError {
         let severity = severity_for(error);
         let suggested_action = suggested_action_for(error);
         let recoverable = recoverable_for(error);
-        let technical_message =
-            crate::diagnostics::sanitize_error_message(error.to_string());
+        let technical_message = crate::diagnostics::sanitize_error_message(error.to_string());
         Self {
             code: error.error_code().to_string(),
             class: error.classification().to_string(),
@@ -752,7 +751,8 @@ mod tests {
             ui.technical_message
         );
         assert!(
-            !ui.technical_message.contains("/sdcard/Documents/private.txt"),
+            !ui.technical_message
+                .contains("/sdcard/Documents/private.txt"),
             "technical_message must redact leaked absolute path: {}",
             ui.technical_message
         );
@@ -766,11 +766,8 @@ mod tests {
     #[test]
     fn ui_error_pre_redacted_entry_point_still_sanitises() {
         let err = MukeiError::NetworkError(String::new());
-        let ui = UiError::from_mukei_error_redacted(
-            &err,
-            "boot",
-            "context=/tmp/foo api_key=leaked",
-        );
+        let ui =
+            UiError::from_mukei_error_redacted(&err, "boot", "context=/tmp/foo api_key=leaked");
         assert!(!ui.technical_message.contains("leaked"));
         assert!(
             ui.technical_message.contains("[redacted-"),

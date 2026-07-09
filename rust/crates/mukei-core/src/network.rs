@@ -162,7 +162,10 @@ impl RetryPolicy {
         }
         let shift = attempt.saturating_sub(1).min(20);
         let factor: u32 = 1u32.checked_shl(shift).unwrap_or(u32::MAX);
-        let candidate = self.base_delay.checked_mul(factor).unwrap_or(self.max_delay);
+        let candidate = self
+            .base_delay
+            .checked_mul(factor)
+            .unwrap_or(self.max_delay);
         let capped = candidate.min(self.max_delay);
         let nanos = capped.as_nanos().min(u64::MAX as u128) as u64;
         if nanos == 0 {
@@ -236,9 +239,9 @@ fn clone_network_error(err: &MukeiError) -> MukeiError {
             status: *status,
             operation: operation.clone(),
         },
-        other => MukeiError::NetworkError(crate::diagnostics::sanitize_log_value(
-            other.error_code(),
-        )),
+        other => {
+            MukeiError::NetworkError(crate::diagnostics::sanitize_log_value(other.error_code()))
+        }
     }
 }
 
