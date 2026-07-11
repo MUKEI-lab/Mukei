@@ -78,13 +78,19 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{MukeiError, Result};
 
+/// Hard upper bound for one model artifact download. Current catalog
+/// entries are well below this; the cap prevents unbounded mobile
+/// storage/bandwidth exhaustion if a server lies or omits size data.
+pub const MAX_MODEL_DOWNLOAD_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+
 /// Progress event emitted during a download. The bridge crate translates
 /// these into QML's `download_progress(progress: f64, status: QString)`
 /// signal. Keep this enum stable — the QML side switches on `status`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DownloadEvent {
-    /// Download has started. `total_bytes` is `None` for servers that
-    /// don't return `Content-Length`.
+    /// Download has started. Production downloads require
+    /// `Content-Length`; `None` remains representable for older tests or
+    /// non-production callers that do not enforce the live network path.
     Started {
         /// Total expected file size in bytes, if known.
         total_bytes: Option<u64>,
@@ -294,10 +300,9 @@ mod real {
             Err(_) => 0,
         };
 
-        let client = reqwest::Client::builder()
-            .user_agent(concat!("mukei-bridge/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|e| MukeiError::HttpClientFailed(e.to_string()))?;
+        let client = crate::network::build_network_client(
+            crate::network::NetworkClientPolicy::model_download(),
+        )?;
 
         let mut request = client.get(&req.url);
         if resume_from > 0 {
@@ -307,7 +312,7 @@ mod real {
         let mut resp = request
             .send()
             .await
-            .map_err(|e| MukeiError::NetworkError(format!("GET {}: {e}", req.url)))?;
+            .map_err(|e| crate::network::map_reqwest_error("model download", e))?;
 
         let status = resp.status();
 
@@ -342,36 +347,80 @@ mod real {
 
             // Re-issue the request without a `Range` header.
             drop(resp);
-            let resp_retry =
-                client.get(&req.url).send().await.map_err(|e| {
-                    MukeiError::NetworkError(format!("GET {} (restart): {e}", req.url))
-                })?;
+            let resp_retry = client
+                .get(&req.url)
+                .send()
+                .await
+                .map_err(|e| crate::network::map_reqwest_error("model download restart", e))?;
             let retry_status = resp_retry.status();
             if !retry_status.is_success() {
-                let msg = format!("HTTP {retry_status} for {} (restart)", req.url);
+                let err = crate::network::http_status_error("model download restart", retry_status);
                 let _ = events
                     .send(DownloadEvent::Error {
-                        code: "ERR_NETWORK",
-                        message: msg.clone(),
+                        code: err.error_code(),
+                        message: err.to_string(),
                     })
                     .await;
-                return Err(MukeiError::NetworkError(msg));
+                return Err(err);
             }
             resp = resp_retry;
         } else if !status.is_success() {
-            let msg = format!("HTTP {status} for {}", req.url);
+            let err = crate::network::http_status_error("model download", status);
             let _ = events
                 .send(DownloadEvent::Error {
-                    code: "ERR_NETWORK",
-                    message: msg.clone(),
+                    code: err.error_code(),
+                    message: err.to_string(),
                 })
                 .await;
-            return Err(MukeiError::NetworkError(msg));
+            return Err(err);
         }
 
-        let total_bytes = resp.content_length().map(|c| c + resume_from);
+        let Some(remaining_bytes) = resp.content_length() else {
+            let err = MukeiError::DownloadSizeMissing;
+            let _ = tokio::fs::remove_file(&partial).await;
+            let _ = events
+                .send(DownloadEvent::Error {
+                    code: err.error_code(),
+                    message: err.to_string(),
+                })
+                .await;
+            return Err(err);
+        };
+        let total_bytes = remaining_bytes.saturating_add(resume_from);
+        if total_bytes > MAX_MODEL_DOWNLOAD_BYTES {
+            let err = MukeiError::DownloadTooLarge {
+                max_bytes: MAX_MODEL_DOWNLOAD_BYTES,
+                actual_bytes: total_bytes,
+            };
+            let _ = tokio::fs::remove_file(&partial).await;
+            let _ = events
+                .send(DownloadEvent::Error {
+                    code: err.error_code(),
+                    message: err.to_string(),
+                })
+                .await;
+            return Err(err);
+        }
 
-        let _ = events.send(DownloadEvent::Started { total_bytes }).await;
+        if let Some(parent) = req.dest.parent() {
+            let quota = crate::storage::StorageQuotaManager::new(parent);
+            if let Err(err) = quota.ensure_model_download_allowed(total_bytes) {
+                let _ = tokio::fs::remove_file(&partial).await;
+                let _ = events
+                    .send(DownloadEvent::Error {
+                        code: err.error_code(),
+                        message: err.to_string(),
+                    })
+                    .await;
+                return Err(err);
+            }
+        }
+
+        let _ = events
+            .send(DownloadEvent::Started {
+                total_bytes: Some(total_bytes),
+            })
+            .await;
 
         // Open .partial in resume-or-create mode at `resume_from`. We
         // deliberately set `truncate(false)` whenever we're resuming so
@@ -433,25 +482,39 @@ mod real {
                 return Err(MukeiError::Cancelled);
             }
             let bytes =
-                chunk.map_err(|e| MukeiError::NetworkError(format!("stream chunk: {e}")))?;
+                chunk.map_err(|e| crate::network::map_reqwest_error("model download stream", e))?;
             hasher.update(&bytes);
             out.write_all(&bytes)
                 .await
                 .map_err(|e| MukeiError::Io(format!("write partial: {e}")))?;
             downloaded = downloaded.saturating_add(bytes.len() as u64);
 
-            if let Some(tot) = total_bytes {
-                if tot > 0 {
-                    let pct = downloaded as f64 / tot as f64;
-                    if pct - last_emit_pct >= 0.005 || pct >= 1.0 {
-                        last_emit_pct = pct;
-                        let _ = events
-                            .send(DownloadEvent::Progress {
-                                progress: pct.clamp(0.0, 1.0),
-                                bytes_downloaded: downloaded,
-                            })
-                            .await;
-                    }
+            if downloaded > MAX_MODEL_DOWNLOAD_BYTES {
+                drop(out);
+                let err = MukeiError::DownloadTooLarge {
+                    max_bytes: MAX_MODEL_DOWNLOAD_BYTES,
+                    actual_bytes: downloaded,
+                };
+                let _ = tokio::fs::remove_file(&partial).await;
+                let _ = events
+                    .send(DownloadEvent::Error {
+                        code: err.error_code(),
+                        message: err.to_string(),
+                    })
+                    .await;
+                return Err(err);
+            }
+
+            if total_bytes > 0 {
+                let pct = downloaded as f64 / total_bytes as f64;
+                if pct - last_emit_pct >= 0.005 || pct >= 1.0 {
+                    last_emit_pct = pct;
+                    let _ = events
+                        .send(DownloadEvent::Progress {
+                            progress: pct.clamp(0.0, 1.0),
+                            bytes_downloaded: downloaded,
+                        })
+                        .await;
                 }
             }
         }
@@ -774,6 +837,112 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, DownloadEvent::Complete { .. })),
             "must emit Complete"
+        );
+    }
+
+    #[cfg(all(feature = "network", feature = "tokio"))]
+    #[tokio::test]
+    async fn missing_content_length_is_rejected_before_writing_partial() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        use tokio_util::sync::CancellationToken;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let _ = sock.read(&mut buf).await.unwrap();
+            sock.write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nhello")
+                .await
+                .unwrap();
+            sock.shutdown().await.ok();
+        });
+
+        let dir = tempdir().unwrap();
+        let dest = dir.path().join("model.gguf");
+        let partial = dir.path().join("model.gguf.partial");
+        let req = DownloadRequest {
+            url: format!("http://{addr}/model.gguf"),
+            expected_sha256: "0".repeat(64),
+            dest,
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<DownloadEvent>(8);
+        let result = exercise_run_download_for_test(req, tx, CancellationToken::new()).await;
+        server.await.unwrap();
+
+        assert!(matches!(result, Err(MukeiError::DownloadSizeMissing)));
+        assert!(!partial.exists(), "unsafe partial file must be removed");
+        let mut events = Vec::new();
+        while let Some(event) = rx.recv().await {
+            events.push(event);
+        }
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                DownloadEvent::Error {
+                    code: "ERR_DOWNLOAD_SIZE_MISSING",
+                    ..
+                }
+            )),
+            "must emit typed missing-size error event; got {events:?}"
+        );
+    }
+
+    #[cfg(all(feature = "network", feature = "tokio"))]
+    #[tokio::test]
+    async fn oversized_content_length_is_rejected_before_writing_partial() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        use tokio_util::sync::CancellationToken;
+
+        let advertised_bytes = MAX_MODEL_DOWNLOAD_BYTES + 1;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let _ = sock.read(&mut buf).await.unwrap();
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {advertised_bytes}\r\nConnection: close\r\n\r\n"
+            );
+            sock.write_all(resp.as_bytes()).await.unwrap();
+            sock.shutdown().await.ok();
+        });
+
+        let dir = tempdir().unwrap();
+        let dest = dir.path().join("model.gguf");
+        let partial = dir.path().join("model.gguf.partial");
+        let req = DownloadRequest {
+            url: format!("http://{addr}/model.gguf"),
+            expected_sha256: "0".repeat(64),
+            dest,
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<DownloadEvent>(8);
+        let result = exercise_run_download_for_test(req, tx, CancellationToken::new()).await;
+        server.await.unwrap();
+
+        assert!(matches!(
+            result,
+            Err(MukeiError::DownloadTooLarge {
+                max_bytes: MAX_MODEL_DOWNLOAD_BYTES,
+                actual_bytes
+            }) if actual_bytes == advertised_bytes
+        ));
+        assert!(!partial.exists(), "unsafe partial file must be removed");
+        let mut events = Vec::new();
+        while let Some(event) = rx.recv().await {
+            events.push(event);
+        }
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                DownloadEvent::Error {
+                    code: "ERR_DOWNLOAD_TOO_LARGE",
+                    ..
+                }
+            )),
+            "must emit typed oversized-download error event; got {events:?}"
         );
     }
 

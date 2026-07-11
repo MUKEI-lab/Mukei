@@ -10,6 +10,7 @@
 //!   high-confidence summary.
 
 use async_trait::async_trait;
+use zeroize::Zeroizing;
 
 #[cfg(feature = "network")]
 use crate::error::MukeiError;
@@ -20,7 +21,7 @@ use crate::search::SearchHit;
 /// Tavily Search engine.
 #[cfg_attr(not(feature = "network"), allow(dead_code))]
 pub struct TavilyEngine {
-    api_key: String,
+    api_key: Zeroizing<String>,
     base_url: String,
 }
 
@@ -28,7 +29,7 @@ impl TavilyEngine {
     /// Standard production constructor.
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            api_key: api_key.into(),
+            api_key: Zeroizing::new(api_key.into()),
             base_url: "https://api.tavily.com/search".to_string(),
         }
     }
@@ -53,7 +54,6 @@ impl SearchEngine for TavilyEngine {
 
 #[cfg(feature = "network")]
 async fn execute_tavily(engine: &TavilyEngine, request: &SearchRequest) -> Result<Vec<SearchHit>> {
-    use reqwest::Client;
     use serde::Deserialize;
     use serde_json::json;
 
@@ -83,15 +83,14 @@ async fn execute_tavily(engine: &TavilyEngine, request: &SearchRequest) -> Resul
         published_date: Option<String>,
     }
 
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(
+    let client = crate::network::build_network_client(
+        crate::network::NetworkClientPolicy::search(std::time::Duration::from_secs(
             crate::search::policy::PlannerPolicy::DEFAULT_TAVILY_TIMEOUT_SECS,
-        ))
-        .build()
-        .map_err(|e| MukeiError::HttpClientFailed(e.to_string()))?;
+        )),
+    )?;
 
     let mut body = json!({
-        "api_key": engine.api_key,
+        "api_key": &*engine.api_key,
         "query": request.query,
         "max_results": request.count,
         "include_answer": true,

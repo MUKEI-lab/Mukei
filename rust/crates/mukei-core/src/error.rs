@@ -111,6 +111,39 @@ pub enum MukeiError {
         /// The full applied set as found on disk.
         applied: Vec<u32>,
     },
+    /// An already-applied migration no longer matches the bundled SQL body.
+    #[error(
+        "migration checksum mismatch at version {version}: applied {applied}, bundled {bundled}"
+    )]
+    MigrationChecksumMismatch {
+        /// Version whose recorded checksum differs from the bundled migration.
+        version: u32,
+        /// Checksum recorded in `migrations_applied`.
+        applied: String,
+        /// Checksum computed from the bundled migration body.
+        bundled: String,
+    },
+    /// The append-only audit hash chain failed verification during boot.
+    /// Normal startup must stop so the app cannot append over a tampered
+    /// local security log.
+    #[error("audit log tamper detected at row {row_id}")]
+    AuditLogTampered {
+        /// First row whose stored chain values failed verification.
+        row_id: i64,
+    },
+    /// SQLCipher support is not available in the linked SQLite library.
+    #[error("database encryption is unavailable in this build")]
+    DatabaseEncryptionUnavailable,
+    /// Existing database is plain SQLite and requires an explicit secure
+    /// migration before encrypted production startup can continue.
+    #[error("unencrypted database requires explicit secure migration")]
+    DatabaseEncryptionMigrationRequired,
+    /// SQLCipher key did not unlock the encrypted database.
+    #[error("database encryption key is invalid")]
+    DatabaseEncryptionInvalidKey,
+    /// Encrypted database header/body could not be interpreted safely.
+    #[error("encrypted database appears corrupted")]
+    DatabaseEncryptionCorrupted,
 
     // ------------------------------------------------------------------
     // Config (TRD §12.5)
@@ -193,6 +226,14 @@ pub enum MukeiError {
         /// Tool name.
         tool_name: String,
     },
+    /// A remote feature was blocked by the current privacy policy.
+    #[error("remote feature '{feature}' blocked by policy {policy}")]
+    RemoteFeatureDisabled {
+        /// Feature name, such as `web_search`.
+        feature: &'static str,
+        /// Active policy tag.
+        policy: String,
+    },
     /// Could not parse the LLM output into a tool-call payload at all.
     #[error("tool payload could not be parsed: {0}")]
     ToolParseFailed(String),
@@ -242,12 +283,74 @@ pub enum MukeiError {
     /// A network request failed at the transport layer.
     #[error("network request failed: {0}")]
     NetworkError(String),
+    /// A network request timed out.
+    #[error("network request timed out during {operation}")]
+    NetworkTimeout {
+        /// Redacted operation label, never a URL or prompt.
+        operation: String,
+    },
+    /// A network request could not connect or the device appears offline.
+    #[error("network unavailable during {operation}")]
+    NetworkUnavailable {
+        /// Redacted operation label, never a URL or prompt.
+        operation: String,
+    },
+    /// TLS or certificate validation failed.
+    #[error("TLS validation failed during {operation}")]
+    NetworkTls {
+        /// Redacted operation label, never a URL or prompt.
+        operation: String,
+    },
+    /// The server returned an invalid or undecodable response.
+    #[error("invalid network response during {operation}")]
+    NetworkInvalidResponse {
+        /// Redacted operation label, never a URL or prompt.
+        operation: String,
+    },
+    /// The server rate-limited the request.
+    #[error("network request rate-limited during {operation}")]
+    NetworkRateLimited {
+        /// Redacted operation label, never a URL or prompt.
+        operation: String,
+    },
+    /// The server returned a 5xx response.
+    #[error("server error {status} during {operation}")]
+    NetworkServerError {
+        /// HTTP status code.
+        status: u16,
+        /// Redacted operation label, never a URL or prompt.
+        operation: String,
+    },
     /// Generic I/O failure (file system, network adapter).
     #[error("io failure: {0}")]
     Io(String),
     /// A resumable download saw a SHA-256 mismatch on truncated resume.
     #[error("resumable download hash mismatch on truncated resume")]
     DownloadHashMismatch,
+    /// A model download response omitted Content-Length, so the app
+    /// cannot preflight storage or enforce a trustworthy upper bound.
+    #[error("download response is missing Content-Length")]
+    DownloadSizeMissing,
+    /// A model download exceeded the configured byte cap.
+    #[error("download too large ({actual_bytes} bytes > {max_bytes} bytes)")]
+    DownloadTooLarge {
+        /// Configured maximum accepted bytes.
+        max_bytes: u64,
+        /// Advertised or streamed byte count that exceeded the cap.
+        actual_bytes: u64,
+    },
+    /// App/model storage quota would be exceeded by the requested write.
+    #[error(
+        "storage quota exceeded ({used_bytes} used + {requested_bytes} requested > {max_bytes} max)"
+    )]
+    StorageQuotaExceeded {
+        /// Configured maximum accepted bytes for the storage class.
+        max_bytes: u64,
+        /// Bytes requested by the operation that was rejected.
+        requested_bytes: u64,
+        /// Bytes already used under the managed storage root.
+        used_bytes: u64,
+    },
 
     // ------------------------------------------------------------------
     // Domain-specific / diagnostics
@@ -305,6 +408,12 @@ impl MukeiError {
             Self::DatabaseCorruption => "ERR_DB_CORRUPTION",
             Self::MigrationFailed(_, _) => "ERR_MIGRATION",
             Self::MigrationOrderConflict { .. } => "ERR_MIGRATION_ORDER",
+            Self::MigrationChecksumMismatch { .. } => "ERR_MIGRATION_CHECKSUM",
+            Self::AuditLogTampered { .. } => "ERR_AUDIT_TAMPERED",
+            Self::DatabaseEncryptionUnavailable => "ERR_DB_ENCRYPTION_UNAVAILABLE",
+            Self::DatabaseEncryptionMigrationRequired => "ERR_DB_ENCRYPTION_MIGRATION_REQUIRED",
+            Self::DatabaseEncryptionInvalidKey => "ERR_DB_ENCRYPTION_INVALID_KEY",
+            Self::DatabaseEncryptionCorrupted => "ERR_DB_ENCRYPTION_CORRUPTED",
 
             Self::ConfigMissingField(_) => "ERR_CONFIG_MISSING",
             Self::ConfigInvalid { .. } => "ERR_CONFIG_INVALID",
@@ -321,6 +430,7 @@ impl MukeiError {
             Self::ToolArgsRejected { .. } => "ERR_TOOL_ARGS",
             Self::ToolAbuseBlocked { .. } => "ERR_TOOL_ABUSE",
             Self::ToolPermanentlyDisabled { .. } => "ERR_TOOL_DISABLED",
+            Self::RemoteFeatureDisabled { .. } => "ERR_REMOTE_DISABLED",
             Self::ToolParseFailed(_) => "ERR_TOOL_PARSE",
             Self::ToolArgumentInvalid { .. } => "ERR_TOOL_ARGUMENT",
             Self::ToolExecutionFailed(_) => "ERR_TOOL_EXEC",
@@ -335,8 +445,17 @@ impl MukeiError {
             Self::SafRequired => "ERR_SAF_REQUIRED",
 
             Self::NetworkError(_) => "ERR_NETWORK",
+            Self::NetworkTimeout { .. } => "ERR_NETWORK_TIMEOUT",
+            Self::NetworkUnavailable { .. } => "ERR_NETWORK_UNAVAILABLE",
+            Self::NetworkTls { .. } => "ERR_NETWORK_TLS",
+            Self::NetworkInvalidResponse { .. } => "ERR_NETWORK_INVALID_RESPONSE",
+            Self::NetworkRateLimited { .. } => "ERR_NETWORK_RATE_LIMITED",
+            Self::NetworkServerError { .. } => "ERR_NETWORK_SERVER",
             Self::Io(_) => "ERR_IO",
             Self::DownloadHashMismatch => "ERR_DOWNLOAD_HASH",
+            Self::DownloadSizeMissing => "ERR_DOWNLOAD_SIZE_MISSING",
+            Self::DownloadTooLarge { .. } => "ERR_DOWNLOAD_TOO_LARGE",
+            Self::StorageQuotaExceeded { .. } => "ERR_STORAGE_QUOTA",
 
             Self::PromptLeakage => "ERR_PROMPT_LEAKAGE",
             Self::WatchdogExceeded { .. } => "ERR_WATCHDOG",
@@ -360,10 +479,17 @@ impl MukeiError {
             Self::DatabaseCorruption
             | Self::DatabaseInitFailed(_)
             | Self::MigrationFailed(_, _)
-            | Self::MigrationOrderConflict { .. } => ErrorClass::Storage,
+            | Self::MigrationOrderConflict { .. }
+            | Self::MigrationChecksumMismatch { .. }
+            | Self::AuditLogTampered { .. }
+            | Self::DatabaseEncryptionUnavailable
+            | Self::DatabaseEncryptionMigrationRequired
+            | Self::DatabaseEncryptionInvalidKey
+            | Self::DatabaseEncryptionCorrupted => ErrorClass::Storage,
             Self::ConfigInvalid { .. }
             | Self::ConfigMissingField(_)
             | Self::ConfigUnknownField(_) => ErrorClass::Config,
+            Self::RemoteFeatureDisabled { .. } => ErrorClass::Permission,
             Self::ToolLoopDetected(_)
             | Self::ToolTimeout(_)
             | Self::ToolAbuseBlocked { .. }
@@ -379,7 +505,19 @@ impl MukeiError {
             | Self::BinaryFile
             | Self::SandboxViolation => ErrorClass::Agent,
             Self::SafRevoked | Self::SafRequired | Self::PermissionDenied => ErrorClass::Permission,
-            Self::NetworkError(_) | Self::DownloadHashMismatch | Self::Io(_) => ErrorClass::Network,
+            Self::NetworkError(_)
+            | Self::NetworkTimeout { .. }
+            | Self::NetworkUnavailable { .. }
+            | Self::NetworkTls { .. }
+            | Self::NetworkInvalidResponse { .. }
+            | Self::NetworkRateLimited { .. }
+            | Self::NetworkServerError { .. }
+            | Self::DownloadHashMismatch
+            | Self::DownloadSizeMissing
+            | Self::Io(_) => ErrorClass::Network,
+            Self::DownloadTooLarge { .. } | Self::StorageQuotaExceeded { .. } => {
+                ErrorClass::Resource
+            }
             Self::SecretLeaked(_)
             | Self::UnwrapFailed
             | Self::WrappedKeyMalformed(_)
@@ -559,5 +697,124 @@ mod tests {
         let rendered = format!("{err}");
         assert!(rendered.contains("already in flight"));
         assert!(rendered.contains("gemma-4-E2B-it-Q4_K_M.gguf"));
+    }
+
+    #[test]
+    fn unsafe_download_size_errors_have_stable_codes() {
+        let missing = MukeiError::DownloadSizeMissing;
+        assert_eq!(missing.error_code(), "ERR_DOWNLOAD_SIZE_MISSING");
+        assert_eq!(missing.classification(), ErrorClass::Network);
+
+        let too_large = MukeiError::DownloadTooLarge {
+            max_bytes: 16,
+            actual_bytes: 17,
+        };
+        assert_eq!(too_large.error_code(), "ERR_DOWNLOAD_TOO_LARGE");
+        assert_eq!(too_large.classification(), ErrorClass::Resource);
+        let rendered = too_large.to_string();
+        assert!(rendered.contains("17 bytes"));
+        assert!(rendered.contains("16 bytes"));
+    }
+
+    #[test]
+    fn storage_quota_error_has_stable_code() {
+        let err = MukeiError::StorageQuotaExceeded {
+            max_bytes: 100,
+            requested_bytes: 40,
+            used_bytes: 80,
+        };
+        assert_eq!(err.error_code(), "ERR_STORAGE_QUOTA");
+        assert_eq!(err.classification(), ErrorClass::Resource);
+        let rendered = err.to_string();
+        assert!(rendered.contains("80 used"));
+        assert!(rendered.contains("40 requested"));
+        assert!(rendered.contains("100 max"));
+    }
+
+    #[test]
+    fn typed_network_errors_have_stable_codes() {
+        let cases = [
+            (
+                MukeiError::NetworkTimeout {
+                    operation: "download".into(),
+                },
+                "ERR_NETWORK_TIMEOUT",
+            ),
+            (
+                MukeiError::NetworkUnavailable {
+                    operation: "download".into(),
+                },
+                "ERR_NETWORK_UNAVAILABLE",
+            ),
+            (
+                MukeiError::NetworkTls {
+                    operation: "download".into(),
+                },
+                "ERR_NETWORK_TLS",
+            ),
+            (
+                MukeiError::NetworkInvalidResponse {
+                    operation: "download".into(),
+                },
+                "ERR_NETWORK_INVALID_RESPONSE",
+            ),
+            (
+                MukeiError::NetworkRateLimited {
+                    operation: "download".into(),
+                },
+                "ERR_NETWORK_RATE_LIMITED",
+            ),
+            (
+                MukeiError::NetworkServerError {
+                    status: 502,
+                    operation: "download".into(),
+                },
+                "ERR_NETWORK_SERVER",
+            ),
+        ];
+
+        for (err, code) in cases {
+            assert_eq!(err.error_code(), code);
+            assert_eq!(err.classification(), ErrorClass::Network);
+        }
+    }
+
+    #[test]
+    fn remote_feature_disabled_has_stable_code() {
+        let err = MukeiError::RemoteFeatureDisabled {
+            feature: "web_search",
+            policy: "local_only".into(),
+        };
+        assert_eq!(err.error_code(), "ERR_REMOTE_DISABLED");
+        assert_eq!(err.classification(), ErrorClass::Permission);
+        assert!(err.to_string().contains("web_search"));
+        assert!(err.to_string().contains("local_only"));
+    }
+
+    #[test]
+    fn database_encryption_errors_have_stable_codes() {
+        let cases = [
+            (
+                MukeiError::DatabaseEncryptionUnavailable,
+                "ERR_DB_ENCRYPTION_UNAVAILABLE",
+            ),
+            (
+                MukeiError::DatabaseEncryptionMigrationRequired,
+                "ERR_DB_ENCRYPTION_MIGRATION_REQUIRED",
+            ),
+            (
+                MukeiError::DatabaseEncryptionInvalidKey,
+                "ERR_DB_ENCRYPTION_INVALID_KEY",
+            ),
+            (
+                MukeiError::DatabaseEncryptionCorrupted,
+                "ERR_DB_ENCRYPTION_CORRUPTED",
+            ),
+        ];
+
+        for (err, code) in cases {
+            assert_eq!(err.error_code(), code);
+            assert_eq!(err.classification(), ErrorClass::Storage);
+        }
     }
 }

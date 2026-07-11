@@ -9,6 +9,7 @@
 //! - All requests must include `X-Subscription-Token`.
 
 use async_trait::async_trait;
+use zeroize::Zeroizing;
 
 #[cfg(feature = "network")]
 use crate::error::MukeiError;
@@ -20,7 +21,7 @@ use crate::search::SearchHit;
 /// key as an opaque string (the executor never logs it).
 #[cfg_attr(not(feature = "network"), allow(dead_code))]
 pub struct BraveEngine {
-    api_key: String,
+    api_key: Zeroizing<String>,
     base_url: String,
 }
 
@@ -28,7 +29,7 @@ impl BraveEngine {
     /// Standard production constructor.
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            api_key: api_key.into(),
+            api_key: Zeroizing::new(api_key.into()),
             base_url: "https://api.search.brave.com/res/v1/web/search".to_string(),
         }
     }
@@ -54,7 +55,6 @@ impl SearchEngine for BraveEngine {
 
 #[cfg(feature = "network")]
 async fn execute_brave(engine: &BraveEngine, request: &SearchRequest) -> Result<Vec<SearchHit>> {
-    use reqwest::Client;
     use serde::Deserialize;
 
     #[cfg(test)]
@@ -85,12 +85,11 @@ async fn execute_brave(engine: &BraveEngine, request: &SearchRequest) -> Result<
         age: Option<String>,
     }
 
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(
+    let client = crate::network::build_network_client(
+        crate::network::NetworkClientPolicy::search(std::time::Duration::from_secs(
             crate::search::policy::PlannerPolicy::DEFAULT_BRAVE_TIMEOUT_SECS,
-        ))
-        .build()
-        .map_err(|e| MukeiError::HttpClientFailed(e.to_string()))?;
+        )),
+    )?;
 
     let mut params = vec![("q", request.query.as_str()), ("count", "5")];
     let count_str = request.count.to_string();
@@ -105,7 +104,7 @@ async fn execute_brave(engine: &BraveEngine, request: &SearchRequest) -> Result<
         .get(&engine.base_url)
         .query(&params)
         .header("Accept", "application/json")
-        .header("X-Subscription-Token", &engine.api_key)
+        .header("X-Subscription-Token", &*engine.api_key)
         .send()
         .await
         .map_err(|e| MukeiError::WebSearchFailed(format!("brave http: {e}")))?

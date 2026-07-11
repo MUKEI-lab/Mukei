@@ -14,8 +14,18 @@
 mod agent_runtime;
 mod bridge_state;
 
+#[cfg(all(
+    target_os = "android",
+    not(debug_assertions),
+    not(feature = "sqlcipher")
+))]
+compile_error!("Android release builds must enable the mukei-bridge/sqlcipher feature");
+
 #[cfg(feature = "rusqlite")]
-use mukei_core::storage::{saf as core_saf, AuditLogWriter};
+use mukei_core::storage::{
+    saf as core_saf, AuditChainStatus, AuditLogReader, AuditLogWriter, ConversationRepository,
+    MessageStatus, PersistedTurn,
+};
 
 #[cfg(not(feature = "rusqlite"))]
 mod core_saf {
@@ -63,12 +73,13 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex as ParkingMutex;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+use zeroize::Zeroizing;
 
 use bridge_state::{single_active_download, ActiveDownload, BusyGuard, DownloadSlotGuard};
 use mukei_core::agent::AgentLoop;
 use mukei_core::config::MukeiConfig;
 use mukei_core::ffi::tags::{TagEvents, TagsStreaming};
-use mukei_core::tools::ToolRegistry;
+use mukei_core::tools::{RemoteFeaturePolicy, ToolRegistry};
 use mukei_core::types::{BranchId, ConversationId, MessageId};
 use mukei_core::ui_contract::{
     AndroidStorageState, AppLifecycleState, BridgeEvent, BridgeEventKind, CapabilitySnapshot,
@@ -80,25 +91,29 @@ static GLOBAL_SAF_REGISTRY: Lazy<Arc<core_saf::SafRegistry>> =
 static GLOBAL_THERMAL_STATUS: Lazy<Arc<Mutex<i32>>> = Lazy::new(|| Arc::new(Mutex::new(0)));
 
 /// Wrapped-secrets registry. The unwrap step (`feature = "android_keystore"`)
-/// happens in the bridge and the *plaintext* lives only inside this
-/// mutex — the QString that arrives from QML is overwritten before
-/// being passed any further.
-static GLOBAL_BRAVE_API_KEY: Lazy<Arc<Mutex<Option<String>>>> =
+/// happens in the bridge and provider keys are kept in zeroizing memory
+/// until the tool registry is rebuilt.
+static GLOBAL_BRAVE_API_KEY: Lazy<Arc<Mutex<Option<Zeroizing<String>>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
-static GLOBAL_TAVILY_API_KEY: Lazy<Arc<Mutex<Option<String>>>> =
+static GLOBAL_TAVILY_API_KEY: Lazy<Arc<Mutex<Option<Zeroizing<String>>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
+static GLOBAL_REMOTE_FEATURE_POLICY: Lazy<Arc<Mutex<RemoteFeaturePolicy>>> =
+    Lazy::new(|| Arc::new(Mutex::new(RemoteFeaturePolicy::default())));
 #[cfg(feature = "sqlcipher")]
-static GLOBAL_DATABASE_CIPHER_KEY: Lazy<Arc<Mutex<Option<Vec<u8>>>>> =
-    Lazy::new(|| Arc::new(Mutex::new(None)));
+static GLOBAL_DATABASE_CIPHER_KEY: Lazy<ParkingMutex<Option<Vec<u8>>>> =
+    Lazy::new(|| ParkingMutex::new(None));
 
 /// Tool registry shared across every `send_message` invocation. Rebuilt
 /// whenever the Brave or Tavily key changes so the next tool call sees
 /// the new credentials without restarting the agent loop.
 static GLOBAL_TOOL_REGISTRY: Lazy<Arc<Mutex<Arc<ToolRegistry>>>> = Lazy::new(|| {
-    Arc::new(Mutex::new(Arc::new(ToolRegistry::with_web_search_keys(
-        "missing-brave-key",
-        "missing-tavily-key",
-    ))))
+    Arc::new(Mutex::new(Arc::new(
+        ToolRegistry::with_web_search_keys_and_policy(
+            "missing-brave-key",
+            "missing-tavily-key",
+            RemoteFeaturePolicy::default(),
+        ),
+    )))
 });
 
 #[cfg(feature = "sqlcipher")]
@@ -133,6 +148,13 @@ static GLOBAL_DATABASE_POOL: Lazy<Mutex<Option<Arc<mukei_core::storage::Database
 #[cfg(feature = "rusqlite")]
 static GLOBAL_AUDIT_LOG_WRITER: Lazy<Arc<AuditLogWriter>> =
     Lazy::new(|| Arc::new(AuditLogWriter::new()));
+
+/// Durable chat session used by `send_message`. Until a public
+/// conversation picker/new-chat API is wired, consecutive sends belong
+/// to one repository-backed conversation instead of being fragmented
+/// into one conversation per turn.
+static GLOBAL_CHAT_SESSION: Lazy<Mutex<Option<(ConversationId, BranchId)>>> =
+    Lazy::new(|| Mutex::new(None));
 
 /// Shared validated config snapshot so we can rebuild the loop when web-search
 /// credentials rotate.
@@ -191,7 +213,53 @@ fn download_event_error(code: &'static str, message: String) -> mukei_core::erro
     match code {
         "ERR_CANCELLED" => mukei_core::error::MukeiError::Cancelled,
         "ERR_DOWNLOAD_HASH" => mukei_core::error::MukeiError::DownloadHashMismatch,
+        "ERR_DOWNLOAD_SIZE_MISSING" => mukei_core::error::MukeiError::DownloadSizeMissing,
+        "ERR_DOWNLOAD_TOO_LARGE" => {
+            let mut numbers = message
+                .split(|c: char| !c.is_ascii_digit())
+                .filter(|part| !part.is_empty())
+                .filter_map(|part| part.parse::<u64>().ok());
+            let actual_bytes = numbers.next().unwrap_or_default();
+            let max_bytes = numbers.next().unwrap_or_default();
+            mukei_core::error::MukeiError::DownloadTooLarge {
+                max_bytes,
+                actual_bytes,
+            }
+        }
+        "ERR_STORAGE_QUOTA" => {
+            let mut numbers = message
+                .split(|c: char| !c.is_ascii_digit())
+                .filter(|part| !part.is_empty())
+                .filter_map(|part| part.parse::<u64>().ok());
+            let used_bytes = numbers.next().unwrap_or_default();
+            let requested_bytes = numbers.next().unwrap_or_default();
+            let max_bytes = numbers.next().unwrap_or_default();
+            mukei_core::error::MukeiError::StorageQuotaExceeded {
+                max_bytes,
+                requested_bytes,
+                used_bytes,
+            }
+        }
         "ERR_NETWORK" => mukei_core::error::MukeiError::NetworkError(message),
+        "ERR_NETWORK_TIMEOUT" => mukei_core::error::MukeiError::NetworkTimeout {
+            operation: "download_model".into(),
+        },
+        "ERR_NETWORK_UNAVAILABLE" => mukei_core::error::MukeiError::NetworkUnavailable {
+            operation: "download_model".into(),
+        },
+        "ERR_NETWORK_TLS" => mukei_core::error::MukeiError::NetworkTls {
+            operation: "download_model".into(),
+        },
+        "ERR_NETWORK_INVALID_RESPONSE" => mukei_core::error::MukeiError::NetworkInvalidResponse {
+            operation: "download_model".into(),
+        },
+        "ERR_NETWORK_RATE_LIMITED" => mukei_core::error::MukeiError::NetworkRateLimited {
+            operation: "download_model".into(),
+        },
+        "ERR_NETWORK_SERVER" => mukei_core::error::MukeiError::NetworkServerError {
+            status: 0,
+            operation: "download_model".into(),
+        },
         "ERR_IO" => mukei_core::error::MukeiError::Io(message),
         _ => mukei_core::error::MukeiError::Internal(message),
     }
@@ -208,8 +276,14 @@ fn download_event_error(code: &'static str, message: String) -> mukei_core::erro
 ///
 /// Stored as `Mutex<PathBuf>` so the QML / JNI side can rewrite it at
 /// any time.
-static GLOBAL_MODEL_DIR: Lazy<Mutex<std::path::PathBuf>> = Lazy::new(|| {
-    let p = std::env::var("XDG_DATA_HOME")
+static GLOBAL_MODEL_BASE_DIR: Lazy<Mutex<std::path::PathBuf>> =
+    Lazy::new(|| Mutex::new(default_model_base_dir()));
+
+static GLOBAL_MODEL_DIR: Lazy<Mutex<std::path::PathBuf>> =
+    Lazy::new(|| Mutex::new(default_model_base_dir().join("models")));
+
+fn default_model_base_dir() -> std::path::PathBuf {
+    std::env::var("XDG_DATA_HOME")
         .ok()
         .map(std::path::PathBuf::from)
         .or_else(|| {
@@ -217,11 +291,110 @@ static GLOBAL_MODEL_DIR: Lazy<Mutex<std::path::PathBuf>> = Lazy::new(|| {
                 .ok()
                 .map(|h| std::path::PathBuf::from(h).join(".local/share"))
         })
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
+        })
         .join("mukei")
-        .join("models");
-    Mutex::new(p)
-});
+}
+
+#[derive(Debug)]
+struct ValidatedModelDir {
+    canonical_dir: std::path::PathBuf,
+    canonical_base: std::path::PathBuf,
+}
+
+fn validate_model_dir(path: std::path::PathBuf) -> mukei_core::error::Result<ValidatedModelDir> {
+    let base = GLOBAL_MODEL_BASE_DIR.blocking_lock().clone();
+    validate_model_dir_against_base(path, base)
+}
+
+fn validate_model_dir_against_base(
+    path: std::path::PathBuf,
+    base: std::path::PathBuf,
+) -> mukei_core::error::Result<ValidatedModelDir> {
+    if !path.is_absolute() {
+        return Err(mukei_core::error::MukeiError::ToolArgumentInvalid {
+            field: "model_dir",
+            reason: "model directory must be an absolute app-private path".to_string(),
+        });
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(mukei_core::error::MukeiError::ToolArgumentInvalid {
+            field: "model_dir",
+            reason: "model directory must not contain parent-directory components".to_string(),
+        });
+    }
+
+    let canonical_dir = canonicalize_existing_model_dir(&path)?;
+    let canonical_base = canonicalize_existing_model_dir(&base)?;
+    if canonical_dir.starts_with(&canonical_base) {
+        return Ok(ValidatedModelDir {
+            canonical_dir,
+            canonical_base,
+        });
+    }
+
+    if is_android_app_specific_files_path(&canonical_dir) {
+        return Ok(ValidatedModelDir {
+            canonical_base: canonical_dir.clone(),
+            canonical_dir,
+        });
+    }
+
+    Err(mukei_core::error::MukeiError::ToolArgumentInvalid {
+        field: "model_dir",
+        reason: "model directory must stay inside app-private storage".to_string(),
+    })
+}
+
+fn canonicalize_existing_model_dir(
+    path: &std::path::Path,
+) -> mukei_core::error::Result<std::path::PathBuf> {
+    std::fs::create_dir_all(path).map_err(|err| {
+        mukei_core::error::MukeiError::Io(format!("create model directory: {err}"))
+    })?;
+    path.canonicalize().map_err(|err| {
+        mukei_core::error::MukeiError::Io(format!("canonicalize model directory: {err}"))
+    })
+}
+
+fn is_android_app_specific_files_path(path: &std::path::Path) -> bool {
+    let parts: Vec<String> = path
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(part) => Some(part.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect();
+
+    parts.windows(4).any(|window| {
+        window[0] == "Android"
+            && window[1] == "data"
+            && !window[2].is_empty()
+            && window[2].contains('.')
+            && window[3] == "files"
+    })
+}
+
+fn safe_model_filename(filename: &str) -> mukei_core::error::Result<&str> {
+    let path = std::path::Path::new(filename);
+    let is_plain_file = path.components().count() == 1
+        && path
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)));
+    let has_allowed_ext = path.extension().and_then(|ext| ext.to_str()) == Some("gguf");
+    if is_plain_file && has_allowed_ext {
+        Ok(filename)
+    } else {
+        Err(mukei_core::error::MukeiError::ToolArgumentInvalid {
+            field: "model_filename",
+            reason: "model filename must be a simple .gguf file name".to_string(),
+        })
+    }
+}
 
 /// Resolve a QML `download_model(url, sha256)` request into a typed
 /// [`mukei_core::storage::DownloadRequest`]. Accepts two call shapes:
@@ -230,9 +403,8 @@ static GLOBAL_MODEL_DIR: Lazy<Mutex<std::path::PathBuf>> = Lazy::new(|| {
 ///    (e.g. `"gemma-4-e2b-it"`) and `sha256` is empty or matches the
 ///    pinned digest. The URL + SHA come from the binary catalogue
 ///    (TRD §8.1).
-/// 2. **Bespoke URL** — `url` is an `https://` URL and `sha256` is the
-///    matching 64-hex digest. Used for QA before the
-///    release-engineering pass pins the real CDN URL.
+/// 2. **Bespoke URL** — debug builds only. Production builds must use
+///    catalog model ids so model provenance stays controlled.
 async fn resolve_download_request(
     url_or_id: &str,
     sha256: &str,
@@ -257,11 +429,23 @@ async fn resolve_download_request(
         });
     }
 
+    #[cfg(not(debug_assertions))]
+    {
+        return Err(mukei_core::error::MukeiError::ToolArgumentInvalid {
+            field: "model_id",
+            reason: "production builds only accept trusted catalog model ids".to_string(),
+        });
+    }
+
+    #[cfg(debug_assertions)]
     let filename = url_or_id
         .rsplit('/')
         .next()
         .filter(|s| !s.is_empty())
         .unwrap_or("model.gguf");
+    #[cfg(debug_assertions)]
+    let filename = safe_model_filename(filename)?;
+    #[cfg(debug_assertions)]
     Ok(mukei_core::storage::DownloadRequest {
         url: url_or_id.to_string(),
         expected_sha256: sha256.to_string(),
@@ -272,19 +456,27 @@ async fn resolve_download_request(
 /// Bridge-side wrapped-secrets helper. The bridge crate is responsible
 /// for unwrapping the Keystore-protected ciphertext that arrives over
 /// the JNI boundary and handing the plaintext to the core; the
-/// plaintext never returns to Java.
+/// plaintext never returns to Java and old bridge copies are zeroized
+/// when replaced.
 async fn rebuild_tool_registry_from_secrets() {
     let brave = GLOBAL_BRAVE_API_KEY
         .lock()
         .await
-        .clone()
+        .as_ref()
+        .map(|key| key.to_string())
         .unwrap_or_else(|| "missing-brave-key".to_string());
     let tavily = GLOBAL_TAVILY_API_KEY
         .lock()
         .await
-        .clone()
+        .as_ref()
+        .map(|key| key.to_string())
         .unwrap_or_else(|| "missing-tavily-key".to_string());
-    let registry = Arc::new(ToolRegistry::with_web_search_keys(brave, tavily));
+    let remote_policy = *GLOBAL_REMOTE_FEATURE_POLICY.lock().await;
+    let registry = Arc::new(ToolRegistry::with_web_search_keys_and_policy(
+        brave,
+        tavily,
+        remote_policy,
+    ));
     *GLOBAL_TOOL_REGISTRY.lock().await = registry.clone();
     tracing::info!("tool registry rebuilt with wrapped-secrets keys");
 
@@ -387,6 +579,8 @@ pub mod ffi {
         fn set_brave_api_key(self: Pin<&mut MukeiBridge>, api_key: QString);
         #[qinvokable]
         fn set_tavily_api_key(self: Pin<&mut MukeiBridge>, api_key: QString);
+        #[qinvokable]
+        fn set_remote_feature_policy(self: Pin<&mut MukeiBridge>, policy: QString);
         /// Inject the hex-encoded unwrapped SQLCipher database key
         /// before `MukeiAgent.initialize()` opens storage. Raw key
         /// bytes must never be passed through QString.
@@ -551,13 +745,24 @@ impl ffi::MukeiAgent {
                     return;
                 }
             };
+            #[cfg(target_os = "android")]
+            if let Err(e) = cfg.validate_android_storage_paths(&cfg_path) {
+                let code = e.error_code().to_string();
+                let msg = e.to_string();
+                let event = error_bridge_event(&e, "initialize");
+                let _ = qt.queue(move |mut qobject| {
+                    qobject.as_mut().event_emitted(event_json(event));
+                    qobject
+                        .as_mut()
+                        .error_occurred(QString::from(&code), QString::from(&msg));
+                });
+                return;
+            }
             tracing::info!(
                 ?cfg.gpu_layers, n_ctx = cfg.n_ctx,
                 max_iterations = cfg.watchdog.max_iterations,
                 "config loaded"
             );
-            *GLOBAL_CONFIG.lock().await = Some(cfg.clone());
-
             rebuild_tool_registry_from_secrets().await;
 
             #[cfg(feature = "rusqlite")]
@@ -572,7 +777,7 @@ impl ffi::MukeiAgent {
                     )));
                 });
                 #[cfg(feature = "sqlcipher")]
-                let database_key = match GLOBAL_DATABASE_CIPHER_KEY.lock().await.take() {
+                let database_key = match GLOBAL_DATABASE_CIPHER_KEY.lock().take() {
                     Some(key) if !key.is_empty() => key,
                     _ => {
                         let err = mukei_core::error::MukeiError::DatabaseInitFailed(
@@ -613,7 +818,61 @@ impl ffi::MukeiAgent {
                         return;
                     }
                 };
-                *GLOBAL_DATABASE_POOL.lock().await = Some(pool.clone());
+                match AuditLogReader::verify_chain(&pool).await {
+                    Ok(AuditChainStatus::Ok { rows_checked, .. }) => {
+                        tracing::info!(
+                            rows_checked,
+                            "audit log hash chain verified during bridge boot"
+                        );
+                    }
+                    Ok(AuditChainStatus::Tampered { row_id, .. }) => {
+                        let err = mukei_core::error::MukeiError::AuditLogTampered { row_id };
+                        let code = err.error_code().to_string();
+                        let msg = err.to_string();
+                        let event = error_bridge_event(&err, "initialize");
+                        let _ = qt.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(event));
+                            qobject
+                                .as_mut()
+                                .error_occurred(QString::from(&code), QString::from(&msg));
+                        });
+                        return;
+                    }
+                    Err(e) => {
+                        let code = e.error_code().to_string();
+                        let msg = e.to_string();
+                        let event = error_bridge_event(&e, "initialize");
+                        let _ = qt.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(event));
+                            qobject
+                                .as_mut()
+                                .error_occurred(QString::from(&code), QString::from(&msg));
+                        });
+                        return;
+                    }
+                }
+
+                match ConversationRepository::mark_incomplete_turns_failed(&pool).await {
+                    Ok(count) if count > 0 => {
+                        tracing::warn!(
+                            incomplete_turns = count,
+                            "marked interrupted chat turns as failed during bridge boot"
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        let code = e.error_code().to_string();
+                        let msg = e.to_string();
+                        let event = error_bridge_event(&e, "initialize");
+                        let _ = qt.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(event));
+                            qobject
+                                .as_mut()
+                                .error_occurred(QString::from(&code), QString::from(&msg));
+                        });
+                        return;
+                    }
+                }
 
                 if let Err(e) = GLOBAL_AUDIT_LOG_WRITER.hydrate_from_pool(&pool).await {
                     let code = e.error_code().to_string();
@@ -678,6 +937,7 @@ impl ffi::MukeiAgent {
                     GLOBAL_AUDIT_LOG_WRITER.clone(),
                 );
                 *GLOBAL_AGENT_LOOP.lock().await = Some(loop_handle);
+                *GLOBAL_DATABASE_POOL.lock().await = Some(pool);
             }
             #[cfg(not(feature = "rusqlite"))]
             {
@@ -686,6 +946,7 @@ impl ffi::MukeiAgent {
                 *GLOBAL_AGENT_LOOP.lock().await = Some(loop_handle);
             }
 
+            *GLOBAL_CONFIG.lock().await = Some(cfg);
             *state.lock().await = "IDLE_READY".to_string();
             let _ = qt.queue(|mut qobject| {
                 qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
@@ -711,12 +972,13 @@ impl ffi::MukeiAgent {
         let sequence = rust.event_sequence.clone();
         let qt_thread = self.as_ref().get_ref().qt_thread();
         let input = user_input.to_string();
-        // Bridge-local correlation ids only. The current AgentLoop API
-        // accepts a BranchId but does not return persisted conversation
-        // or turn ids, so these are for live event ordering until the
-        // storage-backed chat state is wired through.
-        let conversation_id = ConversationId::new();
-        let turn_id = MessageId::new().0.to_string();
+        let (conversation_id, branch_id) = {
+            let mut session = GLOBAL_CHAT_SESSION.blocking_lock();
+            *session.get_or_insert_with(|| (ConversationId::new(), BranchId::new()))
+        };
+        let user_message_id = MessageId::new();
+        let assistant_message_id = MessageId::new();
+        let turn_id = assistant_message_id.0.to_string();
 
         // Re-entrancy guard (user priority follow-up): refuse the call
         // if a prior `send_message` is still streaming. The QML side
@@ -753,9 +1015,17 @@ impl ffi::MukeiAgent {
         let ui_thread = qt_thread.clone();
         let chunk_sequence = sequence.clone();
         let chunk_turn_id = turn_id.clone();
+        let partial_response = Arc::new(Mutex::new(String::new()));
+        let partial_response_for_chunks = partial_response.clone();
+        #[cfg(feature = "rusqlite")]
+        let persisted_turn: Arc<Mutex<Option<PersistedTurn>>> = Arc::new(Mutex::new(None));
+        #[cfg(feature = "rusqlite")]
+        let persisted_turn_for_chunks = persisted_turn.clone();
 
         mukei_core::runtime::get().spawn(async move {
             let mut tags = TagsStreaming::new();
+            let mut last_persisted_len = 0usize;
+            let mut last_persisted_at = tokio::time::Instant::now();
             while let Some(chunk) = chunk_rx.recv().await {
                 if chunk == "\u{0001}STREAM_FINAL\u{0001}" {
                     if tags.is_open() {
@@ -765,6 +1035,42 @@ impl ffi::MukeiAgent {
                     }
                     let _ = ui_thread.queue(|mut qobject| qobject.as_mut().stream_finalized());
                     continue;
+                }
+
+                {
+                    let mut partial = partial_response_for_chunks.lock().await;
+                    partial.push_str(&chunk);
+                }
+                #[cfg(feature = "rusqlite")]
+                {
+                    let should_persist = {
+                        let partial = partial_response_for_chunks.lock().await;
+                        partial.len().saturating_sub(last_persisted_len) >= 512
+                            || last_persisted_at.elapsed() >= std::time::Duration::from_millis(750)
+                    };
+                    if should_persist {
+                        let turn = persisted_turn_for_chunks.lock().await.clone();
+                        if let Some(turn) = turn {
+                            let content = partial_response_for_chunks.lock().await.clone();
+                            if let Some(pool) = GLOBAL_DATABASE_POOL.lock().await.clone() {
+                                if let Err(e) = ConversationRepository::update_assistant_partial(
+                                    &pool,
+                                    turn,
+                                    content.clone(),
+                                )
+                                .await
+                                {
+                                    tracing::warn!(
+                                        error = %e,
+                                        "failed to persist streaming assistant partial"
+                                    );
+                                } else {
+                                    last_persisted_len = content.len();
+                                    last_persisted_at = tokio::time::Instant::now();
+                                }
+                            }
+                        }
+                    }
                 }
 
                 let events = tags.push(&chunk);
@@ -788,6 +1094,9 @@ impl ffi::MukeiAgent {
             }
         });
 
+        let partial_response_for_run = partial_response.clone();
+        #[cfg(feature = "rusqlite")]
+        let persisted_turn_for_run = persisted_turn.clone();
         mukei_core::runtime::get().spawn(async move {
             let submit_event = BridgeEvent::new(BridgeEventKind::ChatState {
                 state: ChatTurnState::Submitting,
@@ -803,12 +1112,48 @@ impl ffi::MukeiAgent {
             let loop_handle = { GLOBAL_AGENT_LOOP.lock().await.clone() };
             let mut failed = false;
             let mut final_capabilities = CapabilitySnapshot::ready();
+            #[cfg(feature = "rusqlite")]
+            {
+                if let Some(pool) = GLOBAL_DATABASE_POOL.lock().await.clone() {
+                    match ConversationRepository::begin_turn(
+                        &pool,
+                        conversation_id,
+                        branch_id,
+                        user_message_id,
+                        assistant_message_id,
+                        input.clone(),
+                    )
+                    .await
+                    {
+                        Ok(turn) => {
+                            *persisted_turn_for_run.lock().await = Some(turn);
+                        }
+                        Err(e) => {
+                            failed = true;
+                            let code = e.error_code().to_string();
+                            let message = e.to_string();
+                            let event = BridgeEvent::new(BridgeEventKind::ChatFailed {
+                                error: UiError::from_mukei_error(&e, "send_message"),
+                            })
+                            .with_chat_context(conversation_id, turn_id.clone())
+                            .with_sequence(sequence.fetch_add(1, Ordering::AcqRel));
+                            let _ = qt_thread.queue(move |mut qobject| {
+                                qobject.as_mut().event_emitted(event_json(event));
+                                qobject.as_mut().error_occurred(
+                                    QString::from(&code),
+                                    QString::from(&message),
+                                );
+                            });
+                        }
+                    }
+                }
+            }
             match loop_handle {
-                Some(handle) => {
+                Some(handle) if !failed => {
                     let result = handle
                         .run(
                             input,
-                            BranchId::default(),
+                            branch_id,
                             cancel_token.clone(),
                             chunk_tx.clone(),
                         )
@@ -828,6 +1173,7 @@ impl ffi::MukeiAgent {
                         });
                     }
                 }
+                Some(_) => {}
                 None => {
                     failed = true;
                     final_capabilities = CapabilitySnapshot::uninitialized();
@@ -847,6 +1193,37 @@ impl ffi::MukeiAgent {
                             QString::from("AgentLoop was never constructed — call MukeiAgent.initialize(config_path) first."),
                         );
                     });
+                }
+            }
+            #[cfg(feature = "rusqlite")]
+            {
+                let turn = persisted_turn_for_run.lock().await.clone();
+                if let Some(turn) = turn {
+                    if let Some(pool) = GLOBAL_DATABASE_POOL.lock().await.clone() {
+                        let content = partial_response_for_run.lock().await.clone();
+                        let persist_result = if failed {
+                            ConversationRepository::fail_turn(
+                                &pool,
+                                turn,
+                                MessageStatus::Failed,
+                                content,
+                            )
+                            .await
+                        } else if cancel_token.is_cancelled() {
+                            ConversationRepository::fail_turn(
+                                &pool,
+                                turn,
+                                MessageStatus::Cancelled,
+                                content,
+                            )
+                            .await
+                        } else {
+                            ConversationRepository::complete_turn(&pool, turn, content).await
+                        };
+                        if let Err(e) = persist_result {
+                            tracing::warn!(error = %e, "failed to finalize persisted chat turn");
+                        }
+                    }
                 }
             }
             let _ = chunk_tx.send("\u{0001}STREAM_FINAL\u{0001}".to_string()).await;
@@ -1179,10 +1556,17 @@ impl ffi::MukeiAgent {
 
             match dl_handle.await {
                 Ok(Ok(())) => {
-                    tracing::info!(path = %dest_for_status.display(), "model download finalised");
+                    tracing::info!(
+                        path = %mukei_core::diagnostics::redact_path(&dest_for_status),
+                        "model download finalised"
+                    );
                 }
                 Ok(Err(e)) => {
-                    tracing::warn!(error = %e, "model download failed");
+                    tracing::warn!(
+                        error = %mukei_core::diagnostics::sanitize_error_message(e.to_string()),
+                        code = e.error_code(),
+                        "model download failed"
+                    );
                     if !terminal_download_event_seen {
                         let code = e.error_code().to_string();
                         let message = e.to_string();
@@ -1244,6 +1628,9 @@ impl ffi::MukeiAgent {
 
     pub fn clear_conversation(self: Pin<&mut Self>) {
         let qt = self.as_ref().get_ref().qt_thread();
+        mukei_core::runtime::get().spawn(async {
+            *GLOBAL_CHAT_SESSION.lock().await = None;
+        });
         let _ = qt.queue(|mut qobject| {
             qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
                 BridgeEventKind::CapabilitySnapshot {
@@ -1278,7 +1665,7 @@ impl ffi::MukeiBridge {
     /// (Issue #3.)
     pub fn set_brave_api_key(self: Pin<&mut Self>, api_key: QString) {
         let store = GLOBAL_BRAVE_API_KEY.clone();
-        let api_key = api_key.to_string();
+        let api_key = Zeroizing::new(api_key.to_string());
         mukei_core::runtime::get().spawn(async move {
             *store.lock().await = Some(api_key);
             rebuild_tool_registry_from_secrets().await;
@@ -1290,11 +1677,40 @@ impl ffi::MukeiBridge {
     /// at all.
     pub fn set_tavily_api_key(self: Pin<&mut Self>, api_key: QString) {
         let store = GLOBAL_TAVILY_API_KEY.clone();
-        let api_key = api_key.to_string();
+        let api_key = Zeroizing::new(api_key.to_string());
         mukei_core::runtime::get().spawn(async move {
             *store.lock().await = Some(api_key);
             rebuild_tool_registry_from_secrets().await;
         });
+    }
+
+    /// Set the privacy policy for remote features. The default is
+    /// `local_only`, so web search cannot send queries off-device until
+    /// this is explicitly set to `remote_allowed`.
+    pub fn set_remote_feature_policy(self: Pin<&mut Self>, policy: QString) {
+        let qt = self.as_ref().get_ref().qt_thread();
+        let raw_policy = policy.to_string();
+        let parsed = raw_policy.parse::<RemoteFeaturePolicy>();
+        match parsed {
+            Ok(policy) => {
+                let store = GLOBAL_REMOTE_FEATURE_POLICY.clone();
+                mukei_core::runtime::get().spawn(async move {
+                    *store.lock().await = policy;
+                    rebuild_tool_registry_from_secrets().await;
+                });
+            }
+            Err(err) => {
+                let event = error_bridge_event(&err, "set_remote_feature_policy");
+                let code = err.error_code().to_string();
+                let message = err.to_string();
+                let _ = qt.queue(move |mut qobject| {
+                    qobject.as_mut().event_emitted(event_json(event));
+                    qobject
+                        .as_mut()
+                        .error_occurred(QString::from(&code), QString::from(&message));
+                });
+            }
+        }
     }
 
     /// Inject the hex-encoded unwrapped SQLCipher key that protects the
@@ -1303,30 +1719,33 @@ impl ffi::MukeiBridge {
     /// method decodes it back to bytes before storage initialization.
     #[cfg(feature = "sqlcipher")]
     pub fn set_database_cipher_key(self: Pin<&mut Self>, key: QString) {
+        use zeroize::Zeroize;
+
         let qt = self.as_ref().get_ref().qt_thread();
-        let store = GLOBAL_DATABASE_CIPHER_KEY.clone();
-        let key_hex = key.to_string();
-        mukei_core::runtime::get().spawn(async move {
-            match decode_hex_key(&key_hex) {
-                Ok(key_bytes) => {
-                    *store.lock().await = Some(key_bytes);
+        let key_hex = Zeroizing::new(key.to_string());
+        match decode_hex_key(&key_hex) {
+            Ok(key_bytes) => {
+                let mut guard = GLOBAL_DATABASE_CIPHER_KEY.lock();
+                if let Some(mut old_key) = guard.take() {
+                    old_key.zeroize();
                 }
-                Err(message) => {
-                    let err = mukei_core::error::MukeiError::ConfigInvalid {
-                        field: "database_cipher_key".to_string(),
-                        reason: message.clone(),
-                    };
-                    let event = error_bridge_event(&err, "set_database_cipher_key");
-                    let _ = qt.queue(move |mut qobject| {
-                        qobject.as_mut().event_emitted(event_json(event));
-                        qobject.as_mut().error_occurred(
-                            QString::from("ERR_DATABASE_KEY_INVALID"),
-                            QString::from(&message),
-                        );
-                    });
-                }
+                *guard = Some(key_bytes);
             }
-        });
+            Err(message) => {
+                let err = mukei_core::error::MukeiError::ConfigInvalid {
+                    field: "database_cipher_key".to_string(),
+                    reason: message.clone(),
+                };
+                let event = error_bridge_event(&err, "set_database_cipher_key");
+                let _ = qt.queue(move |mut qobject| {
+                    qobject.as_mut().event_emitted(event_json(event));
+                    qobject.as_mut().error_occurred(
+                        QString::from("ERR_DATABASE_KEY_INVALID"),
+                        QString::from(&message),
+                    );
+                });
+            }
+        }
     }
 
     #[cfg(not(feature = "sqlcipher"))]
@@ -1365,10 +1784,26 @@ impl ffi::MukeiBridge {
     // -----------------------------------------------------------------
 
     pub fn set_model_dir(self: Pin<&mut Self>, path: QString) {
-        let new_path = std::path::PathBuf::from(path.to_string());
+        let qt = self.as_ref().get_ref().qt_thread();
+        let validated = match validate_model_dir(std::path::PathBuf::from(path.to_string())) {
+            Ok(path) => path,
+            Err(err) => {
+                let code = err.error_code().to_string();
+                let message = err.to_string();
+                let event = error_bridge_event(&err, "set_model_dir");
+                let _ = qt.queue(move |mut qobject| {
+                    qobject.as_mut().event_emitted(event_json(event));
+                    qobject
+                        .as_mut()
+                        .error_occurred(QString::from(&code), QString::from(&message));
+                });
+                return;
+            }
+        };
         mukei_core::runtime::get().spawn(async move {
-            *GLOBAL_MODEL_DIR.lock().await = new_path;
-            tracing::info!("model directory updated");
+            *GLOBAL_MODEL_BASE_DIR.lock().await = validated.canonical_base;
+            *GLOBAL_MODEL_DIR.lock().await = validated.canonical_dir;
+            tracing::info!("model directory updated inside app-private base");
         });
     }
 
@@ -1425,13 +1860,12 @@ impl ffi::SafRegistry {
             created: chrono::Utc::now(),
         };
         mukei_core::runtime::get().spawn(async move {
-            let _ = GLOBAL_SAF_REGISTRY.upsert(row.clone());
             #[cfg(feature = "rusqlite")]
             {
                 let pool = GLOBAL_DATABASE_POOL.lock().await.clone();
                 if let Some(p) = pool {
                     if let Err(e) = GLOBAL_SAF_REGISTRY.persist_upsert(&p, row).await {
-                        tracing::warn!(error = %e, "SAF grant persist_upsert failed; in-memory mirror will diverge until restart");
+                        tracing::warn!(error = %e, "SAF grant persist_upsert failed; in-memory state unchanged");
                     }
                 }
             }
@@ -1451,17 +1885,36 @@ impl ffi::SafRegistry {
         let token_string = token.to_string();
         let qt_clone = qt.clone();
         mukei_core::runtime::get().spawn(async move {
-            let _ = GLOBAL_SAF_REGISTRY.revoke(&token_string);
             #[cfg(feature = "rusqlite")]
             {
                 let pool = GLOBAL_DATABASE_POOL.lock().await.clone();
                 if let Some(p) = pool {
-                    if let Err(e) = GLOBAL_SAF_REGISTRY
+                    match GLOBAL_SAF_REGISTRY
                         .persist_revoke(&p, &token_string, "user_revoke")
                         .await
                     {
-                        tracing::warn!(error = %e, "SAF token persist_revoke failed; in-memory mirror will diverge until restart");
+                        Ok(chunk_ids) => {
+                            if let Some(cfg) = GLOBAL_CONFIG.lock().await.clone() {
+                                if let Err(e) =
+                                    agent_runtime::purge_vector_chunks(&cfg, chunk_ids).await
+                                {
+                                    tracing::warn!(
+                                        error = %e,
+                                        "SAF revoke removed SQL chunks but vector cleanup failed"
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "SAF token persist_revoke failed; in-memory state unchanged"
+                            );
+                            return;
+                        }
                     }
+                } else {
+                    return;
                 }
             }
             let _ = qt_clone.queue(move |mut qobject| {
@@ -1486,7 +1939,10 @@ pub extern "C" fn Java_com_mukei_app_MukeiBridge_nativeOnSafGrantRevoked() {}
 
 #[cfg(test)]
 mod qml_contract_tests {
-    use super::MukeiAgentRust;
+    use super::{
+        is_android_app_specific_files_path, safe_model_filename, validate_model_dir_against_base,
+        MukeiAgentRust,
+    };
     use std::sync::atomic::Ordering;
 
     const SOURCE: &str = include_str!("lib.rs");
@@ -1517,6 +1973,56 @@ mod qml_contract_tests {
     #[test]
     fn typed_event_signal_is_declared() {
         assert!(SOURCE.contains("fn event_emitted("));
+    }
+
+    #[test]
+    fn model_dir_must_stay_under_canonical_app_private_base() {
+        let base = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let models = base.path().join("models");
+
+        assert!(validate_model_dir_against_base(
+            std::path::PathBuf::from("models"),
+            base.path().into()
+        )
+        .is_err());
+        assert!(
+            validate_model_dir_against_base(base.path().join("../models"), base.path().into())
+                .is_err()
+        );
+        assert!(validate_model_dir_against_base(models.clone(), base.path().into()).is_ok());
+        assert!(
+            validate_model_dir_against_base(outside.path().join("models"), base.path().into())
+                .is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn model_dir_rejects_symlink_escape_from_app_private_base() {
+        let base = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let link = base.path().join("models");
+        std::os::unix::fs::symlink(outside.path(), &link).unwrap();
+
+        assert!(validate_model_dir_against_base(link, base.path().into()).is_err());
+    }
+
+    #[test]
+    fn android_model_dir_policy_accepts_only_app_specific_files_root() {
+        assert!(is_android_app_specific_files_path(std::path::Path::new(
+            "/storage/emulated/0/Android/data/com.mukei.app/files/models"
+        )));
+        assert!(!is_android_app_specific_files_path(std::path::Path::new(
+            "/storage/emulated/0/Download/models"
+        )));
+    }
+
+    #[test]
+    fn debug_custom_model_filename_must_be_simple_gguf() {
+        assert!(safe_model_filename("model.gguf").is_ok());
+        assert!(safe_model_filename("../model.gguf").is_err());
+        assert!(safe_model_filename("model.bin").is_err());
     }
 
     #[tokio::test]

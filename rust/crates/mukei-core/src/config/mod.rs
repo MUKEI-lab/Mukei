@@ -242,6 +242,50 @@ impl MukeiConfig {
         Ok(cfg)
     }
 
+    /// Android production storage must stay below the app-private
+    /// directory that owns the config file. This rejects server-style
+    /// defaults such as `/var/mukei` and lexical `..` escapes before any
+    /// directory or database is opened.
+    pub fn validate_android_storage_paths(&self, config_path: &Path) -> Result<()> {
+        use std::path::Component;
+
+        let base = config_path
+            .parent()
+            .ok_or_else(|| MukeiError::ConfigInvalid {
+                field: "config_path".into(),
+                reason: "must have an app-private parent directory".into(),
+            })?;
+        if !base.is_absolute() {
+            return Err(MukeiError::ConfigInvalid {
+                field: "config_path".into(),
+                reason: "must be absolute on Android".into(),
+            });
+        }
+
+        let paths = [
+            ("models_dir", &self.models_dir),
+            ("vectors_dir", &self.vectors_dir),
+            ("database_path", &self.database_path),
+            ("saf_tokens_db", &self.saf_tokens_db),
+            ("crashes_dir", &self.crashes_dir),
+            ("logs_dir", &self.logs_dir),
+        ];
+        for (field, path) in paths {
+            if !path.is_absolute()
+                || path
+                    .components()
+                    .any(|component| matches!(component, Component::ParentDir))
+                || !path.starts_with(base)
+            {
+                return Err(MukeiError::ConfigInvalid {
+                    field: field.into(),
+                    reason: "must stay inside the Android app-private config directory".into(),
+                });
+            }
+        }
+        Ok(())
+    }
+
     fn validate_toml_keys(bytes: &[u8]) -> Result<()> {
         let raw: raw::RawRoot =
             toml::from_str(
@@ -394,5 +438,105 @@ first_run_completed    = false
         let cfg_text = VALID_TOML.replace("n_ctx             = 4096", "n_ctx             = 64");
         let err = MukeiConfig::load_and_validate_from_str(&cfg_text).unwrap_err();
         assert!(matches!(err, MukeiError::ConfigInvalid { .. }));
+    }
+
+    #[test]
+    fn android_storage_validation_rejects_paths_outside_config_parent() {
+        let cfg: MukeiConfig = toml::from_str(VALID_TOML).expect("valid config");
+        let err = cfg
+            .validate_android_storage_paths(Path::new("/data/data/app.mukei/files/mukei.toml"))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            MukeiError::ConfigInvalid { field, .. } if field == "models_dir"
+        ));
+    }
+
+    #[test]
+    fn android_storage_validation_accepts_app_private_paths() {
+        let mut cfg: MukeiConfig = toml::from_str(VALID_TOML).expect("valid config");
+        let base = Path::new("/data/data/app.mukei/files");
+        cfg.models_dir = base.join("models");
+        cfg.vectors_dir = base.join("vectors");
+        cfg.database_path = base.join("db/mukei.db");
+        cfg.saf_tokens_db = base.join("db/saf_tokens.db");
+        cfg.crashes_dir = base.join("crashes");
+        cfg.logs_dir = base.join("logs");
+
+        cfg.validate_android_storage_paths(&base.join("mukei.toml"))
+            .unwrap();
+    }
+
+    #[test]
+    fn android_storage_validation_rejects_parent_dir_escape() {
+        let mut cfg: MukeiConfig = toml::from_str(VALID_TOML).expect("valid config");
+        let base = Path::new("/data/data/app.mukei/files");
+        cfg.models_dir = base.join("models");
+        cfg.vectors_dir = base.join("../escape");
+        cfg.database_path = base.join("db/mukei.db");
+        cfg.saf_tokens_db = base.join("db/saf_tokens.db");
+        cfg.crashes_dir = base.join("crashes");
+        cfg.logs_dir = base.join("logs");
+
+        let err = cfg
+            .validate_android_storage_paths(&base.join("mukei.toml"))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            MukeiError::ConfigInvalid { field, .. } if field == "vectors_dir"
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // Regression: v0.8 static review flagged that the shipped default
+    // config (`migrations/000_default_config.toml`) used `;` for
+    // comments, which TOML does NOT accept — first-run boot would
+    // therefore write a file that `load_and_validate` immediately
+    // rejects. This test guards against future regressions by round-
+    // tripping the exact bytes that `write_default` embeds via
+    // `include_str!` through the strict validator.
+    // ------------------------------------------------------------------
+    const SHIPPED_DEFAULT_CONFIG: &str =
+        include_str!("../../../../migrations/000_default_config.toml");
+
+    #[test]
+    fn shipped_default_config_is_valid_toml_and_passes_validator() {
+        // Parse first so a TOML syntax error (e.g. `;` comment) fails
+        // this test with a clear message instead of a generic
+        // ConfigInvalid at the logical-validate stage.
+        let _: toml::Value = toml::from_str(SHIPPED_DEFAULT_CONFIG)
+            .expect("shipped default config must be syntactically valid TOML");
+
+        // Then run the same strict pipeline the boot path uses.
+        MukeiConfig::load_and_validate_from_str(SHIPPED_DEFAULT_CONFIG)
+            .expect("shipped default config must pass load_and_validate");
+    }
+
+    #[test]
+    fn shipped_default_config_uses_only_hash_comments() {
+        // Belt-and-braces: even if the TOML parser one day tolerates
+        // `;`-prefixed lines, our shipped default must never contain
+        // one, because the reference file is copied verbatim into user
+        // installs and semicolon comments are a well-known footgun.
+        for (idx, line) in SHIPPED_DEFAULT_CONFIG.lines().enumerate() {
+            let trimmed = line.trim_start();
+            assert!(
+                !trimmed.starts_with(';'),
+                "line {} of shipped default config starts with ';': {:?}",
+                idx + 1,
+                line
+            );
+            if let Some(hash_pos) = line.find('#') {
+                // Inline comments are fine; but there must be no `;`
+                // sitting between a value and a trailing comment either.
+                let before_hash = &line[..hash_pos];
+                assert!(
+                    !before_hash.contains(';') || before_hash.contains('"'),
+                    "line {} of shipped default config has a stray ';': {:?}",
+                    idx + 1,
+                    line
+                );
+            }
+        }
     }
 }

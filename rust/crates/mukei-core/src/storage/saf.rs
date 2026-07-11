@@ -140,20 +140,39 @@ impl SafRegistry {
         pool: &super::pool::DatabasePool,
         token: &str,
         reason: &str,
-    ) -> Result<()> {
+    ) -> Result<Vec<u64>> {
         use super::pool::PooledConnectionExt;
         let token_owned = token.to_string();
         let reason_owned = reason.to_string();
-        pool.with_conn(move |c| {
-            c.execute(
-                "UPDATE saf_tokens SET revoked = 1, revoke_reason = ?2 WHERE token_id = ?1",
-                rusqlite::params![token_owned, reason_owned],
-            )?;
-            Ok::<_, super::pool::DbError>(())
-        })
-        .await?;
+        let chunk_ids = pool
+            .with_conn(move |c| {
+                let tx = c.transaction()?;
+                let chunk_ids = {
+                    let mut stmt = tx.prepare(
+                        "SELECT chunk_uuid FROM chunks WHERE file_token = ?1 ORDER BY id",
+                    )?;
+                    let rows = stmt
+                        .query_map([&token_owned], |row| row.get::<_, String>(0))?
+                        .filter_map(|row| row.ok().and_then(|id| id.parse::<u64>().ok()))
+                        .collect::<Vec<_>>();
+                    rows
+                };
+                let changed = tx.execute(
+                    "UPDATE saf_tokens SET revoked = 1, revoke_reason = ?2 WHERE token_id = ?1",
+                    rusqlite::params![&token_owned, reason_owned],
+                )?;
+                if changed == 0 {
+                    return Err(super::pool::DbError::Sqlite(
+                        rusqlite::Error::QueryReturnedNoRows,
+                    ));
+                }
+                tx.execute("DELETE FROM chunks WHERE file_token = ?1", [&token_owned])?;
+                tx.commit()?;
+                Ok::<_, super::pool::DbError>(chunk_ids)
+            })
+            .await?;
         self.revoke(token)?;
-        Ok(())
+        Ok(chunk_ids)
     }
 
     /// `SafRegistry::resolve` — opaque-token → URI string. Returns
@@ -204,6 +223,19 @@ mod tests {
     use super::*;
 
     #[cfg(feature = "rusqlite")]
+    async fn migrated_pool() -> crate::storage::DatabasePool {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("saf.db");
+        let pool = crate::storage::DatabasePool::open(&db_path).unwrap();
+        crate::storage::Migrator::embedded()
+            .apply_pending(&pool)
+            .await
+            .unwrap();
+        std::mem::forget(dir);
+        pool
+    }
+
+    #[cfg(feature = "rusqlite")]
     #[test]
     fn resolve_returns_target_uri() {
         let reg = SafRegistry::new();
@@ -240,5 +272,89 @@ mod tests {
         reg.revoke("tok-2").unwrap();
         let err = reg.resolve("tok-2").unwrap_err();
         assert!(matches!(err, MukeiError::SafRevoked));
+    }
+
+    #[cfg(feature = "rusqlite")]
+    #[tokio::test]
+    async fn persist_revoke_is_db_first_and_deletes_indexed_chunks() {
+        use crate::storage::pool::PooledConnectionExt;
+
+        let pool = migrated_pool().await;
+        let reg = SafRegistry::new();
+        let row = SafTokenRow {
+            token_id: "tok-db-first".into(),
+            source: "android-saf".into(),
+            target: "content://doc".into(),
+            mime: "text/plain".into(),
+            revoked: false,
+            created: chrono::Utc::now(),
+        };
+        reg.persist_upsert(&pool, row.clone()).await.unwrap();
+        pool.with_conn(|c| {
+            c.execute(
+                "INSERT INTO chunks (chunk_uuid, file_token, ordinal, sha256, content) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params!["11", "tok-db-first", 0_i64, "sha", "alpha"],
+            )?;
+            c.execute(
+                "INSERT INTO chunks (chunk_uuid, file_token, ordinal, sha256, content) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params!["12", "tok-db-first", 1_i64, "sha", "beta"],
+            )?;
+            Ok::<_, crate::storage::pool::DbError>(())
+        })
+        .await
+        .unwrap();
+
+        let chunk_ids = reg
+            .persist_revoke(&pool, "tok-db-first", "user_revoke")
+            .await
+            .unwrap();
+        assert_eq!(chunk_ids, vec![11, 12]);
+        assert!(matches!(
+            reg.resolve("tok-db-first").unwrap_err(),
+            MukeiError::SafRevoked
+        ));
+
+        let (revoked, remaining_chunks): (i64, i64) = pool
+            .with_conn(|c| {
+                let revoked = c.query_row(
+                    "SELECT revoked FROM saf_tokens WHERE token_id = ?1",
+                    ["tok-db-first"],
+                    |row| row.get::<_, i64>(0),
+                )?;
+                let remaining_chunks = c.query_row(
+                    "SELECT COUNT(*) FROM chunks WHERE file_token = ?1",
+                    ["tok-db-first"],
+                    |row| row.get::<_, i64>(0),
+                )?;
+                Ok::<_, crate::storage::pool::DbError>((revoked, remaining_chunks))
+            })
+            .await
+            .unwrap();
+        assert_eq!(revoked, 1);
+        assert_eq!(remaining_chunks, 0);
+    }
+
+    #[cfg(feature = "rusqlite")]
+    #[tokio::test]
+    async fn persist_revoke_keeps_memory_unchanged_when_db_revoke_fails() {
+        let pool = migrated_pool().await;
+        let reg = SafRegistry::new();
+        reg.upsert(SafTokenRow {
+            token_id: "memory-only".into(),
+            source: "android-saf".into(),
+            target: "content://still-live".into(),
+            mime: "text/plain".into(),
+            revoked: false,
+            created: chrono::Utc::now(),
+        })
+        .unwrap();
+
+        assert!(reg
+            .persist_revoke(&pool, "memory-only", "user_revoke")
+            .await
+            .is_err());
+        assert_eq!(reg.resolve("memory-only").unwrap(), "content://still-live");
     }
 }

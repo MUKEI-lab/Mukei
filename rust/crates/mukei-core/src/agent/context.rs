@@ -49,7 +49,7 @@ pub struct ContextBudget {
 #[async_trait::async_trait]
 pub trait ContextBackend: Send + Sync {
     /// Load recent messages (§2.4 spawn_blocking caller).
-    async fn load_history(&self) -> Result<Vec<ChatMessage>>;
+    async fn load_history(&self, active_history: &[ChatMessage]) -> Result<Vec<ChatMessage>>;
     /// Perform RAG lookup over the usearch HNSW (see `crate::rag`).
     async fn rag_lookup(&self, query: &str, top_k: usize) -> Result<Vec<String>>;
 }
@@ -91,7 +91,7 @@ impl ContextBudgetManager {
     /// O(n) tokenizer calls overall. The RAG block's own tokens are
     /// also counted against `max_tokens`.
     pub async fn build_for(&self, history: &[ChatMessage]) -> Result<String> {
-        let recent = self.backend.load_history().await?;
+        let recent = self.backend.load_history(history).await?;
         let mut combined: Vec<ChatMessage> =
             recent.into_iter().chain(history.iter().cloned()).collect();
 
@@ -203,7 +203,7 @@ mod tests {
     struct StaticBackend;
     #[async_trait::async_trait]
     impl ContextBackend for StaticBackend {
-        async fn load_history(&self) -> Result<Vec<ChatMessage>> {
+        async fn load_history(&self, _active_history: &[ChatMessage]) -> Result<Vec<ChatMessage>> {
             Ok(Vec::new())
         }
         async fn rag_lookup(&self, _q: &str, _k: usize) -> Result<Vec<String>> {
@@ -249,7 +249,10 @@ mod tests {
         struct HugeRagBackend(String);
         #[async_trait::async_trait]
         impl ContextBackend for HugeRagBackend {
-            async fn load_history(&self) -> Result<Vec<ChatMessage>> {
+            async fn load_history(
+                &self,
+                _active_history: &[ChatMessage],
+            ) -> Result<Vec<ChatMessage>> {
                 Ok(Vec::new())
             }
             async fn rag_lookup(&self, _q: &str, _k: usize) -> Result<Vec<String>> {

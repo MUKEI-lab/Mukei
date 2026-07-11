@@ -1,0 +1,117 @@
+# =====================================================================
+# Mukei backend CI
+#
+# Scope of THIS workflow (deliberately narrow, keeps CI green):
+#
+#   * mukei-core only, feature set = default (no-default-features + std,tokio).
+#
+#     mukei-bridge requires a Qt 6 / cxx-qt toolchain and the
+#     llama.cpp prebuilt on the runner. Wiring those up is a separate
+#     ticket (see rust-toolchain.toml and llama-cpp-prebuilt/). Until
+#     that lands, running the bridge crate here would just fail loudly
+#     and mask the real signal from the pure-Rust kernel, so we scope
+#     CI to what actually builds in a stock GitHub runner.
+#
+#   * fmt + clippy (deny warnings) + unit tests, on stable Rust.
+#
+# The goal is a durable green-badge signal for the pure-Rust core so
+# that regressions in config/storage/agent/tools land loud in PR review
+# without waiting for the full mobile pipeline.
+# =====================================================================
+
+name: ci
+
+on:
+  push:
+    branches: [ main, "agent/**" ]
+  pull_request:
+    branches: [ main ]
+
+# Cancel superseded runs on the same branch/PR — saves runner minutes
+# and keeps the visible status current.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  RUST_BACKTRACE: 1
+
+jobs:
+  # -------------------------------------------------------------------
+  # Job 1 — formatting. Fast fail before we spin up a heavier compile.
+  # -------------------------------------------------------------------
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: cargo fmt --check
+        working-directory: rust
+        run: cargo fmt --all -- --check
+
+  # -------------------------------------------------------------------
+  # Job 2 — clippy on mukei-core (default features only).
+  # -------------------------------------------------------------------
+  clippy:
+    name: clippy (mukei-core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-clippy-
+      - name: cargo clippy
+        working-directory: rust
+        run: >-
+          cargo clippy
+          -p mukei-core
+          --no-default-features
+          --features std,tokio
+          --lib --tests
+          -- -D warnings
+
+  # -------------------------------------------------------------------
+  # Job 3 — unit tests on mukei-core (default features only).
+  # -------------------------------------------------------------------
+  test:
+    name: test (mukei-core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-
+      - name: cargo test
+        working-directory: rust
+        run: >-
+          cargo test
+          -p mukei-core
+          --no-default-features
+          --features std,tokio
+          --lib

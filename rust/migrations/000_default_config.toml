@@ -1,34 +1,38 @@
-; Mukei — TRD §12.5 reference default `mukei.toml`.
-; The boot path writes this file on first install via
-; `mukei_core::config::write_default`. Every field is REQUIRED; the
-; validator rejects any missing field, unknown key, or out-of-range
-; integer with a typed `MukeiError::ConfigInvalid` whose `field`
-; and `reason` strings surface verbatim to the editor's first-run UI.
+# Mukei — TRD §12.5 reference default `mukei.toml`.
+# The boot path writes this file on first install via
+# `mukei_core::config::write_default`. Every field is REQUIRED; the
+# validator rejects any missing field, unknown key, or out-of-range
+# integer with a typed `MukeiError::ConfigInvalid` whose `field`
+# and `reason` strings surface verbatim to the editor's first-run UI.
+#
+# NOTE: TOML uses `#` for comments — semicolon `;` is NOT a valid TOML
+# comment marker and will cause `load_and_validate()` to reject this
+# file on first-run boot. Do not reintroduce `;`-prefixed comments.
 
 models_dir        = "/var/mukei/models"
 vectors_dir       = "/var/mukei/vectors"
 database_path     = "/var/mukei/db/mukei.db"
 saf_tokens_db     = "/var/mukei/db/saf_tokens.db"
-; Architect review GH #17 — `crashes_dir` MUST resolve to app-internal
-; scoped storage on Android (`Context.getFilesDir() + "/crashes/"`).
-; The bridge crate rewrites this default at boot when running on
-; `target_os = "android"`. On Linux/macOS desktop the value below is
-; XDG-style and works as-is.
+# Architect review GH #17 — `crashes_dir` MUST resolve to app-internal
+# scoped storage on Android (`Context.getFilesDir() + "/crashes/"`).
+# The bridge crate rewrites this default at boot when running on
+# `target_os = "android"`. On Linux/macOS desktop the value below is
+# XDG-style and works as-is.
 crashes_dir       = "/var/mukei/crashes"
 logs_dir          = "/var/mukei/logs"
 
-gpu_layers        = 32      ; 0 = CPU-only
-n_ctx             = 4096    ; [256, 32768]
-n_threads         = 4       ; [1, 32]
+gpu_layers        = 32      # 0 = CPU-only
+n_ctx             = 4096    # [256, 32768]
+n_threads         = 4       # [1, 32]
 
 [max_blocking]
-; TRD §2.2 — Android-bounded pool, BUGFIX v0.7.4
+# TRD §2.2 — Android-bounded pool, BUGFIX v0.7.4
 max_blocking_threads_android = 6
 max_blocking_threads_desktop = 8
 tool_slots                   = 2
 
 [watchdog]
-max_iterations     = 8       ; REQ-AGT-04
+max_iterations     = 8       # REQ-AGT-04
 max_token_budget   = 8192
 max_wall_seconds   = 600
 
@@ -41,27 +45,27 @@ persist_grants_to_db = true
 prompt_on_first_use  = true
 
 [agent]
-; Number of consecutive failures on the SAME (tool, fingerprint) pair
-; before the abuse blocker fires. Raised from 2 → 5 per the v0.7.5
-; audit — the legacy value was too brittle for transient network errors
-; on tools like web_search. See `ToolPolicy::DEFAULT_MAX_FAILURES`.
-max_failures_per_tool       = 5     ; REQ-AGT-05
+# Number of consecutive failures on the SAME (tool, fingerprint) pair
+# before the abuse blocker fires. Raised from 2 → 5 per the v0.7.5
+# audit — the legacy value was too brittle for transient network errors
+# on tools like web_search. See `ToolPolicy::DEFAULT_MAX_FAILURES`.
+max_failures_per_tool       = 5     # REQ-AGT-05
 recovered_history_window    = 12
-; Repeat-output / no-progress detection (TRD §2.5, v0.7.5 audit P7).
-repeat_output_window        = 2     ; consecutive identical outputs to trigger backoff
-repeat_output_backoff_secs  = 10    ; advisory pause hinted to the LLM
-max_concurrent_tools        = 4     ; GH #13 — cap on tokio::spawn tool tasks alive at once
+# Repeat-output / no-progress detection (TRD §2.5, v0.7.5 audit P7).
+repeat_output_window        = 2     # consecutive identical outputs to trigger backoff
+repeat_output_backoff_secs  = 10    # advisory pause hinted to the LLM
+max_concurrent_tools        = 4     # GH #13 — cap on tokio::spawn tool tasks alive at once
 
 [search]
-; Architect review GH #34 — per-engine timeouts and parallelism are now
-; config-driven so poor-connectivity zones (4G in rural regions) can
-; bump them without a rebuild.
+# Architect review GH #34 — per-engine timeouts and parallelism are now
+# config-driven so poor-connectivity zones (4G in rural regions) can
+# bump them without a rebuild.
 brave_timeout_secs    = 3
 tavily_timeout_secs   = 5
 max_parallel_engines  = 2
 enable_cache          = true
 
 [defaults]
-prompt_card_auto_send = false      ; false = fill-only, opt-in (PRD §7.4 + AF §6.6)
+prompt_card_auto_send = false      # false = fill-only, opt-in (PRD §7.4 + AF §6.6)
 thermal_autopause      = true
 first_run_completed    = false

@@ -28,6 +28,8 @@
 #[cfg(feature = "rusqlite")]
 pub mod audit_log;
 #[cfg(feature = "rusqlite")]
+pub mod conversation;
+#[cfg(feature = "rusqlite")]
 pub mod migrations;
 #[cfg(feature = "rusqlite")]
 pub mod pool;
@@ -39,9 +41,15 @@ pub mod saf;
 #[cfg(feature = "rusqlite")]
 pub use audit_log::{AuditChainStatus, AuditEntry, AuditLogReader, AuditLogWriter};
 #[cfg(feature = "rusqlite")]
+pub use conversation::{
+    ConversationRecord, ConversationRepository, MessageRecord, MessageStatus, PersistedTurn,
+};
+#[cfg(feature = "rusqlite")]
 pub use migrations::{MigrationRecord, Migrator, MIGRATIONS_DIR, MIGRATION_FILE_PREFIX};
 #[cfg(feature = "rusqlite")]
-pub use pool::{DatabasePool, DbError, PooledConnectionExt};
+pub use pool::{
+    DatabaseEncryptionStatus, DatabaseOpenResult, DatabasePool, DbError, PooledConnectionExt,
+};
 #[cfg(feature = "rusqlite")]
 pub use recovery::{RecoveryState, RecoveryStore};
 #[cfg(feature = "rusqlite")]
@@ -57,3 +65,7 @@ pub use saf::{SafRegistry, SafTokenRow};
 pub mod model_download;
 #[cfg(feature = "tokio")]
 pub use model_download::{run_download, verify_file_sha256, DownloadEvent, DownloadRequest};
+#[cfg(feature = "tokio")]
+pub mod quota;
+#[cfg(feature = "tokio")]
+pub use quota::{StorageQuotaManager, StorageQuotaPolicy, StorageUsage};

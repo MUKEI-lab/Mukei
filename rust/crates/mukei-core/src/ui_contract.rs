@@ -172,11 +172,54 @@ pub struct UiError {
 
 impl UiError {
     /// Build a UI error from an existing core error and bridge/core source label.
+    ///
+    /// Security: `technical_message` is the only field that the UI may
+    /// surface to advanced / debug panels — and it is the field most
+    /// likely to embed a raw filesystem path, an Authorization header,
+    /// an `api_key=...` token, or a prompt fragment when an upstream
+    /// crate's error formatting leaks it. We therefore funnel
+    /// `error.to_string()` through the diagnostics redactor before it
+    /// crosses the bridge boundary. `sanitize_error_message` uses
+    /// cheap structural checks (looks_like_secret / looks_like_path /
+    /// redact_inline_secrets) so the cost on the error-hot path is
+    /// negligible.
+    ///
+    /// Full diagnostic detail is still preserved on the server side
+    /// via `tracing` events that have been written through the same
+    /// redactor (see `crate::diagnostics::sanitize_error_message`).
     pub fn from_mukei_error(error: &MukeiError, source: impl Into<String>) -> Self {
         let severity = severity_for(error);
         let suggested_action = suggested_action_for(error);
         let recoverable = recoverable_for(error);
-        let technical_message = error.to_string();
+        let technical_message = crate::diagnostics::sanitize_error_message(error.to_string());
+        Self {
+            code: error.error_code().to_string(),
+            class: error.classification().to_string(),
+            severity,
+            recoverable,
+            user_message: user_message_for(error),
+            technical_message,
+            suggested_action,
+            source: source.into(),
+        }
+    }
+
+    /// Variant that lets callers pre-redact the technical message (e.g.
+    /// because they want to combine the error with a structured
+    /// diagnostic blob). Defaults `from_mukei_error` already redacts,
+    /// but this entry point is convenient when an embedder has its own
+    /// adapter that wants to surface only a substr of the original
+    /// error string.
+    pub fn from_mukei_error_redacted(
+        error: &MukeiError,
+        source: impl Into<String>,
+        technical_message: impl Into<String>,
+    ) -> Self {
+        let severity = severity_for(error);
+        let suggested_action = suggested_action_for(error);
+        let recoverable = recoverable_for(error);
+        let technical_message =
+            crate::diagnostics::sanitize_error_message(technical_message.into());
         Self {
             code: error.error_code().to_string(),
             class: error.classification().to_string(),
@@ -226,6 +269,10 @@ pub struct CapabilitySnapshot {
 }
 
 impl CapabilitySnapshot {
+    fn network_enabled() -> bool {
+        cfg!(feature = "network")
+    }
+
     /// Conservative uninitialized capability set.
     pub fn uninitialized() -> Self {
         Self {
@@ -256,7 +303,7 @@ impl CapabilitySnapshot {
             can_initialize: false,
             can_send_message: true,
             can_stop_generation: false,
-            can_download_model: true,
+            can_download_model: Self::network_enabled(),
             can_stop_download: false,
             can_switch_model: true,
             can_delete_model: true,
@@ -280,7 +327,7 @@ impl CapabilitySnapshot {
             can_initialize: false,
             can_send_message: false,
             can_stop_generation: true,
-            can_download_model: true,
+            can_download_model: Self::network_enabled(),
             can_stop_download: false,
             can_switch_model: false,
             can_delete_model: false,
@@ -305,8 +352,8 @@ impl CapabilitySnapshot {
             can_initialize: false,
             can_send_message: active_model_ready,
             can_stop_generation: false,
-            can_download_model: true,
-            can_stop_download: true,
+            can_download_model: Self::network_enabled(),
+            can_stop_download: Self::network_enabled(),
             can_switch_model: false,
             can_delete_model: false,
             can_clear_conversation: active_model_ready,
@@ -495,6 +542,7 @@ fn severity_for(error: &MukeiError) -> ErrorSeverity {
         | MukeiError::SecretLeaked(_)
         | MukeiError::DatabaseCorruption
         | MukeiError::MigrationOrderConflict { .. }
+        | MukeiError::AuditLogTampered { .. }
         | MukeiError::CrashLoopDetected { .. }
         | MukeiError::Invariant(_) => ErrorSeverity::Fatal,
         MukeiError::Cancelled | MukeiError::BridgeBusy | MukeiError::DownloadBusy { .. } => {
@@ -518,6 +566,7 @@ fn recoverable_for(error: &MukeiError) -> bool {
             | MukeiError::SecretLeaked(_)
             | MukeiError::DatabaseCorruption
             | MukeiError::MigrationOrderConflict { .. }
+            | MukeiError::AuditLogTampered { .. }
             | MukeiError::CrashLoopDetected { .. }
             | MukeiError::Invariant(_)
     )
@@ -537,17 +586,27 @@ fn suggested_action_for(error: &MukeiError) -> SuggestedUiAction {
         MukeiError::ModelLoadFailed(_)
         | MukeiError::ModelCorrupted
         | MukeiError::DownloadHashMismatch
+        | MukeiError::DownloadSizeMissing
+        | MukeiError::DownloadTooLarge { .. }
         | MukeiError::MemoryPreflightRejected(_) => SuggestedUiAction::OpenModelManager,
         MukeiError::NetworkError(_)
+        | MukeiError::NetworkTimeout { .. }
+        | MukeiError::NetworkUnavailable { .. }
+        | MukeiError::NetworkTls { .. }
+        | MukeiError::NetworkInvalidResponse { .. }
+        | MukeiError::NetworkRateLimited { .. }
+        | MukeiError::NetworkServerError { .. }
         | MukeiError::HttpClientFailed(_)
         | MukeiError::Io(_)
         | MukeiError::ToolTimeout(_)
         | MukeiError::WebSearchFailed(_) => SuggestedUiAction::Retry,
+        MukeiError::RemoteFeatureDisabled { .. } => SuggestedUiAction::OpenSettings,
         MukeiError::BridgeBusy => SuggestedUiAction::StopGeneration,
         MukeiError::DownloadBusy { .. } | MukeiError::Cancelled => SuggestedUiAction::ClearDownload,
         MukeiError::FFIPanic
         | MukeiError::DatabaseCorruption
         | MukeiError::MigrationOrderConflict { .. }
+        | MukeiError::AuditLogTampered { .. }
         | MukeiError::CrashLoopDetected { .. } => SuggestedUiAction::RestartApp,
         MukeiError::SecretLeaked(_) | MukeiError::PromptLeakage | MukeiError::Invariant(_) => {
             SuggestedUiAction::ReportIssue
@@ -564,7 +623,12 @@ fn user_message_for(error: &MukeiError) -> String {
         MukeiError::DatabaseInitFailed(_)
         | MukeiError::DatabaseCorruption
         | MukeiError::MigrationFailed(_, _)
-        | MukeiError::MigrationOrderConflict { .. } => {
+        | MukeiError::MigrationOrderConflict { .. }
+        | MukeiError::AuditLogTampered { .. }
+        | MukeiError::DatabaseEncryptionUnavailable
+        | MukeiError::DatabaseEncryptionMigrationRequired
+        | MukeiError::DatabaseEncryptionInvalidKey
+        | MukeiError::DatabaseEncryptionCorrupted => {
             "Local storage could not be opened safely.".to_string()
         }
         MukeiError::SafRequired => "Storage permission is required for this file.".to_string(),
@@ -576,8 +640,19 @@ fn user_message_for(error: &MukeiError) -> String {
         MukeiError::DownloadHashMismatch => {
             "The downloaded model did not pass verification.".to_string()
         }
-        MukeiError::NetworkError(_) | MukeiError::HttpClientFailed(_) => {
-            "Network request failed.".to_string()
+        MukeiError::DownloadSizeMissing | MukeiError::DownloadTooLarge { .. } => {
+            "The model download could not be accepted safely.".to_string()
+        }
+        MukeiError::NetworkError(_)
+        | MukeiError::NetworkTimeout { .. }
+        | MukeiError::NetworkUnavailable { .. }
+        | MukeiError::NetworkTls { .. }
+        | MukeiError::NetworkInvalidResponse { .. }
+        | MukeiError::NetworkRateLimited { .. }
+        | MukeiError::NetworkServerError { .. }
+        | MukeiError::HttpClientFailed(_) => "Network request failed.".to_string(),
+        MukeiError::RemoteFeatureDisabled { .. } => {
+            "Remote features are disabled by privacy settings.".to_string()
         }
         MukeiError::BridgeBusy => "A response is already running.".to_string(),
         MukeiError::DownloadBusy { .. } => "That model is already downloading.".to_string(),
@@ -661,6 +736,111 @@ mod tests {
     }
 
     #[test]
+    fn ui_error_technical_message_redacts_secrets_and_paths() {
+        // Simulate an upstream crate whose Display impl embeds a raw
+        // path AND a leaked bearer token. Without sanitization the
+        // exact strings would pass verbatim into the QML diagnostics
+        // panel — exactly the case the v0.8 review flagged.
+        let err = MukeiError::Internal(String::from(
+            "upstream: Authorization: Bearer abc123 path=/sdcard/Documents/private.txt",
+        ));
+        let ui = UiError::from_mukei_error(&err, "boot");
+        assert!(
+            !ui.technical_message.contains("Bearer abc123"),
+            "technical_message must redact leaked bearer token: {}",
+            ui.technical_message
+        );
+        assert!(
+            !ui.technical_message
+                .contains("/sdcard/Documents/private.txt"),
+            "technical_message must redact leaked absolute path: {}",
+            ui.technical_message
+        );
+        assert!(
+            ui.technical_message.contains("[redacted-"),
+            "technical_message should clearly mark redactions: {}",
+            ui.technical_message
+        );
+    }
+
+    #[test]
+    fn ui_error_pre_redacted_entry_point_still_sanitises() {
+        let err = MukeiError::NetworkError(String::new());
+        let ui =
+            UiError::from_mukei_error_redacted(&err, "boot", "context=/tmp/foo api_key=leaked");
+        assert!(!ui.technical_message.contains("leaked"));
+        assert!(
+            ui.technical_message.contains("[redacted-"),
+            "sanitizer output should mark redactions: {}",
+            ui.technical_message
+        );
+    }
+
+    #[test]
+    fn unsafe_download_size_errors_route_to_model_manager() {
+        for err in [
+            MukeiError::DownloadSizeMissing,
+            MukeiError::DownloadTooLarge {
+                max_bytes: 16,
+                actual_bytes: 17,
+            },
+        ] {
+            let ui = UiError::from_mukei_error(&err, "download_model");
+            let expected_class = match err {
+                MukeiError::DownloadTooLarge { .. } => "resource",
+                _ => "network",
+            };
+            assert_eq!(ui.class, expected_class);
+            assert_eq!(ui.severity, ErrorSeverity::Error);
+            assert!(ui.recoverable);
+            assert_eq!(ui.suggested_action, SuggestedUiAction::OpenModelManager);
+            assert_eq!(
+                ui.user_message,
+                "The model download could not be accepted safely."
+            );
+        }
+    }
+
+    #[test]
+    fn typed_network_errors_are_retryable_for_ui() {
+        for err in [
+            MukeiError::NetworkTimeout {
+                operation: "download".into(),
+            },
+            MukeiError::NetworkRateLimited {
+                operation: "download".into(),
+            },
+            MukeiError::NetworkServerError {
+                status: 503,
+                operation: "download".into(),
+            },
+        ] {
+            let ui = UiError::from_mukei_error(&err, "download_model");
+            assert_eq!(ui.class, "network");
+            assert!(ui.recoverable);
+            assert_eq!(ui.suggested_action, SuggestedUiAction::Retry);
+            assert_eq!(ui.user_message, "Network request failed.");
+        }
+    }
+
+    #[test]
+    fn remote_disabled_error_routes_to_settings() {
+        let err = MukeiError::RemoteFeatureDisabled {
+            feature: "web_search",
+            policy: "local_only".into(),
+        };
+        let ui = UiError::from_mukei_error(&err, "web_search");
+        assert_eq!(ui.code, "ERR_REMOTE_DISABLED");
+        assert_eq!(ui.class, "permission");
+        assert!(ui.recoverable);
+        assert_eq!(ui.suggested_action, SuggestedUiAction::OpenSettings);
+        assert_eq!(
+            ui.user_message,
+            "Remote features are disabled by privacy settings."
+        );
+    }
+
+    #[test]
     fn capability_snapshots_cover_core_runtime_modes() {
         let uninitialized = CapabilitySnapshot::uninitialized();
         assert!(uninitialized.can_initialize);
@@ -668,6 +848,10 @@ mod tests {
 
         let ready = CapabilitySnapshot::ready();
         assert!(ready.can_send_message);
+        assert_eq!(
+            ready.can_download_model,
+            CapabilitySnapshot::network_enabled()
+        );
         assert!(!ready.active_model_ready);
         assert!(!ready.is_busy);
 
@@ -678,7 +862,10 @@ mod tests {
         assert!(!inferencing.active_model_ready);
 
         let downloading = CapabilitySnapshot::downloading(false);
-        assert!(downloading.can_stop_download);
+        assert_eq!(
+            downloading.can_stop_download,
+            CapabilitySnapshot::network_enabled()
+        );
         assert!(downloading.is_downloading);
         assert!(!downloading.can_send_message);
     }
@@ -739,5 +926,17 @@ mod tests {
         assert_eq!(value["category"], "error");
         assert_eq!(value["error"]["code"], "ERR_NETWORK");
         assert_eq!(value["error"]["source"], "download_model");
+    }
+
+    #[test]
+    fn audit_tamper_error_is_fatal_and_stable() {
+        let ui =
+            UiError::from_mukei_error(&MukeiError::AuditLogTampered { row_id: 7 }, "initialize");
+        assert_eq!(ui.code, "ERR_AUDIT_TAMPERED");
+        assert_eq!(ui.class, "storage");
+        assert_eq!(ui.severity, ErrorSeverity::Fatal);
+        assert!(!ui.recoverable);
+        assert_eq!(ui.suggested_action, SuggestedUiAction::RestartApp);
+        assert_eq!(ui.user_message, "Local storage could not be opened safely.");
     }
 }

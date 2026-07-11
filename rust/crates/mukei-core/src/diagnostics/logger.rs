@@ -57,7 +57,7 @@ pub fn log_error(err: &MukeiError) {
         target = "mukei::error",
         code = err.error_code(),
         class = %err.classification(),
-        message = %err,
+        message = %crate::diagnostics::sanitize_error_message(err.to_string()),
     );
 }
 

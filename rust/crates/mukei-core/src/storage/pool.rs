@@ -19,6 +19,34 @@ use std::time::Duration;
 #[cfg(feature = "rusqlite")]
 use crate::error::{MukeiError, Result};
 
+#[cfg(all(feature = "rusqlite", any(test, feature = "sqlcipher")))]
+const SQLITE_PLAIN_HEADER: &[u8; 16] = b"SQLite format 3\0";
+
+#[cfg(feature = "rusqlite")]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum DatabaseEncryptionStatus {
+    Encrypted,
+    Unavailable,
+    InvalidKey,
+    Corrupted,
+    MigrationRequired,
+}
+
+#[cfg(feature = "rusqlite")]
+pub struct DatabaseOpenResult {
+    pub pool: DatabasePool,
+    pub encryption_status: DatabaseEncryptionStatus,
+}
+
+#[cfg(all(feature = "rusqlite", any(test, feature = "sqlcipher")))]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum DatabaseHeaderState {
+    Missing,
+    Empty,
+    PlainSqlite,
+    NotPlainSqlite,
+}
+
 /// Pool-specific error mapped into [`MukeiError`].
 #[cfg(feature = "rusqlite")]
 #[derive(thiserror::Error, Debug)]
@@ -100,32 +128,55 @@ impl DatabasePool {
     ///   crate is responsible for that step.
     /// - The key bytes are bound via `PRAGMA key = x'<hex>'` so they
     ///   never appear in a query plan / log line.
-    /// - The buffer is **zeroised** immediately after `PRAGMA key`
-    ///   succeeds, so a heap-inspecting attacker (or panic-handler core
-    ///   dump) cannot recover the key.
+    /// - Every pooled connection receives the key inside `with_init`.
+    ///   SQLCipher requires this per connection; keying only the first
+    ///   r2d2 connection leaves later pool members unable to read the DB.
+    /// - The pool holds the key in a zeroizing wrapper for its lifetime
+    ///   and zeroizes per-connection hex renderings immediately after use.
     /// - Only gated behind `feature = "sqlcipher"` because plain
     ///   `rusqlite` builds do not understand `PRAGMA key`. On non-cipher
     ///   builds the bridge should call [`Self::open`] instead.
     #[cfg(feature = "sqlcipher")]
     pub fn open_with_cipher_key(path: &Path, unwrapped_key: Vec<u8>) -> Result<Self> {
-        use zeroize::Zeroize;
+        Self::open_with_cipher_key_result(path, unwrapped_key).map(|result| result.pool)
+    }
 
-        // Move the key into a slot shared with the `with_init` closure;
-        // the first connection consumes + zeroises it. Subsequent
-        // pooled connections are derived from the same database file
-        // and SQLCipher unwraps internally without the key again.
-        let key_slot: std::sync::Arc<parking_lot::Mutex<Option<Vec<u8>>>> =
-            std::sync::Arc::new(parking_lot::Mutex::new(Some(unwrapped_key)));
+    /// Status-returning SQLCipher open path. Production boot should use
+    /// this when it needs to expose the encryption state to the bridge.
+    #[cfg(feature = "sqlcipher")]
+    pub fn open_with_cipher_key_result(
+        path: &Path,
+        unwrapped_key: Vec<u8>,
+    ) -> Result<DatabaseOpenResult> {
+        use zeroize::Zeroizing;
 
-        let key_slot_for_init = key_slot.clone();
-        let manager = r2d2_sqlite::SqliteConnectionManager::file(path).with_init(move |c| {
-            if let Some(mut key) = key_slot_for_init.lock().take() {
-                let hex_key: String = key.iter().map(|b| format!("{b:02x}")).collect();
-                c.pragma_update(None, "key", format!("x'{hex_key}'"))?;
-                // Zeroise the in-memory copy BEFORE drop.
-                key.zeroize();
-                drop(hex_key);
+        if unwrapped_key.is_empty() {
+            return Err(MukeiError::DatabaseEncryptionInvalidKey);
+        }
+
+        match inspect_database_header(path)? {
+            DatabaseHeaderState::PlainSqlite => {
+                return Err(MukeiError::DatabaseEncryptionMigrationRequired);
             }
+            DatabaseHeaderState::Missing
+            | DatabaseHeaderState::Empty
+            | DatabaseHeaderState::NotPlainSqlite => {}
+        }
+
+        let key = std::sync::Arc::new(Zeroizing::new(unwrapped_key));
+
+        let key_for_init = key.clone();
+        let manager = r2d2_sqlite::SqliteConnectionManager::file(path).with_init(move |c| {
+            ensure_sqlcipher_available(c)?;
+            let hex_key = Zeroizing::new(
+                key_for_init
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>(),
+            );
+            let pragma_value = Zeroizing::new(format!("x'{}'", &*hex_key));
+            c.pragma_update(None, "key", &*pragma_value)?;
+            verify_keyed_database(c)?;
             c.pragma_update(None, "journal_mode", "WAL")?;
             c.pragma_update(None, "synchronous", "NORMAL")?;
             c.pragma_update(None, "foreign_keys", "ON")?;
@@ -135,8 +186,11 @@ impl DatabasePool {
         let pool = r2d2::Pool::builder()
             .max_size(8)
             .build(manager)
-            .map_err(|e| MukeiError::DatabaseInitFailed(format!("pool build: {e}")))?;
-        Ok(Self { inner: pool })
+            .map_err(map_sqlcipher_pool_error)?;
+        Ok(DatabaseOpenResult {
+            pool: Self { inner: pool },
+            encryption_status: DatabaseEncryptionStatus::Encrypted,
+        })
     }
 
     /// Acquire one connection synchronously. Only callable from
@@ -151,6 +205,70 @@ impl DatabasePool {
     /// Direct access to the r2d2 pool (escape hatch).
     pub fn raw(&self) -> &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager> {
         &self.inner
+    }
+}
+
+#[cfg(all(feature = "rusqlite", any(test, feature = "sqlcipher")))]
+fn inspect_database_header(path: &Path) -> Result<DatabaseHeaderState> {
+    use std::io::Read;
+
+    if !path.exists() {
+        return Ok(DatabaseHeaderState::Missing);
+    }
+    let metadata = std::fs::metadata(path).map_err(|e| MukeiError::Io(e.to_string()))?;
+    if metadata.len() == 0 {
+        return Ok(DatabaseHeaderState::Empty);
+    }
+
+    let mut file = std::fs::File::open(path).map_err(|e| MukeiError::Io(e.to_string()))?;
+    let mut header = [0_u8; 16];
+    let n = file
+        .read(&mut header)
+        .map_err(|e| MukeiError::Io(e.to_string()))?;
+    if n < SQLITE_PLAIN_HEADER.len() {
+        return Ok(DatabaseHeaderState::NotPlainSqlite);
+    }
+    if &header == SQLITE_PLAIN_HEADER {
+        Ok(DatabaseHeaderState::PlainSqlite)
+    } else {
+        Ok(DatabaseHeaderState::NotPlainSqlite)
+    }
+}
+
+#[cfg(feature = "sqlcipher")]
+fn ensure_sqlcipher_available(c: &mut Conn) -> std::result::Result<(), rusqlite::Error> {
+    let version = c.query_row("PRAGMA cipher_version", [], |row| row.get::<_, String>(0));
+    match version {
+        Ok(value) if !value.trim().is_empty() => Ok(()),
+        Ok(_) | Err(rusqlite::Error::QueryReturnedNoRows) => Err(
+            rusqlite::Error::InvalidParameterName("sqlcipher unavailable".to_string()),
+        ),
+        Err(err) => Err(err),
+    }
+}
+
+#[cfg(feature = "sqlcipher")]
+fn verify_keyed_database(c: &mut Conn) -> std::result::Result<(), rusqlite::Error> {
+    c.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(()))
+}
+
+#[cfg(feature = "sqlcipher")]
+fn map_sqlcipher_pool_error(error: r2d2::Error) -> MukeiError {
+    let message = error.to_string().to_ascii_lowercase();
+    if message.contains("sqlcipher unavailable") || message.contains("no such pragma") {
+        MukeiError::DatabaseEncryptionUnavailable
+    } else if message.contains("file is not a database")
+        || message.contains("not a database")
+        || message.contains("file is encrypted")
+    {
+        MukeiError::DatabaseEncryptionInvalidKey
+    } else if message.contains("database disk image is malformed")
+        || message.contains("malformed")
+        || message.contains("corrupt")
+    {
+        MukeiError::DatabaseEncryptionCorrupted
+    } else {
+        MukeiError::DatabaseInitFailed(format!("pool build: {error}"))
     }
 }
 
@@ -230,5 +348,77 @@ mod tests {
             })
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn header_detection_distinguishes_plain_sqlite_from_ciphertext() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing.db");
+        assert_eq!(
+            inspect_database_header(&missing).unwrap(),
+            DatabaseHeaderState::Missing
+        );
+
+        let empty = dir.path().join("empty.db");
+        std::fs::write(&empty, []).unwrap();
+        assert_eq!(
+            inspect_database_header(&empty).unwrap(),
+            DatabaseHeaderState::Empty
+        );
+
+        let plain = dir.path().join("plain.db");
+        std::fs::write(&plain, SQLITE_PLAIN_HEADER).unwrap();
+        assert_eq!(
+            inspect_database_header(&plain).unwrap(),
+            DatabaseHeaderState::PlainSqlite
+        );
+
+        let encrypted_like = dir.path().join("encrypted.db");
+        std::fs::write(&encrypted_like, [0xA5_u8; 32]).unwrap();
+        assert_eq!(
+            inspect_database_header(&encrypted_like).unwrap(),
+            DatabaseHeaderState::NotPlainSqlite
+        );
+    }
+
+    #[cfg(feature = "sqlcipher")]
+    #[test]
+    fn sqlcipher_open_refuses_plain_sqlite_header_as_migration_required() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir.path().join("plain.db");
+        std::fs::write(&plain, SQLITE_PLAIN_HEADER).unwrap();
+
+        let err = match DatabasePool::open_with_cipher_key_result(&plain, vec![7_u8; 32]) {
+            Ok(_) => panic!("plain SQLite header must not open as encrypted DB"),
+            Err(err) => err,
+        };
+        assert!(matches!(
+            err,
+            MukeiError::DatabaseEncryptionMigrationRequired
+        ));
+    }
+
+    #[cfg(feature = "sqlcipher")]
+    #[test]
+    fn sqlcipher_open_creates_non_plain_database_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("encrypted.db");
+
+        let opened = DatabasePool::open_with_cipher_key_result(&path, vec![9_u8; 32]).unwrap();
+        assert_eq!(
+            opened.encryption_status,
+            DatabaseEncryptionStatus::Encrypted
+        );
+
+        {
+            let conn = opened.pool.blocking_acquire().unwrap();
+            conn.execute_batch("CREATE TABLE encrypted_probe (id INTEGER PRIMARY KEY);")
+                .unwrap();
+        }
+
+        assert_eq!(
+            inspect_database_header(&path).unwrap(),
+            DatabaseHeaderState::NotPlainSqlite
+        );
     }
 }

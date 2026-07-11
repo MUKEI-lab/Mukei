@@ -197,7 +197,7 @@ impl LlamaEngine {
         if got.eq_ignore_ascii_case(expected) {
             Ok(())
         } else {
-            tracing::warn!(found = %got, expected = %expected, "model SHA-256 mismatch");
+            tracing::warn!("model SHA-256 mismatch");
             Err(MukeiError::ModelCorrupted)
         }
     }

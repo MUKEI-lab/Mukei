@@ -31,23 +31,96 @@ pub struct MigrationRecord {
 /// migrator owns the schema; the bridge crate opens the real
 /// connection and invokes `apply_one` on each row.
 pub struct Migrator {
-    dir: PathBuf,
+    source: MigrationSource,
 }
+
+enum MigrationSource {
+    Directory(PathBuf),
+    Embedded,
+}
+
+const EMBEDDED_MIGRATIONS: &[(u32, &str, &str)] = &[
+    (
+        1,
+        "V001__schema",
+        include_str!("../../../../migrations/V001__schema.sql"),
+    ),
+    (
+        2,
+        "V002__recovery_state",
+        include_str!("../../../../migrations/V002__recovery_state.sql"),
+    ),
+    (
+        3,
+        "V003__tooling_and_saf",
+        include_str!("../../../../migrations/V003__tooling_and_saf.sql"),
+    ),
+    (
+        4,
+        "V004__branching",
+        include_str!("../../../../migrations/V004__branching.sql"),
+    ),
+    (
+        5,
+        "V005__audit_chain_checks",
+        include_str!("../../../../migrations/V005__audit_chain_checks.sql"),
+    ),
+    (
+        6,
+        "V006__branch_message_constraints",
+        include_str!("../../../../migrations/V006__branch_message_constraints.sql"),
+    ),
+    (
+        7,
+        "V007__message_status",
+        include_str!("../../../../migrations/V007__message_status.sql"),
+    ),
+    (
+        8,
+        "V008__schema_metadata_and_rag_tombstones",
+        include_str!("../../../../migrations/V008__schema_metadata_and_rag_tombstones.sql"),
+    ),
+];
 
 impl Migrator {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into() }
+        Self {
+            source: MigrationSource::Directory(dir.into()),
+        }
+    }
+
+    /// Build a migrator from SQL bundled into the Rust binary. This is
+    /// the release/mobile boot path: Android packages do not contain the
+    /// workspace source tree, so runtime DB migrations must not depend
+    /// on `CARGO_MANIFEST_DIR` filesystem layout.
+    pub fn embedded() -> Self {
+        Self {
+            source: MigrationSource::Embedded,
+        }
     }
 
     pub fn dir(&self) -> &Path {
-        &self.dir
+        match &self.source {
+            MigrationSource::Directory(dir) => dir,
+            MigrationSource::Embedded => Path::new("<embedded>"),
+        }
     }
 
     /// Read all migration files in the directory and return them in
     /// strict ascending order of `V{n}`.
     pub fn list_available(&self) -> Result<Vec<(u32, String, String)>> {
+        if matches!(&self.source, MigrationSource::Embedded) {
+            return Ok(EMBEDDED_MIGRATIONS
+                .iter()
+                .map(|(id, name, body)| (*id, (*name).to_string(), (*body).to_string()))
+                .collect());
+        }
+
+        let MigrationSource::Directory(dir) = &self.source else {
+            unreachable!("embedded migrations returned above");
+        };
         let mut out = Vec::new();
-        let entries = std::fs::read_dir(&self.dir).map_err(|e| MukeiError::Io(e.to_string()))?;
+        let entries = std::fs::read_dir(dir).map_err(|e| MukeiError::Io(e.to_string()))?;
         let mut sorted: Vec<_> = entries
             .filter_map(|e| e.ok())
             .map(|e| e.path())
@@ -165,6 +238,8 @@ impl Migrator {
             // Order check first — surface conflict BEFORE running any DDL.
             Self::verify_order(&available_brief, &applied)
                 .map_err(|e| super::pool::DbError::Manager(e.to_string()))?;
+            Self::verify_checksums(&bundle, &applied)
+                .map_err(|e| super::pool::DbError::Manager(e.to_string()))?;
             let pending_ids: Vec<u32> = Self::pending(&available_brief, &applied)
                 .iter()
                 .map(|(id, _, _)| *id)
@@ -250,6 +325,30 @@ impl Migrator {
         }
         Ok(())
     }
+
+    /// Verify that every already-applied migration still matches the
+    /// bundled SQL body. This fails fast when a historical migration
+    /// file is edited after shipping.
+    pub fn verify_checksums(
+        bundled: &[(u32, String, String, String)],
+        applied: &[MigrationRecord],
+    ) -> Result<()> {
+        for record in applied {
+            let Some((_, _, _, bundled_checksum)) =
+                bundled.iter().find(|(id, _, _, _)| *id == record.id)
+            else {
+                continue;
+            };
+            if !record.checksum.is_empty() && record.checksum != *bundled_checksum {
+                return Err(MukeiError::MigrationChecksumMismatch {
+                    version: record.id,
+                    applied: record.checksum.clone(),
+                    bundled: bundled_checksum.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -280,6 +379,44 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].1, "V001__schema");
         assert!(list[0].2.contains("CREATE TABLE"));
+    }
+
+    #[test]
+    fn embedded_migrations_are_available_without_source_tree_scan() {
+        let list = Migrator::embedded().list_available().unwrap();
+        let ids: Vec<_> = list.iter().map(|(id, _, _)| *id).collect();
+        assert_eq!(ids, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        assert!(list.iter().any(|(_, name, body)| {
+            name == "V007__message_status" && body.contains("ALTER TABLE messages")
+        }));
+        assert!(list.iter().any(|(_, name, body)| {
+            name == "V008__schema_metadata_and_rag_tombstones"
+                && body.contains("CREATE TABLE IF NOT EXISTS schema_metadata")
+                && body.contains("CREATE TABLE IF NOT EXISTS migration_lock")
+                && body.contains("CREATE TABLE IF NOT EXISTS document_tombstone")
+        }));
+    }
+
+    #[test]
+    fn applied_migration_checksum_mismatch_is_rejected() {
+        let bundled = vec![(
+            1,
+            "V001__schema".to_string(),
+            "CREATE TABLE t (id INTEGER);".to_string(),
+            "bundled-checksum".to_string(),
+        )];
+        let applied = vec![MigrationRecord {
+            id: 1,
+            name: "V001__schema".into(),
+            applied_at: chrono::Utc::now(),
+            checksum: "old-checksum".into(),
+        }];
+
+        let err = Migrator::verify_checksums(&bundled, &applied).unwrap_err();
+        assert!(matches!(
+            err,
+            MukeiError::MigrationChecksumMismatch { version: 1, .. }
+        ));
     }
 
     #[test]
@@ -461,12 +598,11 @@ mod tests {
     async fn real_migrations_enforce_branch_message_constraints() {
         use crate::storage::pool::{DatabasePool, PooledConnectionExt};
 
-        let mig_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../migrations");
         let db_dir = tempfile::tempdir().unwrap();
         let db_path = db_dir.path().join("mukei-constraints-test.db");
         let pool = DatabasePool::open(&db_path).unwrap();
 
-        Migrator::new(mig_dir).apply_pending(&pool).await.unwrap();
+        Migrator::embedded().apply_pending(&pool).await.unwrap();
 
         pool.with_conn(|c| {
             c.execute_batch(
