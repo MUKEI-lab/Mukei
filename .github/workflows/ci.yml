@@ -78,14 +78,28 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-clippy-
       - name: cargo clippy
+        id: clippy
+        continue-on-error: true
         working-directory: rust
-        run: >-
-          cargo clippy
-          -p mukei-core
-          --no-default-features
-          --features std,tokio
-          --lib --tests
-          -- -D warnings
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo clippy \
+            -p mukei-core \
+            --no-default-features \
+            --features std,tokio \
+            --lib --tests \
+            -- -D warnings 2>&1 | tee clippy.log
+      - name: Upload clippy diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clippy-diagnostic
+          path: rust/clippy.log
+          if-no-files-found: error
+      - name: Enforce clippy result
+        if: steps.clippy.outcome == 'failure'
+        run: exit 1
 
   # -------------------------------------------------------------------
   # Job 3 — unit tests on mukei-core (default features only).
