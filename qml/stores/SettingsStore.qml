@@ -108,7 +108,7 @@ QtObject {
         preferenceUpdated(key)
     }
 
-    Connections {
+    property Connections asyncResultConnections: Connections {
         target: root.agentSource
         ignoreUnknownSignals: true
         function onAsync_result(resultJson) {
