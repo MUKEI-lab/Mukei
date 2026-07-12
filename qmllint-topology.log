@@ -1,46 +1,46 @@
-[1/103] Generating com/mukei/app/architecture/AppCoordinator.qml
-[2/103] Generating com/mukei/app/MainWindow.qml
+[1/103] Generating com/mukei/app/MainWindow.qml
+[2/103] Generating com/mukei/app/architecture/AppCoordinator.qml
 [3/103] Generating com/mukei/app/events/EventDispatcher.qml
 [4/103] Generating com/mukei/app/architecture/AppStateHub.qml
 [5/103] Generating com/mukei/app/architecture/IntentDispatcher.qml
 [6/103] Generating com/mukei/app/architecture/PresentationPolicy.qml
 [7/103] Generating com/mukei/app/architecture/SnapshotController.qml
 [8/103] Generating com/mukei/app/stores/ContractStore.qml
-[9/103] Generating com/mukei/app/stores/LifecycleStore.qml
-[10/103] Generating com/mukei/app/stores/CapabilityStore.qml
-[11/103] Generating com/mukei/app/stores/ConversationStore.qml
-[12/103] Generating com/mukei/app/stores/NavigationStore.qml
-[13/103] Generating com/mukei/app/stores/UiSessionStore.qml
-[14/103] Generating com/mukei/app/stores/ChatStore.qml
-[15/103] Generating com/mukei/app/stores/ModelStore.qml
-[16/103] Generating com/mukei/app/stores/DownloadStore.qml
-[17/103] Generating com/mukei/app/stores/StorageStore.qml
-[18/103] Generating com/mukei/app/stores/SettingsStore.qml
-[19/103] Generating com/mukei/app/stores/RecoveryStore.qml
-[20/103] Generating com/mukei/app/stores/DocumentStore.qml
-[21/103] Generating com/mukei/app/stores/ResponsiveStore.qml
-[22/103] Generating com/mukei/app/stores/OperationStore.qml
-[23/103] Generating com/mukei/app/stores/DiagnosticsStore.qml
-[24/103] Generating com/mukei/app/stores/ErrorStore.qml
-[25/103] Generating com/mukei/app/stores/AccessibilityStore.qml
+[9/103] Generating com/mukei/app/stores/CapabilityStore.qml
+[10/103] Generating com/mukei/app/stores/NavigationStore.qml
+[11/103] Generating com/mukei/app/stores/LifecycleStore.qml
+[12/103] Generating com/mukei/app/stores/UiSessionStore.qml
+[13/103] Generating com/mukei/app/stores/ChatStore.qml
+[14/103] Generating com/mukei/app/stores/ConversationStore.qml
+[15/103] Generating com/mukei/app/stores/RecoveryStore.qml
+[16/103] Generating com/mukei/app/stores/ModelStore.qml
+[17/103] Generating com/mukei/app/stores/DownloadStore.qml
+[18/103] Generating com/mukei/app/stores/DocumentStore.qml
+[19/103] Generating com/mukei/app/stores/StorageStore.qml
+[20/103] Generating com/mukei/app/stores/SettingsStore.qml
+[21/103] Generating com/mukei/app/stores/DiagnosticsStore.qml
+[22/103] Generating com/mukei/app/stores/AccessibilityStore.qml
+[23/103] Generating com/mukei/app/stores/ResponsiveStore.qml
+[24/103] Generating com/mukei/app/stores/OperationStore.qml
+[25/103] Generating com/mukei/app/stores/ErrorStore.qml
 [26/103] Generating com/mukei/app/shell/AppShell.qml
-[27/103] Generating com/mukei/app/shell/AdaptiveNavigation.qml
-[28/103] Generating com/mukei/app/shell/RouterHost.qml
-[29/103] Generating com/mukei/app/shell/BannerHost.qml
-[30/103] Generating com/mukei/app/shell/OperationOverlayHost.qml
-[31/103] Generating com/mukei/app/shell/SheetHost.qml
-[32/103] Generating com/mukei/app/theme/Type.qml
-[33/103] Generating com/mukei/app/theme/Spacing.qml
-[34/103] Generating com/mukei/app/theme/Motion.qml
-[35/103] Generating com/mukei/app/shell/SnackbarHost.qml
-[36/103] Generating com/mukei/app/shell/DialogHost.qml
-[37/103] Generating com/mukei/app/theme/Theme.qml
+[27/103] Generating com/mukei/app/shell/RouterHost.qml
+[28/103] Generating com/mukei/app/shell/BannerHost.qml
+[29/103] Generating com/mukei/app/shell/AdaptiveNavigation.qml
+[30/103] Generating com/mukei/app/shell/SnackbarHost.qml
+[31/103] Generating com/mukei/app/shell/OperationOverlayHost.qml
+[32/103] Generating com/mukei/app/shell/SheetHost.qml
+[33/103] Generating com/mukei/app/shell/DialogHost.qml
+[34/103] Generating com/mukei/app/theme/Theme.qml
+[35/103] Generating com/mukei/app/theme/Type.qml
+[36/103] Generating com/mukei/app/theme/Spacing.qml
+[37/103] Generating com/mukei/app/theme/Motion.qml
 [38/103] Generating com/mukei/app/components/AccessibilityAnnouncer.qml
 [39/103] Generating com/mukei/app/components/AIMessageBubble.qml
 [40/103] Generating com/mukei/app/components/BranchSwitcherSheet.qml
 [41/103] Generating com/mukei/app/components/ChatComposer.qml
-[42/103] Generating com/mukei/app/components/CodeBlockComponent.qml
-[43/103] Generating com/mukei/app/components/ChatTimelineEvent.qml
+[42/103] Generating com/mukei/app/components/ChatTimelineEvent.qml
+[43/103] Generating com/mukei/app/components/CodeBlockComponent.qml
 [44/103] Generating com/mukei/app/components/ConversationList.qml
 [45/103] Generating com/mukei/app/components/ConfirmationDialog.qml
 [46/103] Generating com/mukei/app/components/CopyButton.qml
@@ -48,52 +48,52 @@
 [48/103] Generating com/mukei/app/components/DestructiveConfirmDialog.qml
 [49/103] Generating com/mukei/app/components/FontLoader.qml
 [50/103] Generating com/mukei/app/components/FullScreenModal.qml
-[51/103] Generating com/mukei/app/components/IconButton.qml
-[52/103] Generating com/mukei/app/components/HapticFeedback.qml
-[53/103] Generating com/mukei/app/components/LeftDrawer.qml
-[54/103] Generating com/mukei/app/components/GhostButton.qml
-[55/103] Generating com/mukei/app/components/MarkdownRenderer.qml
+[51/103] Generating com/mukei/app/components/GhostButton.qml
+[52/103] Generating com/mukei/app/components/IconButton.qml
+[53/103] Generating com/mukei/app/components/HapticFeedback.qml
+[54/103] Generating com/mukei/app/components/MarkdownRenderer.qml
+[55/103] Generating com/mukei/app/components/LeftDrawer.qml
 [56/103] Generating com/mukei/app/components/MukeiIcon.qml
 [57/103] Generating com/mukei/app/components/ModalSheet.qml
-[58/103] Generating com/mukei/app/components/PrimaryButton.qml
-[59/103] Generating com/mukei/app/components/NetworkBanner.qml
-[60/103] Generating com/mukei/app/components/ProgressBar.qml
+[58/103] Generating com/mukei/app/components/NetworkBanner.qml
+[59/103] Generating com/mukei/app/components/ProgressBar.qml
+[60/103] Generating com/mukei/app/components/PrimaryButton.qml
 [61/103] Generating com/mukei/app/components/RAGChunkCard.qml
-[62/103] Generating com/mukei/app/components/PromptCard.qml
+[62/103] Generating com/mukei/app/components/SearchField.qml
 [63/103] Generating com/mukei/app/components/SecondaryButton.qml
-[64/103] Generating com/mukei/app/components/SearchField.qml
-[65/103] Generating com/mukei/app/components/SettingsTextField.qml
-[66/103] Generating com/mukei/app/components/SkeletonLoader.qml
-[67/103] Generating com/mukei/app/components/StatusPill.qml
+[64/103] Generating com/mukei/app/components/PromptCard.qml
+[65/103] Generating com/mukei/app/components/SkeletonLoader.qml
+[66/103] Generating com/mukei/app/components/StatusPill.qml
+[67/103] Generating com/mukei/app/components/SettingsTextField.qml
 [68/103] Generating com/mukei/app/components/Spinner.qml
 [69/103] Generating com/mukei/app/components/StoragePressureCard.qml
-[70/103] Generating com/mukei/app/components/StreamingCaret.qml
+[70/103] Generating com/mukei/app/components/ThinkingAccordion.qml
 [71/103] Generating com/mukei/app/components/ToastNotification.qml
-[72/103] Generating com/mukei/app/components/ThinkingAccordion.qml
+[72/103] Generating com/mukei/app/components/StreamingCaret.qml
 [73/103] Generating com/mukei/app/components/ToolResultCard.qml
 [74/103] Generating com/mukei/app/components/UserMessageBubble.qml
 [75/103] Generating com/mukei/app/screens/ChatScreen.qml
 [76/103] Generating com/mukei/app/screens/CompatibilityScreen.qml
-[77/103] Generating com/mukei/app/screens/EmptyChatScreen.qml
-[78/103] Generating com/mukei/app/screens/DiagnosticsScreen.qml
-[79/103] Generating com/mukei/app/screens/DownloadsScreen.qml
-[80/103] Generating com/mukei/app/screens/DocumentsScreen.qml
+[77/103] Generating com/mukei/app/screens/DownloadsScreen.qml
+[78/103] Generating com/mukei/app/screens/DocumentsScreen.qml
+[79/103] Generating com/mukei/app/screens/DiagnosticsScreen.qml
+[80/103] Generating com/mukei/app/screens/EmptyChatScreen.qml
 [81/103] Generating com/mukei/app/screens/ModelManagerScreen.qml
 [82/103] Generating com/mukei/app/screens/ModelPickerScreen.qml
-[83/103] Generating com/mukei/app/screens/RecoveryScreen.qml
-[84/103] Generating com/mukei/app/screens/RagRebuildPromptScreen.qml
+[83/103] Generating com/mukei/app/screens/RagRebuildPromptScreen.qml
+[84/103] Generating com/mukei/app/screens/RecoveryScreen.qml
 [85/103] Generating com/mukei/app/screens/SafeModeScreen.qml
 [86/103] Generating com/mukei/app/screens/SettingsScreen.qml
 [87/103] Generating com/mukei/app/screens/StartupScreen.qml
 [88/103] Generating com/mukei/app/screens/ToolResultExpandedScreen.qml
 [89/103] Generating com/mukei/app/screens/VerificationScreen.qml
 [90/103] Generating com/mukei/app/screens/WelcomeScreen.qml
-[91/103] Generating com/mukei/app/events/qmldir
-[92/103] Generating com/mukei/app/architecture/qmldir
-[93/103] Generating com/mukei/app/stores/qmldir
+[91/103] Generating com/mukei/app/stores/qmldir
+[92/103] Generating com/mukei/app/events/qmldir
+[93/103] Generating com/mukei/app/architecture/qmldir
 [94/103] Generating com/mukei/app/shell/qmldir
-[95/103] Generating com/mukei/app/components/qmldir
-[96/103] Generating com/mukei/app/theme/qmldir
+[95/103] Generating com/mukei/app/theme/qmldir
+[96/103] Generating com/mukei/app/components/qmldir
 [97/103] Generating com/mukei/app/screens/qmldir
 [98/103] Generating .rcc/qmlcache/mukei_qmlcache_loader.cpp
 [99/103] Automatic MOC for target mukei
@@ -124,18 +124,6 @@ Warning: /home/runner/work/Mukei/Mukei/qml/events/EventDispatcher.qml:9:69: Unqu
 Warning: /home/runner/work/Mukei/Mukei/qml/stores/ChatStore.qml:13:30: Unqualified access [unqualified]
                            ? mukeiTimelineModel : fallbackTimelineModel
                              ^^^^^^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/stores/DownloadStore.qml:122:5: Cannot assign to non-existent default property [missing-property]
-    Connections {
-    ^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/stores/DocumentStore.qml:177:5: Cannot assign to non-existent default property [missing-property]
-    Connections {
-    ^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/stores/StorageStore.qml:22:5: Cannot assign to non-existent default property [missing-property]
-    Timer { id: refreshTimer; interval: 350; repeat: false; onTriggered: root.hydrate() }
-    ^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/stores/SettingsStore.qml:111:5: Cannot assign to non-existent default property [missing-property]
-    Connections {
-    ^^^^^^^^^^^
 Warning: /home/runner/work/Mukei/Mukei/qml/stores/AccessibilityStore.qml:19:24: Unqualified access [unqualified]
                     && mukeiAccessibility !== null
                        ^^^^^^^^^^^^^^^^^^
@@ -430,18 +418,18 @@ Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:176:21: 'Deleg
 Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:160:21: Cannot assign to non-existent default property [missing-property]
                     DelegateChoice {
                     ^^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:159:21: Binding assigned to "role", but no property "role" exists in the current element. [missing-property]
-                    role: "type"
-                    ^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:177:25: Binding assigned to "roleValue", but no property "roleValue" exists in the current element. [missing-property]
+                        roleValue: "timeline_event"
+                        ^^^^^^^^^
 Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:161:25: Binding assigned to "roleValue", but no property "roleValue" exists in the current element. [missing-property]
                         roleValue: "user_message"
                         ^^^^^^^^^
 Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:169:25: Binding assigned to "roleValue", but no property "roleValue" exists in the current element. [missing-property]
                         roleValue: "assistant_message"
                         ^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:177:25: Binding assigned to "roleValue", but no property "roleValue" exists in the current element. [missing-property]
-                        roleValue: "timeline_event"
-                        ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:159:21: Binding assigned to "role", but no property "role" exists in the current element. [missing-property]
+                    role: "type"
+                    ^^^^
 Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:160:21: Type DelegateChoice is used but it is not resolved [unresolved-type]
                     DelegateChoice {
                     ^^^^^^^^^^^^^^
