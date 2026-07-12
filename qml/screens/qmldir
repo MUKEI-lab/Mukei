@@ -1,12 +1,1 @@
-module com.mukei.screens
-WelcomeScreen 1.0 WelcomeScreen.qml
-ModelPickerScreen 1.0 ModelPickerScreen.qml
-VerificationScreen 1.0 VerificationScreen.qml
-EmptyChatScreen 1.0 EmptyChatScreen.qml
-ChatScreen 1.0 ChatScreen.qml
-ModelManagerScreen 1.0 ModelManagerScreen.qml
-SettingsScreen 1.0 SettingsScreen.qml
-SafeModeScreen 1.0 SafeModeScreen.qml
-RagRebuildPromptScreen 1.0 RagRebuildPromptScreen.qml
-ToolResultExpandedScreen 1.0 ToolResultExpandedScreen.qml
-StartupScreen 1.0 StartupScreen.qml
+prefer :/com/mukei/app/
