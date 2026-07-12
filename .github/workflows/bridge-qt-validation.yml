@@ -137,27 +137,23 @@ jobs:
           assert lib.count(old_load) == 1, lib.count(old_load)
           lib = lib.replace(old_load, new_load)
 
-          old_complete = '''                        let status = format!("complete:{destination_token}");
-                          let final_path_string = destination_token.clone();
-                          let _ = qt_for_ev.queue(move |mut qobject| {
-                              qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
-                                  BridgeEventKind::DownloadCompleted {
-                                      final_path: final_path_string.clone(),
-                                      model_id: model_id.clone(),
-                                  },
-                              )));'''
-          new_complete = '''                        let status = format!("complete:{destination_token}");
-                          let final_path_string = destination_token.clone();
-                          let completed_model_id = model_id.clone();
-                          let _ = qt_for_ev.queue(move |mut qobject| {
-                              qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
-                                  BridgeEventKind::DownloadCompleted {
-                                      final_path: final_path_string.clone(),
-                                      model_id: completed_model_id,
-                                  },
-                              )));'''
-          assert lib.count(old_complete) == 1, lib.count(old_complete)
-          lib_path.write_text(lib.replace(old_complete, new_complete))
+          marker = "let final_path_string = destination_token.clone();"
+          assert lib.count(marker) == 1, lib.count(marker)
+          lib = lib.replace(
+              marker,
+              marker + "\n                        let completed_model_id = model_id.clone();",
+              1,
+          )
+
+          complete_start = lib.index("BridgeEventKind::DownloadCompleted {")
+          error_start = lib.index("mukei_core::storage::DownloadEvent::Error", complete_start)
+          complete_block = lib[complete_start:error_start]
+          old_model = "model_id: model_id.clone(),"
+          assert complete_block.count(old_model) == 1, complete_block.count(old_model)
+          complete_block = complete_block.replace(old_model, "model_id: completed_model_id,", 1)
+          lib = lib[:complete_start] + complete_block + lib[error_start:]
+
+          lib_path.write_text(lib)
       - name: Normalize formatting
         working-directory: rust
         run: cargo fmt --all
