@@ -163,9 +163,18 @@ jobs:
           echo "exit_status=$?" >> ../workspace-test-current.log
           exit 0
       - name: Commit diagnostic logs
+        shell: bash
         run: |
+          cp core-clippy-current.log /tmp/core-clippy-current.log
+          cp workspace-clippy-current.log /tmp/workspace-clippy-current.log
+          cp workspace-test-current.log /tmp/workspace-test-current.log
+          git fetch origin agent/diagnose-current-ci
+          git reset --hard origin/agent/diagnose-current-ci
+          cp /tmp/core-clippy-current.log .
+          cp /tmp/workspace-clippy-current.log .
+          cp /tmp/workspace-test-current.log .
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add core-clippy-current.log workspace-clippy-current.log workspace-test-current.log
+          git add -f core-clippy-current.log workspace-clippy-current.log workspace-test-current.log
           git commit -m "chore(ci): capture exact remaining failures"
           git push origin HEAD:agent/diagnose-current-ci
