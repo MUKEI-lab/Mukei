@@ -217,6 +217,34 @@ endif()
 
 if(MUKEI_USE_REAL_BRIDGE)
     target_compile_definitions(mukei PRIVATE MUKEI_USE_REAL_BRIDGE=1)
+
+    # CXX-Qt writes generated C++ headers below Cargo's target tree.
+    # The exact profile/target directory can differ between desktop,
+    # Android, debug, and release builds, so discover the generated
+    # bridge header and add the include root that owns `mukei_bridge/`.
+    file(GLOB_RECURSE _MUKEI_BRIDGE_HEADER_CANDIDATES
+        LIST_DIRECTORIES FALSE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/*lib.rs.h"
+    )
+    set(_MUKEI_BRIDGE_GENERATED_INCLUDE_DIR "")
+    foreach(_MUKEI_BRIDGE_HEADER IN LISTS _MUKEI_BRIDGE_HEADER_CANDIDATES)
+        if(_MUKEI_BRIDGE_HEADER MATCHES "/mukei_bridge/src/lib[.]rs[.]h$")
+            string(REGEX REPLACE "/mukei_bridge/src/lib[.]rs[.]h$" ""
+                _MUKEI_BRIDGE_GENERATED_INCLUDE_DIR "${_MUKEI_BRIDGE_HEADER}")
+            break()
+        endif()
+    endforeach()
+
+    if(NOT _MUKEI_BRIDGE_GENERATED_INCLUDE_DIR)
+        message(FATAL_ERROR
+            "MUKEI_USE_REAL_BRIDGE=ON but the generated CXX-Qt header "
+            "mukei_bridge/src/lib.rs.h was not found under rust/target. "
+            "Build mukei-bridge with Cargo before configuring QML.")
+    endif()
+
+    target_include_directories(mukei PRIVATE
+        "${_MUKEI_BRIDGE_GENERATED_INCLUDE_DIR}"
+    )
 endif()
 
 qt_add_executable(tst_EventDispatcher
