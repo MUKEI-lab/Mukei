@@ -119,7 +119,7 @@ QtObject {
             Qt.callLater(hydrate)
     }
 
-    Connections {
+    property Connections asyncResultConnections: Connections {
         target: root.agentSource
         ignoreUnknownSignals: true
         function onAsync_result(resultJson) {
