@@ -105,8 +105,8 @@ jobs:
       - name: Run CTest
         run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
 
-  qmldir-diagnostic:
-    name: capture generated qmldir metadata
+  qmllint-diagnostic:
+    name: capture residual qmllint failure
     if: github.head_ref == 'agent/diagnose-current-ci' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -122,33 +122,30 @@ jobs:
         run: echo "$QT_ROOT_DIR/bin" >> $GITHUB_PATH
       - name: Ensure CMake and Ninja
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
-      - name: Configure QML build for metadata inspection
+      - name: Configure QML build for linting
         shell: bash
         run: |
           mkdir -p rust/target/debug
           touch rust/target/debug/libmukei_bridge.so
-          cmake -S qml -B /tmp/mukei-qmldir -G Ninja \
+          cmake -S qml -B /tmp/mukei-qmllint-residual -G Ninja \
             -DMUKEI_USE_REAL_BRIDGE=ON \
             -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/debug/libmukei_bridge.so"
-      - name: Capture generated qmldir files
+      - name: Capture residual qmllint output
         shell: bash
         run: |
-          {
-            find /tmp/mukei-qmldir -type f -name qmldir -print | sort | while read -r file; do
-              echo "===== $file ====="
-              cat "$file"
-              echo
-            done
-          } > qmldir-current.txt
-      - name: Commit qmldir diagnostics
+          set +e
+          cmake --build /tmp/mukei-qmllint-residual --target all_qmllint > qmllint-residual.log 2>&1
+          echo "exit_status=$?" >> qmllint-residual.log
+          exit 0
+      - name: Commit residual qmllint diagnostics
         shell: bash
         run: |
-          cp qmldir-current.txt /tmp/qmldir-current.txt
+          cp qmllint-residual.log /tmp/qmllint-residual.log
           git fetch origin agent/diagnose-current-ci
           git reset --hard origin/agent/diagnose-current-ci
-          cp /tmp/qmldir-current.txt .
+          cp /tmp/qmllint-residual.log .
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f qmldir-current.txt
-          git commit -m "chore(ci): capture generated qmldir metadata"
+          git add -f qmllint-residual.log
+          git commit -m "chore(ci): capture residual qmllint failure"
           git push origin HEAD:agent/diagnose-current-ci
