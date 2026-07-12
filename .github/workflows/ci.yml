@@ -130,3 +130,29 @@ jobs:
         run: python3 qml/scripts/qml_contract_guard.py qml
       - name: QML security check
         run: python3 qml/scripts/qml_security_analyzer.py qml
+
+  # Temporary diagnostic job on the CI repair branch only. Removed before merge.
+  clippy-diagnostic-artifact:
+    name: clippy diagnostic artifact
+    if: github.head_ref == 'agent/diagnose-current-ci' || github.ref == 'refs/heads/agent/diagnose-current-ci'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Capture core Clippy output
+        working-directory: rust
+        shell: bash
+        run: |
+          set +e
+          cargo clippy -p mukei-core --no-default-features --features std,tokio --lib --tests -- -D warnings > ../clippy-diagnostics.txt 2>&1
+          echo "exit_status=$?" >> ../clippy-diagnostics.txt
+          exit 0
+      - name: Upload Clippy diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-clippy-diagnostics
+          path: clippy-diagnostics.txt
+          if-no-files-found: error
