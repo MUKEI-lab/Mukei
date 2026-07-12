@@ -7,9 +7,6 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 concurrency:
   group: release-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -21,51 +18,6 @@ env:
   QT_VERSION: 6.5.3
 
 jobs:
-  apply-cxxqt-export-path-fix:
-    name: apply CXX-Qt export path fix
-    if: github.event_name == 'pull_request' && github.head_ref == 'checkpoint/stabilization-2026-07-12'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-      - name: Align exact exported header path
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          old = "mukei_bridge/src/lib.rs.cxxqt.h"
-          new = "mukei-bridge/src/lib.cxxqt.h"
-
-          main = Path("qml/main.cpp")
-          text = main.read_text()
-          count = text.count(old)
-          if count not in (0, 3):
-              raise SystemExit(f"expected 0 or 3 old generated-header references in main.cpp, found {count}")
-          if count == 3:
-              main.write_text(text.replace(old, new))
-
-          cmake = Path("qml/CMakeLists.txt")
-          text = cmake.read_text()
-          count = text.count(old)
-          if count not in (0, 1):
-              raise SystemExit(f"expected 0 or 1 old generated-header reference in CMakeLists.txt, found {count}")
-          if count == 1:
-              cmake.write_text(text.replace(old, new, 1))
-          PY
-          git diff --check
-      - name: Commit exact export path fix
-        run: |
-          if git diff --quiet; then
-            echo "Exact CXX-Qt export path fix already applied."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add qml/main.cpp qml/CMakeLists.txt
-          git commit -m "fix: align QML bridge include with CXX-Qt export layout"
-          git push origin HEAD:${{ github.head_ref }}
-
   bridge-compile:
     name: bridge compile gate
     runs-on: ubuntu-latest
@@ -136,67 +88,23 @@ jobs:
             CXX_QT_EXPORT_DIR="$CXX_QT_EXPORT_DIR" \
             'CXX_QT_EXPORT_CRATE_mukei-bridge=1' \
             cargo build -p mukei-bridge --features "sqlcipher,network"
-      - name: Capture QML configure diagnostics
-        id: qml-configure
-        continue-on-error: true
+      - name: Configure QML build
         working-directory: qml
-        run: |
-          {
-            echo "=== CXX-Qt export tree ==="
-            find "$CXX_QT_EXPORT_DIR" -maxdepth 8 -print | sort
-            echo "=== CMake configure ==="
-          } > /tmp/mukei-qml-configure.log
-          cmake -S . -B "$CMAKE_BUILD_DIR" -G Ninja \
-            -DMUKEI_USE_REAL_BRIDGE=ON \
-            -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/debug/libmukei_bridge.so" \
-            -DMUKEI_CXX_QT_EXPORT_DIR="$CXX_QT_EXPORT_DIR" \
-            >> /tmp/mukei-qml-configure.log 2>&1
-      - name: Upload QML configure diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qml-configure-diagnostics
-          path: /tmp/mukei-qml-configure.log
-          if-no-files-found: error
-          retention-days: 1
-      - name: Enforce QML configure result
-        if: steps.qml-configure.outcome == 'failure'
-        run: exit 1
-      - name: Capture generated qmllint diagnostics
-        id: qmllint
-        continue-on-error: true
+        run: >-
+          cmake -S . -B "$CMAKE_BUILD_DIR" -G Ninja
+          -DMUKEI_USE_REAL_BRIDGE=ON
+          -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/debug/libmukei_bridge.so"
+          -DMUKEI_CXX_QT_EXPORT_DIR="$CXX_QT_EXPORT_DIR"
+      - name: Build generated qmllint targets
         run: |
           cmake --build "$CMAKE_BUILD_DIR" --target help > /tmp/mukei-qml-targets.txt
-          if ! grep -q 'all_qmllint' /tmp/mukei-qml-targets.txt; then
-            echo "Expected all_qmllint target was not generated." > /tmp/mukei-qmllint.log
+          if grep -q 'all_qmllint' /tmp/mukei-qml-targets.txt; then
+            cmake --build "$CMAKE_BUILD_DIR" --target all_qmllint
+          else
+            echo "Expected all_qmllint target was not generated." >&2
             exit 1
           fi
-          cmake --build "$CMAKE_BUILD_DIR" --target all_qmllint > /tmp/mukei-qmllint.log 2>&1
-      - name: Upload generated qmllint diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qmllint-diagnostics
-          path: /tmp/mukei-qmllint.log
-          if-no-files-found: error
-          retention-days: 1
-      - name: Enforce generated qmllint result
-        if: steps.qmllint.outcome == 'failure'
-        run: exit 1
-      - name: Capture QML build diagnostics
-        id: qml-build
-        continue-on-error: true
-        run: cmake --build "$CMAKE_BUILD_DIR" > /tmp/mukei-qml-build.log 2>&1
-      - name: Upload QML build diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qml-build-diagnostics
-          path: /tmp/mukei-qml-build.log
-          if-no-files-found: error
-          retention-days: 1
-      - name: Enforce QML build result
-        if: steps.qml-build.outcome == 'failure'
-        run: exit 1
+      - name: Build QML and test targets
+        run: cmake --build "$CMAKE_BUILD_DIR"
       - name: Run CTest
         run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
