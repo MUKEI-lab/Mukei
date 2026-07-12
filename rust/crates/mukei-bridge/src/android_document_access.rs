@@ -8,6 +8,13 @@
 pub enum PermissionState {
     Failed,
     Transient,
+    #[cfg_attr(
+        not(target_os = "android"),
+        expect(
+            dead_code,
+            reason = "constructed only by the Android SAF persistence result"
+        )
+    )]
     Persisted,
     NotRequired,
 }
