@@ -22,7 +22,7 @@ ApplicationWindow {
         ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
     }
 
-    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft // qmllint disable missing-property
     LayoutMirroring.childrenInherit: true
 
     signal accessibilityAnnouncementRequested(string text)
@@ -50,8 +50,8 @@ ApplicationWindow {
 
     Connections {
         target: Qt.application
-        function onStateChanged() {
-            AppCoordinator.onApplicationStateChanged(Qt.application.state)
+        function onStateChanged(state) {
+            AppCoordinator.onApplicationStateChanged(state)
         }
     }
 
