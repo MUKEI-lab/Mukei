@@ -5,7 +5,8 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use crate::diagnostics::redaction::{
-    sanitize_stable_identifier, sanitize_telemetry_field, telemetry_field_redaction,
+    sanitize_stable_identifier, sanitize_telemetry_field, sanitize_telemetry_field_key,
+    telemetry_field_redaction,
 };
 
 use super::context::{CorrelationContext, MAX_COMPONENT_NAME_LEN};
@@ -82,7 +83,6 @@ pub enum SafeAttributeValue {
     Stable(String),
 }
 
-
 impl SafeAttributeValue {
     fn estimated_size_bytes(&self) -> usize {
         match self {
@@ -106,13 +106,15 @@ impl EventAttribute {
         value: AttributeValue,
         sensitivity: FieldSensitivity,
     ) -> Result<Self, AttributeError> {
-        let key = sanitize_stable_identifier(key.as_ref(), MAX_ATTRIBUTE_KEY_LEN)
-            .ok_or(AttributeError::InvalidKey)?;
-
-        if matches!(sensitivity, FieldSensitivity::Sensitive | FieldSensitivity::Secret) {
+        if matches!(
+            sensitivity,
+            FieldSensitivity::Sensitive | FieldSensitivity::Secret
+        ) {
             return Err(AttributeError::SensitivityRejected);
         }
 
+        let key = sanitize_telemetry_field_key(key.as_ref(), MAX_ATTRIBUTE_KEY_LEN)
+            .ok_or(AttributeError::InvalidKey)?;
         let value = sanitize_attribute_value(&key, value)?;
         Ok(Self {
             key,
@@ -328,8 +330,10 @@ fn sanitize_attribute_value(
         AttributeValue::Duration(value) => Ok(SafeAttributeValue::DurationMillis(
             value.as_millis().min(u128::from(u64::MAX)) as u64,
         )),
-        AttributeValue::Stable(value) => sanitize_stable_identifier(&value, MAX_ATTRIBUTE_STRING_LEN)
-            .map(SafeAttributeValue::Stable)
-            .ok_or(AttributeError::InvalidValue),
+        AttributeValue::Stable(value) => {
+            sanitize_stable_identifier(&value, MAX_ATTRIBUTE_STRING_LEN)
+                .map(SafeAttributeValue::Stable)
+                .ok_or(AttributeError::InvalidValue)
+        }
     }
 }
