@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: release-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -18,6 +21,52 @@ env:
   QT_VERSION: 6.5.3
 
 jobs:
+  apply-cxxqt-staticlib-link-fix:
+    name: apply CXX-Qt staticlib link fix
+    if: github.event_name == 'pull_request' && github.head_ref == 'checkpoint/stabilization-2026-07-12'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Use the Rust staticlib for the Qt executable
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("qml/CMakeLists.txt")
+          text = path.read_text()
+
+          replacements = {
+              "target/aarch64-linux-android/release/libmukei_bridge.so": "target/aarch64-linux-android/release/libmukei_bridge.a",
+              "target/release/libmukei_bridge.dylib": "target/release/libmukei_bridge.a",
+              "target/release/libmukei_bridge.so": "target/release/libmukei_bridge.a",
+              "Path to the Cargo-built mukei-bridge shared library": "Path to the Cargo-built mukei-bridge static library",
+              "# smoke-runs) uses the plain `release` directory. Both the .so and .dylib\n# suffixes are probed so a macOS build picks up libmukei_bridge.dylib.": "# smoke-runs) uses the plain `release` directory. The Qt executable links\n# the Rust staticlib so CXX-Qt generated QObject implementation symbols are retained.",
+          }
+
+          for old, new in replacements.items():
+              count = text.count(old)
+              if count not in (0, 1):
+                  raise SystemExit(f"expected 0 or 1 occurrence of {old!r}, found {count}")
+              if count == 1:
+                  text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+          git diff --check
+      - name: Commit staticlib linkage fix
+        run: |
+          if git diff --quiet; then
+            echo "CXX-Qt staticlib linkage fix already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add qml/CMakeLists.txt
+          git commit -m "fix: link Qt executable against CXX-Qt staticlib"
+          git push origin HEAD:${{ github.head_ref }}
+
   bridge-compile:
     name: bridge compile gate
     runs-on: ubuntu-latest
@@ -93,7 +142,7 @@ jobs:
         run: >-
           cmake -S . -B "$CMAKE_BUILD_DIR" -G Ninja
           -DMUKEI_USE_REAL_BRIDGE=ON
-          -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/debug/libmukei_bridge.so"
+          -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/debug/libmukei_bridge.a"
           -DMUKEI_CXX_QT_EXPORT_DIR="$CXX_QT_EXPORT_DIR"
       - name: Build generated qmllint targets
         run: |
