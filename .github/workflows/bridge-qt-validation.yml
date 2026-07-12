@@ -7,9 +7,6 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 concurrency:
   group: release-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -104,48 +101,3 @@ jobs:
         run: cmake --build "$CMAKE_BUILD_DIR"
       - name: Run CTest
         run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
-
-  qmllint-diagnostic:
-    name: capture current qmllint failure
-    if: github.head_ref == 'agent/ci-green-final' && github.actor != 'github-actions[bot]'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/ci-green-final
-      - name: Install Qt 6.5
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: ${{ env.QT_VERSION }}
-          cache: true
-      - name: Export Qt toolchain paths
-        run: echo "$QT_ROOT_DIR/bin" >> $GITHUB_PATH
-      - name: Ensure CMake and Ninja
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
-      - name: Configure QML build for linting
-        shell: bash
-        run: |
-          mkdir -p rust/target/debug
-          touch rust/target/debug/libmukei_bridge.so
-          cmake -S qml -B /tmp/mukei-qmllint-current -G Ninja \
-            -DMUKEI_USE_REAL_BRIDGE=ON \
-            -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/debug/libmukei_bridge.so"
-      - name: Capture compact qmllint output
-        shell: bash
-        run: |
-          set +e
-          cmake --build /tmp/mukei-qmllint-current --target all_qmllint > qmllint-topology.log 2>&1
-          echo "exit_status=$?" >> qmllint-topology.log
-          exit 0
-      - name: Commit qmllint diagnostics
-        shell: bash
-        run: |
-          cp qmllint-topology.log /tmp/qmllint-topology.log
-          git fetch origin agent/ci-green-final
-          git reset --hard origin/agent/ci-green-final
-          cp /tmp/qmllint-topology.log .
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f qmllint-topology.log
-          git commit -m "chore(ci): capture current qmllint failure"
-          git push origin HEAD:agent/ci-green-final
