@@ -72,7 +72,6 @@ QtObject {
         }
     }
 
-
     function markClaimed(operationId, conversationId, branchId) {
         if (!available || !operationId || claimedOperationId === operationId)
             return false
@@ -88,7 +87,7 @@ QtObject {
         changed()
     }
 
-    Connections {
+    property Connections asyncResultConnections: Connections {
         target: root.agentSource
         ignoreUnknownSignals: true
         function onAsync_result(resultJson) {
