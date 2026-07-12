@@ -42,9 +42,6 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # -------------------------------------------------------------------
-  # Job 1 — formatting. Fast fail before we spin up a heavier compile.
-  # -------------------------------------------------------------------
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
@@ -58,9 +55,6 @@ jobs:
         working-directory: rust
         run: cargo fmt --all -- --check
 
-  # -------------------------------------------------------------------
-  # Job 2 — clippy on mukei-core (default features only).
-  # -------------------------------------------------------------------
   clippy:
     name: clippy (mukei-core)
     runs-on: ubuntu-latest
@@ -90,9 +84,6 @@ jobs:
           --lib --tests
           -- -D warnings
 
-  # -------------------------------------------------------------------
-  # Job 3 — unit tests on mukei-core (default features only).
-  # -------------------------------------------------------------------
   test:
     name: test (mukei-core)
     runs-on: ubuntu-latest
@@ -119,9 +110,6 @@ jobs:
           --features std,tokio
           --lib
 
-  # -------------------------------------------------------------------
-  # Job 4 — static QML architecture and security guards.
-  # -------------------------------------------------------------------
   qml-architecture:
     name: qml architecture guards
     runs-on: ubuntu-latest
@@ -136,7 +124,7 @@ jobs:
 
   # Temporary branch-scoped repair job. Removed before merge.
   apply-clippy-repair:
-    name: apply reviewed Clippy repair
+    name: apply compiler Clippy repair
     if: github.head_ref == 'agent/diagnose-current-ci'
     runs-on: ubuntu-latest
     steps:
@@ -147,8 +135,17 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
-      - name: Apply exact reviewed patch
-        run: git apply --check ci-clippy-fix.patch && git apply ci-clippy-fix.patch
+      - name: Apply compiler-suggested Clippy fixes
+        working-directory: rust
+        run: >-
+          cargo clippy --fix
+          -p mukei-core
+          --no-default-features
+          --features std,tokio
+          --lib --tests
+          --allow-dirty
+          --allow-staged
+          -- -D warnings
       - name: Normalize formatting
         working-directory: rust
         run: cargo fmt --all
