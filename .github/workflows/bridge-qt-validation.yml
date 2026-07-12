@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: release-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -18,6 +21,50 @@ env:
   QT_VERSION: 6.5.3
 
 jobs:
+  apply-cxxqt-cpp-namespace-fix:
+    name: apply CXX-Qt C++ namespace fix
+    if: github.event_name == 'pull_request' && github.head_ref == 'checkpoint/stabilization-2026-07-12'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Align generated QObject C++ names
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("qml/main.cpp")
+          text = path.read_text()
+          replacements = {
+              "ffi::MukeiAgent agent;": "MukeiAgent agent;",
+              "ffi::MukeiBridge bridge;": "MukeiBridge bridge;",
+              "ffi::SafRegistry safRegistry;": "SafRegistry safRegistry;",
+          }
+          changed = False
+          for old, new in replacements.items():
+              count = text.count(old)
+              if count not in (0, 1):
+                  raise SystemExit(f"expected 0 or 1 occurrence of {old!r}, found {count}")
+              if count == 1:
+                  text = text.replace(old, new, 1)
+                  changed = True
+          if changed:
+              path.write_text(text)
+          PY
+          git diff --check
+      - name: Commit CXX-Qt namespace fix
+        run: |
+          if git diff --quiet; then
+            echo "CXX-Qt C++ namespace fix already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add qml/main.cpp
+          git commit -m "fix: use generated CXX-Qt QObject names in C++"
+          git push origin HEAD:${{ github.head_ref }}
+
   bridge-compile:
     name: bridge compile gate
     runs-on: ubuntu-latest
