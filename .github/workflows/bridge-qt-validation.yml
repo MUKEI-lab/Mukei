@@ -44,9 +44,24 @@ jobs:
           key: ${{ runner.os }}-cargo-bridge-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-bridge-
-      - name: cargo build -p mukei-bridge
+      - name: Capture bridge compiler diagnostics
+        id: bridge-build
+        continue-on-error: true
         working-directory: rust
-        run: cargo build --quiet -p mukei-bridge --features "sqlcipher,network" --message-format=short
+        run: >-
+          cargo build --quiet -p mukei-bridge --features "sqlcipher,network"
+          --message-format=short > /tmp/mukei-bridge-build.log 2>&1
+      - name: Upload bridge compiler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-build-diagnostics
+          path: /tmp/mukei-bridge-build.log
+          if-no-files-found: error
+          retention-days: 1
+      - name: Enforce bridge build result
+        if: steps.bridge-build.outcome == 'failure'
+        run: exit 1
 
   qml-runtime:
     name: qml configure-build-test gate
