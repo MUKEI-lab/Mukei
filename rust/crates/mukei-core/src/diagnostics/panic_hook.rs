@@ -51,6 +51,7 @@ pub fn reinstall_panic_hook(sink: Option<Arc<dyn PanicSink>>) {
     std::panic::set_hook(Box::new(handle_panic));
 }
 
+#[allow(clippy::incompatible_msrv)]
 fn handle_panic(info: &std::panic::PanicHookInfo<'_>) {
     let recursive = IN_PANIC_HOOK.with(|flag| {
         if flag.get() {
@@ -112,9 +113,9 @@ fn handle_panic(info: &std::panic::PanicHookInfo<'_>) {
     }
 }
 
-fn panic_payload_text<'a>(payload: &'a (dyn std::any::Any + Send)) -> &'a str {
+fn panic_payload_text(payload: &(dyn std::any::Any + Send)) -> &str {
     if let Some(value) = payload.downcast_ref::<&'static str>() {
-        *value
+        value
     } else if let Some(value) = payload.downcast_ref::<String>() {
         value.as_str()
     } else {
@@ -124,8 +125,7 @@ fn panic_payload_text<'a>(payload: &'a (dyn std::any::Any + Send)) -> &'a str {
 
 fn safe_panic_reason(reason: &str) -> String {
     let sanitized = sanitize_telemetry_text(reason, 192).into_string();
-    sanitize_stable_identifier(&sanitized, 192)
-        .unwrap_or_else(|| "[redacted-content]".to_string())
+    sanitize_stable_identifier(&sanitized, 192).unwrap_or_else(|| "[redacted-content]".to_string())
 }
 
 #[cfg(test)]
@@ -177,7 +177,10 @@ mod tests {
 
     #[test]
     fn stable_reason_code_is_preserved() {
-        assert_eq!(safe_panic_reason("backend_unavailable"), "backend_unavailable");
+        assert_eq!(
+            safe_panic_reason("backend_unavailable"),
+            "backend_unavailable"
+        );
     }
     #[test]
     fn installation_is_idempotent() {
@@ -191,5 +194,4 @@ mod tests {
         install_panic_hook(second);
         assert!(is_installed());
     }
-
 }

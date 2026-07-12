@@ -81,7 +81,10 @@ impl RetrievalScope {
     fn validate(&self) -> RetrieverResult<()> {
         if self.tenant_id.trim().is_empty()
             || self.workspace_id.trim().is_empty()
-            || self.actor_id.as_ref().is_some_and(|value| value.trim().is_empty())
+            || self
+                .actor_id
+                .as_ref()
+                .is_some_and(|value| value.trim().is_empty())
             || self
                 .authorization_marker
                 .as_ref()
@@ -220,7 +223,6 @@ pub struct RetrievalRequest {
     #[serde(skip, default)]
     pub timeout: Option<Duration>,
 }
-
 
 const fn default_retrieval_top_k() -> usize {
     DEFAULT_RETRIEVAL_TOP_K
@@ -722,21 +724,15 @@ impl Retriever {
             .top_k
             .max(request.context_budget.max_results)
             .min(self.vector_store.count());
-        let mut matches = self.vector_store.search_scoped(
-            &query_embedding.0,
-            &request.scope,
-            candidate_limit,
-        );
+        let mut matches =
+            self.vector_store
+                .search_scoped(&query_embedding.0, &request.scope, candidate_limit);
 
         matches.retain(|(_, raw_score)| raw_score.is_finite());
         let mut normalized_matches: Vec<(u64, f32)> = matches
             .into_iter()
             .map(|(chunk_id, raw_score)| (chunk_id, normalize_cosine_score(raw_score)))
-            .filter(|(_, score)| {
-                request
-                    .min_score
-                    .map_or(true, |minimum| *score >= minimum)
-            })
+            .filter(|(_, score)| request.min_score.map_or(true, |minimum| *score >= minimum))
             .collect();
         normalized_matches.sort_by(|(left_id, left_score), (right_id, right_score)| {
             right_score
@@ -1071,7 +1067,6 @@ fn metadata_completeness(chunk: &ResolvedChunk) -> u8 {
         + u8::from(chunk.index_metadata.is_some())
 }
 
-
 fn classify_dependency_error(error: MukeiError) -> RetrieverError {
     match error {
         MukeiError::Cancelled => RetrieverError::Cancelled,
@@ -1185,18 +1180,22 @@ mod tests {
             result(3, 0.8, duplicate_text, "doc-d", scope("t", "w")),
         ];
         let (kept, diagnostics) = normalize_and_budget_results(&request, inputs);
-        assert_eq!(kept.iter().map(|item| item.chunk_id).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(
+            kept.iter().map(|item| item.chunk_id).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
         assert_eq!(diagnostics.deduplicated_count, 2);
     }
 
     #[test]
     fn sol05_budget_enforces_total_chunk_and_result_caps_deterministically() {
-        let mut budget = RetrievalBudget::default();
-        budget.max_results = 2;
-        budget.max_total_bytes = 12;
-        budget.max_chunk_bytes = 8;
-        budget.reserved_context_tokens = 777;
-        budget.per_document_cap = None;
+        let budget = RetrievalBudget {
+            max_results: 2,
+            max_total_bytes: 12,
+            max_chunk_bytes: 8,
+            reserved_context_tokens: 777,
+            per_document_cap: None,
+        };
         let request = RetrievalRequest::new_scoped("q", scope("t", "w"))
             .with_top_k(5)
             .with_context_budget(budget.clone());
@@ -1213,16 +1212,21 @@ mod tests {
         assert_eq!(kept[0].content, "abcdefgh");
         assert_eq!(kept[1].content, "1234");
         assert!(kept[0].truncated && kept[1].truncated);
-        assert_eq!(kept.iter().map(|item| item.content.len()).sum::<usize>(), 12);
+        assert_eq!(
+            kept.iter().map(|item| item.content.len()).sum::<usize>(),
+            12
+        );
         assert!(diagnostics.truncated_count >= 2);
     }
 
     #[test]
     fn sol05_source_diversity_cap_is_deterministic() {
-        let mut budget = RetrievalBudget::default();
-        budget.per_document_cap = Some(1);
-        let request = RetrievalRequest::new_scoped("q", scope("t", "w"))
-            .with_context_budget(budget);
+        let budget = RetrievalBudget {
+            per_document_cap: Some(1),
+            ..RetrievalBudget::default()
+        };
+        let request =
+            RetrievalRequest::new_scoped("q", scope("t", "w")).with_context_budget(budget);
         let (kept, diagnostics) = normalize_and_budget_results(
             &request,
             vec![
@@ -1231,7 +1235,10 @@ mod tests {
                 result(3, 0.97, "b1", "b", scope("t", "w")),
             ],
         );
-        assert_eq!(kept.iter().map(|item| item.chunk_id).collect::<Vec<_>>(), vec![1, 3]);
+        assert_eq!(
+            kept.iter().map(|item| item.chunk_id).collect::<Vec<_>>(),
+            vec![1, 3]
+        );
         assert_eq!(diagnostics.diversity_skipped_count, 1);
     }
 

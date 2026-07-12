@@ -127,9 +127,9 @@ impl TrustClassifier {
 /// Minimal `scheme://host` parser. Returns the lowercase host on
 /// success, `None` on malformed input.
 fn extract_host(raw_url: &str) -> Option<String> {
-    let after_scheme = match raw_url.find("://") {
-        Some(idx) => &raw_url[idx + 3..],
-        None => return None,
+    let after_scheme = {
+        let idx = raw_url.find("://")?;
+        &raw_url[idx + 3..]
     };
     if after_scheme.is_empty() {
         return None;

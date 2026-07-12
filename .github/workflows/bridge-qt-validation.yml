@@ -30,6 +30,10 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           cache: true
+      - name: Export Qt toolchain paths
+        run: |
+          echo "$QT_ROOT_DIR/bin" >> $GITHUB_PATH
+          echo "QMAKE=$QT_ROOT_DIR/bin/qmake" >> $GITHUB_ENV
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -59,6 +63,10 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           cache: true
+      - name: Export Qt toolchain paths
+        run: |
+          echo "$QT_ROOT_DIR/bin" >> $GITHUB_PATH
+          echo "QMAKE=$QT_ROOT_DIR/bin/qmake" >> $GITHUB_ENV
       - name: Ensure CMake and Ninja
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
       - name: Cache cargo

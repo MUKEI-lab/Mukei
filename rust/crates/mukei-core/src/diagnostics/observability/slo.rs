@@ -214,7 +214,7 @@ impl SloRegistry {
         let now = self.inner.clock.monotonic_now();
         let mut state = self.inner.state.write();
         if let Some(summary) = state.get_mut(&dimensions) {
-            summary.rotate(now.clone(), self.inner.interval);
+            summary.rotate(now, self.inner.interval);
             summary.apply(observation);
             return SloRecordStatus::Recorded;
         }
@@ -250,8 +250,8 @@ impl SloRegistry {
 
         let summary = state
             .entry(dimensions)
-            .or_insert_with(|| WindowedSloSummary::new(now.clone()));
-        summary.rotate(now.clone(), self.inner.interval);
+            .or_insert_with(|| WindowedSloSummary::new(now));
+        summary.rotate(now, self.inner.interval);
         summary.apply(SloObservation::OperationOutcome(outcome));
         if let Some(latency) = latency {
             summary.apply(SloObservation::Latency(latency));
@@ -278,10 +278,12 @@ impl SloRegistry {
                 lifetime: summary.lifetime.snapshot(),
             })
             .collect::<Vec<_>>();
-        series.sort_by(|left, right| format!("{:?}", left.dimensions).cmp(&format!("{:?}", right.dimensions)));
+        series.sort_by(|left, right| {
+            format!("{:?}", left.dimensions).cmp(&format!("{:?}", right.dimensions))
+        });
 
         SloRegistrySnapshot {
-            captured_at: now.clone(),
+            captured_at: now,
             interval: self.inner.interval,
             series,
             cardinality_overflow_count: self

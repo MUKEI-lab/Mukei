@@ -88,9 +88,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        features:
-          - tokio,rusqlite
-          - tokio,network
+        include:
+          - features: tokio,rusqlite
+            cache_key: tokio-rusqlite
+          - features: tokio,network
+            cache_key: tokio-network
     steps:
       - uses: actions/checkout@v4
       - name: Install stable toolchain
@@ -102,9 +104,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             rust/target
-          key: ${{ runner.os }}-cargo-core-features-${{ matrix.features }}-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
+          key: ${{ runner.os }}-cargo-core-features-${{ matrix.cache_key }}-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-core-features-${{ matrix.features }}-
+            ${{ runner.os }}-cargo-core-features-${{ matrix.cache_key }}-
       - name: cargo check -p mukei-core --features ${{ matrix.features }}
         working-directory: rust
         run: cargo check -p mukei-core --no-default-features --features ${{ matrix.features }}

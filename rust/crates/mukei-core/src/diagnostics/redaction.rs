@@ -78,8 +78,7 @@ pub(crate) fn sanitize_telemetry_text(value: &str, max_chars: usize) -> Sanitize
     let effective_max = max_chars.min(MAX_DIAGNOSTIC_TEXT_CHARS);
     let scan_limit = effective_max
         .saturating_mul(4)
-        .max(64)
-        .min(MAX_DIAGNOSTIC_TEXT_CHARS);
+        .clamp(64, MAX_DIAGNOSTIC_TEXT_CHARS);
     let (normalized, _) = normalize_controls_bounded(value, scan_limit);
     let trimmed = normalized.trim();
 
@@ -110,11 +109,7 @@ pub(crate) fn sanitize_telemetry_text(value: &str, max_chars: usize) -> Sanitize
 /// accidentally marks them as operational-safe. This is deliberately
 /// conservative: observability should carry categories and identifiers, not
 /// user content.
-pub(crate) fn sanitize_telemetry_field(
-    key: &str,
-    value: &str,
-    max_chars: usize,
-) -> SanitizedText {
+pub(crate) fn sanitize_telemetry_field(key: &str, value: &str, max_chars: usize) -> SanitizedText {
     if let Some(redacted) = telemetry_field_redaction(key) {
         return SanitizedText {
             value: redacted.to_string(),
@@ -252,19 +247,17 @@ pub(crate) fn telemetry_field_redaction(key: &str) -> Option<&'static str> {
 }
 
 fn matches_field_key(value: &str, exact: &[&str], suffixes: &[&str]) -> bool {
-    exact.iter().any(|candidate| value == *candidate)
-        || suffixes.iter().any(|suffix| value.ends_with(suffix))
+    exact.contains(&value) || suffixes.iter().any(|suffix| value.ends_with(suffix))
 }
 
-/// Validate a stable machine identifier such as an event, component,
-/// attribute, metric or reason-code name.
-///
-/// Only a deliberately small ASCII alphabet is accepted. This prevents
-/// arbitrary user text, paths and URLs from becoming cardinality-bearing
-/// identities. The value is rejected rather than silently normalized.
-pub(crate) fn sanitize_stable_identifier(value: &str, max_len: usize) -> Option<String> {
+fn sanitize_ascii_identifier(
+    value: &str,
+    max_len: usize,
+    reject_secret_like: bool,
+) -> Option<String> {
     let value = value.trim();
-    if value.is_empty() || value.len() > max_len || looks_like_secret(value) {
+    if value.is_empty() || value.len() > max_len || (reject_secret_like && looks_like_secret(value))
+    {
         return None;
     }
 
@@ -278,14 +271,34 @@ pub(crate) fn sanitize_stable_identifier(value: &str, max_len: usize) -> Option<
     }
 }
 
+/// Validate a stable machine identifier such as an event, component,
+/// attribute, metric or reason-code name.
+///
+/// Only a deliberately small ASCII alphabet is accepted. This prevents
+/// arbitrary user text, paths and URLs from becoming cardinality-bearing
+/// identities. The value is rejected rather than silently normalized.
+pub(crate) fn sanitize_stable_identifier(value: &str, max_len: usize) -> Option<String> {
+    sanitize_ascii_identifier(value, max_len, true)
+}
+
+/// Validate a structured telemetry field key.
+///
+/// Field keys intentionally allow secret-like names such as `api_key`
+/// because the value path is still redacted by `telemetry_field_redaction`.
+/// Rejecting those keys outright prevents the caller from recording that a
+/// sensitive field was dropped or redacted.
+pub(crate) fn sanitize_telemetry_field_key(value: &str, max_len: usize) -> Option<String> {
+    sanitize_ascii_identifier(value, max_len, false)
+}
+
 /// Returns false for values that are unsafe even as opaque correlation input.
 pub(crate) fn is_safe_opaque_input(value: &str, max_len: usize) -> bool {
     let value = value.trim();
     !value.is_empty()
         && value.len() <= max_len
-        && value.bytes().all(|b| {
-            b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b':' | b'@')
-        })
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b':' | b'@'))
         && !looks_like_secret(value)
         && !looks_like_path(value)
         && !looks_like_url(value)
@@ -294,7 +307,10 @@ pub(crate) fn is_safe_opaque_input(value: &str, max_len: usize) -> bool {
 
 fn sanitize_token(part: &str) -> (String, bool) {
     let stripped = part.trim_matches(|c: char| {
-        matches!(c, ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'')
+        matches!(
+            c,
+            ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\''
+        )
     });
 
     if looks_like_secret(stripped) {
@@ -419,7 +435,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn sanitizer_does_not_preserve_unbounded_input() {
         let raw = "x".repeat(MAX_DIAGNOSTIC_TEXT_CHARS * 8);
@@ -446,5 +461,14 @@ mod tests {
             "[redacted-path].gguf"
         );
         assert_eq!(redact_path("/sdcard/private"), REDACTED_PATH);
+    }
+
+    #[test]
+    fn telemetry_field_keys_allow_secret_like_names() {
+        assert_eq!(
+            sanitize_telemetry_field_key("api_key", 48),
+            Some("api_key".to_string())
+        );
+        assert_eq!(sanitize_stable_identifier("api_key", 48), None);
     }
 }

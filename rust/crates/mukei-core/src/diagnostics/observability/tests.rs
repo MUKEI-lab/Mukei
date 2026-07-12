@@ -28,7 +28,7 @@ impl FakeClock {
 
     fn rollback_wall(&self, duration: ChronoDuration) {
         let mut wall = self.wall.lock().unwrap();
-        *wall = wall.clone() - duration;
+        *wall -= duration;
     }
 }
 
@@ -38,7 +38,7 @@ impl ObservabilityClock for FakeClock {
     }
 
     fn wall_now(&self) -> DateTime<Utc> {
-        self.wall.lock().unwrap().clone()
+        *self.wall.lock().unwrap()
     }
 }
 
@@ -104,7 +104,6 @@ fn oversized_event_is_rejected_without_queue_growth() {
     assert_eq!(recorder.stats_snapshot().event_buffer_bytes, 0);
     assert_eq!(recorder.stats_snapshot().event_oversized_drops, 1);
 }
-
 
 #[test]
 fn critical_budget_evicts_noncritical_before_distinct_failures() {
@@ -262,7 +261,6 @@ fn sensitive_content_is_redacted_before_enqueue() {
     assert!(!format!("{snapshot:?}").contains(raw));
 }
 
-
 #[test]
 fn sensitive_field_names_are_redacted_independent_of_value_type() {
     let item = event("field_key_redaction", EventSeverity::Info)
@@ -319,7 +317,6 @@ fn sensitive_classification_is_rejected_before_enqueue() {
     assert!(recorder.snapshot().recent_events[0].attributes().is_empty());
 }
 
-
 struct CapturingSink {
     events: Mutex<Vec<String>>,
 }
@@ -356,8 +353,10 @@ fn export_envelope_never_exposes_raw_sensitive_field_content() {
     );
     assert_eq!(recorder.record_event(item), EventRecordStatus::Recorded);
     wait_until(|| !sink.events.lock().unwrap().is_empty());
-    let emitted = sink.events.lock().unwrap().join("
-");
+    let emitted = sink.events.lock().unwrap().join(
+        "
+",
+    );
     assert!(!emitted.contains(raw));
     assert!(emitted.contains("[redacted-content]"));
 }
@@ -425,7 +424,6 @@ impl DiagnosticSink for BlockingSink {
         Ok(())
     }
 }
-
 
 struct BlockingMetricsSink {
     state: Mutex<bool>,
@@ -542,7 +540,6 @@ fn privacy_epoch_invalidates_already_queued_old_policy_data() {
     assert!(recorder.stats_snapshot().sink_privacy_epoch_drops >= 1);
 }
 
-
 #[test]
 fn pending_metric_snapshots_coalesce_for_a_stalled_sink() {
     let recorder = ObservabilityRecorder::new(exported_config());
@@ -632,8 +629,12 @@ fn healthy_sink_remains_functional_when_another_sink_stalls() {
         disconnect_after_drops: 3,
         slow_callback_threshold: Duration::from_secs(60),
     };
-    recorder.add_sink_with_limits(blocked.clone(), limits).unwrap();
-    recorder.add_sink_with_limits(healthy.clone(), limits).unwrap();
+    recorder
+        .add_sink_with_limits(blocked.clone(), limits)
+        .unwrap();
+    recorder
+        .add_sink_with_limits(healthy.clone(), limits)
+        .unwrap();
 
     recorder.record_event(event("first", EventSeverity::Info));
     blocked.wait_until_started();
@@ -644,7 +645,6 @@ fn healthy_sink_remains_functional_when_another_sink_stalls() {
     assert!(healthy.events.load(Ordering::Relaxed) >= 1);
     blocked.release();
 }
-
 
 #[test]
 fn monotonic_elapsed_saturates_instead_of_becoming_negative() {
@@ -704,7 +704,10 @@ fn slo_ratios_report_insufficient_data_until_minimum_sample_rule_is_met() {
         registry.record_operation(dimensions.clone(), OutcomeClass::Success, None);
     }
     let enough = registry.snapshot();
-    assert_eq!(enough.series[0].current.sample_state(), SloSampleState::Sufficient);
+    assert_eq!(
+        enough.series[0].current.sample_state(),
+        SloSampleState::Sufficient
+    );
     assert_eq!(enough.series[0].current.success_ratio(), Some(1.0));
 }
 
@@ -717,12 +720,13 @@ fn repeated_equivalent_health_signals_are_coalesced_with_explicit_transitions() 
     registry.publish(HealthSignal::new("engine", HealthState::Healthy, "ready").unwrap());
     assert_eq!(registry.coalesced_count(), 1);
 
-    registry.publish(
-        HealthSignal::new("engine", HealthState::Degraded, "queue_pressure").unwrap(),
-    );
+    registry.publish(HealthSignal::new("engine", HealthState::Degraded, "queue_pressure").unwrap());
     let snapshot = registry.snapshot();
     assert_eq!(snapshot.signals.len(), 1);
-    assert_eq!(snapshot.signals[0].previous_state, Some(HealthState::Healthy));
+    assert_eq!(
+        snapshot.signals[0].previous_state,
+        Some(HealthState::Healthy)
+    );
     assert_eq!(snapshot.signals[0].transition_count, 1);
 }
 
@@ -733,5 +737,8 @@ fn wait_until(mut predicate: impl FnMut() -> bool) {
         }
         thread::sleep(Duration::from_millis(5));
     }
-    assert!(predicate(), "condition did not become true within bounded test wait");
+    assert!(
+        predicate(),
+        "condition did not become true within bounded test wait"
+    );
 }
