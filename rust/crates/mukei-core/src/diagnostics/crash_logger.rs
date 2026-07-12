@@ -30,7 +30,7 @@ const _: () = {
 };
 
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,12 @@ use sha2::{Digest, Sha256};
 
 #[allow(unused_imports)]
 use crate::diagnostics::logger;
+use crate::diagnostics::redaction::{sanitize_stable_identifier, sanitize_telemetry_text};
+
+pub const MAX_CRASH_LOCATION_CHARS: usize = 192;
+pub const MAX_CRASH_REASON_CHARS: usize = 192;
+pub const MAX_CRASH_RECORD_BYTES: usize = 4 * 1024;
+pub const MAX_CRASH_RECORD_FILES: usize = 64;
 
 /// Architect review GH #17: refuse paths that obviously breach
 /// Android scoped-storage policy. Called from `CrashLogger::new`.
@@ -107,8 +113,8 @@ impl CrashRecord {
     pub fn new(fp: CrashFingerprint, location: String, reason: String) -> Self {
         Self {
             fingerprint: fp,
-            location,
-            reason,
+            location: sanitize_telemetry_text(&location, MAX_CRASH_LOCATION_CHARS).into_string(),
+            reason: sanitize_crash_reason(&reason),
             ts: chrono::Utc::now(),
         }
     }
@@ -149,15 +155,41 @@ impl CrashSink {
     pub fn append(&self, rec: &CrashRecord) {
         let _g = self.append_lock.lock().unwrap_or_else(|p| p.into_inner());
         let path = self.file_for(&rec.fingerprint);
-        let body = serde_json::to_vec_pretty(rec).unwrap_or_default();
-        let _ = fs::write(&path, body);
+
+        // `CrashRecord` is a public compatibility type, so do not trust callers
+        // to have constructed it through `CrashRecord::new`. Re-sanitize into a
+        // bounded local copy before serialization to avoid duplicating an
+        // arbitrarily large caller-owned string.
+        let safe_record = CrashRecord {
+            fingerprint: rec.fingerprint.clone(),
+            location: sanitize_telemetry_text(&rec.location, MAX_CRASH_LOCATION_CHARS).into_string(),
+            reason: sanitize_crash_reason(&rec.reason),
+            ts: rec.ts,
+        };
+        let body = match serde_json::to_vec(&safe_record) {
+            Ok(body) if body.len() <= MAX_CRASH_RECORD_BYTES => body,
+            _ => return,
+        };
+        let temp = path.with_extension("json.tmp");
+        match fs::write(&temp, body) {
+            Ok(()) => {
+                if fs::rename(&temp, &path).is_err() {
+                    let _ = fs::remove_file(&temp);
+                    return;
+                }
+                self.prune_old_records();
+            }
+            Err(_) => {
+                let _ = fs::remove_file(&temp);
+            }
+        }
     }
 
     /// Recent crashes for the given fingerprint. Used by the boot path
     /// (§36.1) to decide whether the user is stuck in a crash loop.
     pub fn recent_for(&self, fp: &CrashFingerprint) -> io::Result<Vec<CrashRecord>> {
         let path = self.file_for(fp);
-        match fs::read(&path) {
+        match read_bounded(&path) {
             Ok(bytes) => {
                 let rec: CrashRecord = serde_json::from_slice(&bytes)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -179,7 +211,7 @@ impl CrashSink {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            let bytes = match fs::read(&path) {
+            let bytes = match read_bounded(&path) {
                 Ok(b) => b,
                 Err(_) => continue,
             };
@@ -193,6 +225,61 @@ impl CrashSink {
         }
         Ok(newest.map(|(_, r)| r))
     }
+
+    fn prune_old_records(&self) {
+        let Ok(entries) = fs::read_dir(&self.dir) else {
+            return;
+        };
+
+        // Keep only the newest bounded set while streaming the directory.
+        // This avoids allocating one `PathBuf` per legacy/corrupt crash file.
+        let mut retained = Vec::with_capacity(MAX_CRASH_RECORD_FILES + 1);
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let Some(modified) = entry.metadata().ok().and_then(|meta| meta.modified().ok()) else {
+                continue;
+            };
+            retained.push((modified, path));
+            if retained.len() > MAX_CRASH_RECORD_FILES {
+                let Some(oldest_index) = retained
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, (modified, _))| *modified)
+                    .map(|(index, _)| index)
+                else {
+                    continue;
+                };
+                let (_, oldest_path) = retained.swap_remove(oldest_index);
+                let _ = fs::remove_file(oldest_path);
+            }
+        }
+    }
+}
+
+fn sanitize_crash_reason(reason: &str) -> String {
+    let sanitized = sanitize_telemetry_text(reason, MAX_CRASH_REASON_CHARS).into_string();
+    if let Some(stable) = sanitize_stable_identifier(&sanitized, MAX_CRASH_REASON_CHARS) {
+        stable
+    } else {
+        "[redacted-content]".to_string()
+    }
+}
+
+fn read_bounded(path: &Path) -> io::Result<Vec<u8>> {
+    let file = fs::File::open(path)?;
+    let mut bytes = Vec::with_capacity(MAX_CRASH_RECORD_BYTES.min(1024));
+    file.take((MAX_CRASH_RECORD_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_CRASH_RECORD_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "crash record exceeds bounded diagnostics size",
+        ));
+    }
+    Ok(bytes)
 }
 
 /// Public hex helper for callers outside `diag`.
@@ -272,4 +359,68 @@ mod tests {
         let dir = tempdir().unwrap();
         let _sink = CrashSink::open(dir.path()).unwrap();
     }
+    #[test]
+    fn crash_record_redacts_arbitrary_content_and_bounds_fields() {
+        let fp = CrashFingerprint::from_panic("/home/private/project/main.rs:9", "raw");
+        let rec = CrashRecord::new(
+            fp,
+            "/home/private/project/main.rs:9".into(),
+            format!("user prompt private words {}", "x".repeat(10_000)),
+        );
+        assert!(!rec.location.contains("/home/private"));
+        assert_eq!(rec.reason, "[redacted-content]");
+        assert!(serde_json::to_vec(&rec).unwrap().len() <= MAX_CRASH_RECORD_BYTES);
+    }
+
+
+    #[test]
+    fn append_resanitizes_public_record_fields_before_serialization() {
+        let dir = tempdir().unwrap();
+        let sink = CrashSink::open(dir.path()).unwrap();
+        let fp = CrashFingerprint::from_panic("x.rs:1", "manual");
+        let rec = CrashRecord {
+            fingerprint: fp.clone(),
+            location: "/home/private/".repeat(10_000),
+            reason: "private user content ".repeat(10_000),
+            ts: chrono::Utc::now(),
+        };
+        sink.append(&rec);
+        let stored = sink.recent_for(&fp).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert!(stored[0].location.len() <= MAX_CRASH_LOCATION_CHARS * 4);
+        assert_eq!(stored[0].reason, "[redacted-content]");
+        assert!(serde_json::to_vec(&stored[0]).unwrap().len() <= MAX_CRASH_RECORD_BYTES);
+    }
+
+    #[test]
+    fn oversized_crash_file_is_rejected_on_read() {
+        let dir = tempdir().unwrap();
+        let sink = CrashSink::open(dir.path()).unwrap();
+        let fp = CrashFingerprint::from_panic("x.rs:1", "boom");
+        std::fs::write(
+            sink.file_for(&fp),
+            vec![b'x'; MAX_CRASH_RECORD_BYTES + 1],
+        )
+        .unwrap();
+        let err = sink.recent_for(&fp).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn crash_sink_prunes_retained_file_count() {
+        let dir = tempdir().unwrap();
+        let sink = CrashSink::open(dir.path()).unwrap();
+        for index in 0..(MAX_CRASH_RECORD_FILES + 8) {
+            let reason = format!("reason_{index}");
+            let fp = CrashFingerprint::from_panic("x.rs:1", &reason);
+            sink.append(&CrashRecord::new(fp, "x.rs:1".into(), reason));
+        }
+        let count = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("json"))
+            .count();
+        assert!(count <= MAX_CRASH_RECORD_FILES);
+    }
+
 }

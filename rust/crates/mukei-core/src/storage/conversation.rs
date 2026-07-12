@@ -7,7 +7,8 @@
 
 use crate::error::Result;
 use crate::storage::pool::{DatabasePool, DbError, PooledConnectionExt};
-use crate::types::{BranchId, ConversationId, MessageId, Role};
+use crate::types::{BranchId, ChatMessage, ConversationId, MessageId, Role};
+use rusqlite::OptionalExtension;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum MessageStatus {
@@ -64,6 +65,44 @@ pub struct MessageRecord {
     pub parent_message_id: Option<i64>,
     pub token_count: u32,
     pub status: MessageStatus,
+}
+
+
+#[derive(Clone, Debug, serde::Serialize, PartialEq, Eq)]
+pub struct ConversationSummary {
+    pub conversation_id: String,
+    pub title: String,
+    pub active_branch_id: String,
+    pub updated_at: String,
+    pub preview: String,
+}
+
+#[derive(Clone, Debug, serde::Serialize, PartialEq, Eq)]
+pub struct TimelineRow {
+    #[serde(rename = "rowId")]
+    pub row_id: String,
+    #[serde(rename = "type")]
+    pub row_type: String,
+    pub text: String,
+    pub phase: String,
+    pub kind: String,
+    pub status: String,
+    pub timestamp: String,
+    #[serde(rename = "toolName")]
+    pub tool_name: String,
+    #[serde(rename = "parentId")]
+    pub parent_id: String,
+    #[serde(rename = "conversationId")]
+    pub conversation_id: String,
+    #[serde(rename = "branchId")]
+    pub branch_id: String,
+}
+
+#[derive(Clone, Debug, serde::Serialize, PartialEq, Eq)]
+pub struct TimelinePage {
+    pub items: Vec<TimelineRow>,
+    pub has_older: bool,
+    pub oldest_message_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -287,6 +326,56 @@ impl ConversationRepository {
         .await
     }
 
+    /// Persist an assistant/tool message emitted inside the ReAct loop.
+    /// Parent resolution uses the external message id and is restricted to
+    /// the same durable conversation and branch, preventing cross-thread
+    /// graph corruption.
+    pub async fn append_intermediate_message(
+        pool: &DatabasePool,
+        turn: PersistedTurn,
+        message: ChatMessage,
+    ) -> Result<MessageRecord> {
+        pool.with_conn(move |c| {
+            let tx = c.transaction()?;
+            let parent_external_id = message.parent.map(|id| id.0.to_string());
+            let parent_message_id = match parent_external_id {
+                Some(parent_external_id) => Some(tx.query_row(
+                    "SELECT id FROM messages \
+                     WHERE external_id = ?1 AND conversation_id = ?2 AND branch_id = ?3 \
+                       AND deleted = 0",
+                    rusqlite::params![parent_external_id, turn.conversation_id, turn.branch_id,],
+                    |row| row.get::<_, i64>(0),
+                )?),
+                None => None,
+            };
+            let created_at = message.created_at.to_rfc3339();
+            tx.execute(
+                "INSERT INTO messages \
+                    (external_id, conversation_id, role, content, created_at, updated_at, \
+                     branch_id, parent_message_id, token_count, deleted, status) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8, 0, 'completed')",
+                rusqlite::params![
+                    message.id.0.to_string(),
+                    turn.conversation_id,
+                    role_to_sql(message.role),
+                    message.content,
+                    created_at,
+                    turn.branch_id,
+                    parent_message_id,
+                    message.token_count.map(i64::from),
+                ],
+            )?;
+            let id = tx.last_insert_rowid();
+            tx.execute(
+                "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
+                rusqlite::params![chrono::Utc::now().to_rfc3339(), turn.conversation_id],
+            )?;
+            tx.commit()?;
+            get_message_by_id(c, id)
+        })
+        .await
+    }
+
     pub async fn update_message(
         pool: &DatabasePool,
         message_id: i64,
@@ -376,27 +465,25 @@ impl ConversationRepository {
         turn: PersistedTurn,
         content: String,
     ) -> Result<()> {
-        pool.with_conn(move |c| {
-            let tx = c.transaction()?;
-            let now = chrono::Utc::now().to_rfc3339();
-            let token_count = estimate_tokens(&content);
-            tx.execute(
-                "UPDATE messages \
-                 SET content = ?1, token_count = ?2, status = 'completed', updated_at = ?3 \
-                 WHERE id = ?4",
-                rusqlite::params![content, token_count as i64, now, turn.assistant_message_id],
-            )?;
-            tx.execute(
-                "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
-                rusqlite::params![now, turn.conversation_id],
-            )?;
-            tx.execute(
-                "DELETE FROM recovery_state WHERE id = 1 AND last_message_id = ?1",
-                [turn.assistant_message_id],
-            )?;
-            tx.commit()?;
-            Ok::<_, DbError>(())
-        })
+        Self::complete_turn_with_parent(pool, turn, content, None, None).await
+    }
+
+    pub async fn complete_turn_with_parent(
+        pool: &DatabasePool,
+        turn: PersistedTurn,
+        content: String,
+        parent_external_id: Option<MessageId>,
+        token_count: Option<u32>,
+    ) -> Result<()> {
+        finalize_turn(
+            pool,
+            turn,
+            MessageStatus::Completed,
+            content,
+            parent_external_id,
+            token_count,
+            true,
+        )
         .await
     }
 
@@ -406,33 +493,31 @@ impl ConversationRepository {
         status: MessageStatus,
         content: String,
     ) -> Result<()> {
+        Self::fail_turn_with_parent(pool, turn, status, content, None).await
+    }
+
+    pub async fn fail_turn_with_parent(
+        pool: &DatabasePool,
+        turn: PersistedTurn,
+        status: MessageStatus,
+        content: String,
+        parent_external_id: Option<MessageId>,
+    ) -> Result<()> {
         let terminal = match status {
             MessageStatus::Cancelled => MessageStatus::Cancelled,
             _ => MessageStatus::Failed,
         };
-        pool.with_conn(move |c| {
-            let tx = c.transaction()?;
-            let now = chrono::Utc::now().to_rfc3339();
-            let token_count = estimate_tokens(&content);
-            tx.execute(
-                "UPDATE messages \
-                 SET content = ?1, token_count = ?2, status = ?3, updated_at = ?4 \
-                 WHERE id = ?5",
-                rusqlite::params![
-                    content,
-                    token_count as i64,
-                    terminal.as_str(),
-                    now,
-                    turn.assistant_message_id,
-                ],
-            )?;
-            tx.execute(
-                "DELETE FROM recovery_state WHERE id = 1 AND last_message_id = ?1",
-                [turn.assistant_message_id],
-            )?;
-            tx.commit()?;
-            Ok::<_, DbError>(())
-        })
+        // Preserve the recovery snapshot for interrupted/failed turns so a
+        // later resume or regeneration can use the exact partial prefix.
+        finalize_turn(
+            pool,
+            turn,
+            terminal,
+            content,
+            parent_external_id,
+            None,
+            false,
+        )
         .await
     }
 
@@ -457,6 +542,136 @@ impl ConversationRepository {
                 .query_map([conversation_id], map_message_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok::<_, DbError>(rows)
+        })
+        .await
+    }
+
+
+    pub async fn list_conversation_summaries(
+        pool: &DatabasePool,
+        limit: usize,
+    ) -> Result<Vec<ConversationSummary>> {
+        let limit = limit.clamp(1, 200) as i64;
+        pool.with_conn(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT c.external_id, c.title, COALESCE(b.external_id, ''), c.updated_at, \
+                        COALESCE((SELECT content FROM messages m \
+                                  WHERE m.conversation_id = c.id AND m.deleted = 0 \
+                                  ORDER BY m.id DESC LIMIT 1), '') \
+                 FROM conversations c \
+                 LEFT JOIN branches b ON b.id = c.active_branch_id \
+                 WHERE c.archived = 0 \
+                 ORDER BY c.updated_at DESC, c.id DESC LIMIT ?1",
+            )?;
+            let rows = stmt
+                .query_map([limit], |row| {
+                    Ok(ConversationSummary {
+                        conversation_id: row.get(0)?,
+                        title: row.get(1)?,
+                        active_branch_id: row.get(2)?,
+                        updated_at: row.get(3)?,
+                        preview: row.get(4)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok::<_, DbError>(rows)
+        })
+        .await
+    }
+
+    pub async fn timeline_page(
+        pool: &DatabasePool,
+        conversation_external_id: ConversationId,
+        branch_external_id: BranchId,
+        before_message_external_id: Option<MessageId>,
+        limit: usize,
+    ) -> Result<TimelinePage> {
+        let limit = limit.clamp(1, 200) as i64;
+        pool.with_conn(move |c| {
+            let before_id = match before_message_external_id {
+                Some(message_id) => c
+                    .query_row(
+                        "SELECT m.id FROM messages m \
+                         JOIN conversations c ON c.id = m.conversation_id \
+                         JOIN branches b ON b.id = m.branch_id \
+                         WHERE m.external_id = ?1 AND c.external_id = ?2 AND b.external_id = ?3",
+                        rusqlite::params![
+                            message_id.0.to_string(),
+                            conversation_external_id.0.to_string(),
+                            branch_external_id.0.to_string(),
+                        ],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .optional()?,
+                None => None,
+            };
+
+            let conversation_id: i64 = c.query_row(
+                "SELECT id FROM conversations WHERE external_id = ?1 AND archived = 0",
+                [conversation_external_id.0.to_string()],
+                |row| row.get(0),
+            )?;
+            let branch_id: i64 = c.query_row(
+                "SELECT id FROM branches WHERE external_id = ?1 AND conversation_id = ?2",
+                rusqlite::params![branch_external_id.0.to_string(), conversation_id],
+                |row| row.get(0),
+            )?;
+
+            let boundary = before_id.unwrap_or(i64::MAX);
+            let mut stmt = c.prepare(
+                "SELECT m.id, m.external_id, m.role, m.content, m.created_at, m.status, \
+                        COALESCE(m.tool_name, ''), COALESCE(parent.external_id, '') \
+                 FROM messages m \
+                 LEFT JOIN messages parent ON parent.id = m.parent_message_id \
+                 WHERE m.conversation_id = ?1 AND m.branch_id = ?2 AND m.deleted = 0 \
+                   AND m.id < ?3 \
+                 ORDER BY m.id DESC LIMIT ?4",
+            )?;
+            let mut raw = stmt
+                .query_map(rusqlite::params![conversation_id, branch_id, boundary, limit + 1], |row| {
+                    let role: String = row.get(2)?;
+                    let tool_name: String = row.get(6)?;
+                    let (row_type, kind, phase) = match role.as_str() {
+                        "user" => ("user_message", "", ""),
+                        "assistant" if !tool_name.is_empty() => ("timeline_event", "tool", "result"),
+                        "assistant" => ("assistant_message", "", ""),
+                        "tool" => ("timeline_event", "tool", "result"),
+                        "system" => ("timeline_event", "system", "result"),
+                        _ => ("timeline_event", "system", "failure"),
+                    };
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        TimelineRow {
+                            row_id: row.get(1)?,
+                            row_type: row_type.into(),
+                            text: row.get(3)?,
+                            phase: phase.into(),
+                            kind: kind.into(),
+                            status: row.get(5)?,
+                            timestamp: row.get(4)?,
+                            tool_name,
+                            parent_id: row.get(7)?,
+                            conversation_id: conversation_external_id.0.to_string(),
+                            branch_id: branch_external_id.0.to_string(),
+                        },
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            let has_older = raw.len() as i64 > limit;
+            if has_older {
+                raw.pop();
+            }
+            raw.reverse();
+            let oldest_message_id = raw
+                .first()
+                .map(|(_, row)| row.row_id.clone())
+                .unwrap_or_default();
+            Ok::<_, DbError>(TimelinePage {
+                items: raw.into_iter().map(|(_, row)| row).collect(),
+                has_older,
+                oldest_message_id,
+            })
         })
         .await
     }
@@ -495,6 +710,77 @@ impl ConversationRepository {
         })
         .await
     }
+}
+
+async fn finalize_turn(
+    pool: &DatabasePool,
+    turn: PersistedTurn,
+    status: MessageStatus,
+    content: String,
+    parent_external_id: Option<MessageId>,
+    token_count: Option<u32>,
+    clear_recovery: bool,
+) -> Result<()> {
+    pool.with_conn(move |c| {
+        let tx = c.transaction()?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let resolved_parent_id = match parent_external_id {
+            Some(parent_external_id) => Some(tx.query_row(
+                "SELECT id FROM messages \
+                 WHERE external_id = ?1 AND conversation_id = ?2 AND branch_id = ?3 \
+                   AND id <> ?4 AND deleted = 0",
+                rusqlite::params![
+                    parent_external_id.0.to_string(),
+                    turn.conversation_id,
+                    turn.branch_id,
+                    turn.assistant_message_id,
+                ],
+                |row| row.get::<_, i64>(0),
+            )?),
+            None => None,
+        };
+        let token_count = token_count.unwrap_or_else(|| estimate_tokens(&content));
+        tx.execute(
+            "UPDATE messages \
+             SET content = ?1, token_count = ?2, status = ?3, updated_at = ?4, \
+                 parent_message_id = COALESCE(?5, parent_message_id) \
+             WHERE id = ?6",
+            rusqlite::params![
+                content,
+                i64::from(token_count),
+                status.as_str(),
+                now,
+                resolved_parent_id,
+                turn.assistant_message_id,
+            ],
+        )?;
+        tx.execute(
+            "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, turn.conversation_id],
+        )?;
+        if clear_recovery {
+            tx.execute(
+                "DELETE FROM recovery_state WHERE id = 1 AND last_message_id = ?1",
+                [turn.assistant_message_id],
+            )?;
+        } else {
+            tx.execute(
+                "UPDATE recovery_state \
+                 SET generated_prefix = ?1, last_token_count = ?2, resumed_after_kill = 1, \
+                     updated_at = ?3 \
+                 WHERE id = 1 AND last_message_id = ?4",
+                rusqlite::params![
+                    content,
+                    i64::from(token_count),
+                    now,
+                    turn.assistant_message_id,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok::<_, DbError>(())
+    })
+    .await
 }
 
 fn get_conversation_by_external_id(
@@ -667,6 +953,99 @@ mod tests {
         assert_eq!(messages.len(), 4);
         assert_eq!(messages[2].parent_message_id, Some(messages[1].id));
         assert_eq!(turn_two.conversation_id, messages[0].conversation_id);
+    }
+
+
+    #[tokio::test]
+    async fn timeline_page_is_conversation_and_branch_scoped() {
+        let pool = migrated_pool().await;
+        let conversation_a = ConversationId::new();
+        let branch_a = BranchId::new();
+        let turn_a = ConversationRepository::begin_turn(
+            &pool,
+            conversation_a,
+            branch_a,
+            MessageId::new(),
+            MessageId::new(),
+            "alpha".into(),
+        )
+        .await
+        .unwrap();
+        ConversationRepository::complete_turn(&pool, turn_a, "answer alpha".into())
+            .await
+            .unwrap();
+
+        let conversation_b = ConversationId::new();
+        let branch_b = BranchId::new();
+        let turn_b = ConversationRepository::begin_turn(
+            &pool,
+            conversation_b,
+            branch_b,
+            MessageId::new(),
+            MessageId::new(),
+            "beta".into(),
+        )
+        .await
+        .unwrap();
+        ConversationRepository::complete_turn(&pool, turn_b, "answer beta".into())
+            .await
+            .unwrap();
+
+        let page = ConversationRepository::timeline_page(
+            &pool,
+            conversation_a,
+            branch_a,
+            None,
+            20,
+        )
+        .await
+        .unwrap();
+        assert_eq!(page.items.len(), 2);
+        assert!(page.items.iter().all(|row| row.conversation_id == conversation_a.0.to_string()));
+        assert!(page.items.iter().all(|row| row.branch_id == branch_a.0.to_string()));
+        assert!(page.items.iter().any(|row| row.text == "alpha"));
+        assert!(!page.items.iter().any(|row| row.text.contains("beta")));
+    }
+
+    #[tokio::test]
+    async fn timeline_page_uses_stable_message_anchor() {
+        let pool = migrated_pool().await;
+        let conversation = ConversationId::new();
+        let branch = BranchId::new();
+        for prompt in ["one", "two"] {
+            let turn = ConversationRepository::begin_turn(
+                &pool,
+                conversation,
+                branch,
+                MessageId::new(),
+                MessageId::new(),
+                prompt.into(),
+            )
+            .await
+            .unwrap();
+            ConversationRepository::complete_turn(&pool, turn, format!("answer {prompt}"))
+                .await
+                .unwrap();
+        }
+
+        let newest = ConversationRepository::timeline_page(&pool, conversation, branch, None, 2)
+            .await
+            .unwrap();
+        assert_eq!(newest.items.len(), 2);
+        assert!(newest.has_older);
+        let anchor = MessageId(uuid::Uuid::parse_str(&newest.oldest_message_id).unwrap());
+        let older = ConversationRepository::timeline_page(
+            &pool,
+            conversation,
+            branch,
+            Some(anchor),
+            2,
+        )
+        .await
+        .unwrap();
+        assert_eq!(older.items.len(), 2);
+        assert!(!older.has_older);
+        assert!(older.items.iter().all(|row| !newest.items.iter().any(|newer| newer.row_id == row.row_id)));
     }
 
     #[tokio::test]

@@ -16,7 +16,7 @@ Item {
     ColumnLayout {
         id: column
         anchors.right: parent.right
-        width: Math.min(parent ? parent.width * 0.78 : Spacing.huge * 3, bubble.implicitWidth)
+        width: Math.min(parent ? parent.width * 0.78 : Spacing.huge * 3, Math.max(Spacing.huge, message.implicitWidth + Spacing.md * 2))
         spacing: Spacing.xxs
         Rectangle {
             id: bubble

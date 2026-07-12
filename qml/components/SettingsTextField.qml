@@ -8,6 +8,8 @@ Control {
     property alias text: input.text
     property string label: ""
     property string errorText: ""
+    property alias inputMethodHints: input.inputMethodHints
+    signal editingFinished(string value)
     Accessible.role: Accessible.EditableText
     Accessible.name: label
     Accessible.description: errorText.length > 0 ? errorText : qsTr("Editable setting")
@@ -23,6 +25,8 @@ Control {
         }
         TextField {
             id: input
+            activeFocusOnTab: true
+            onEditingFinished: root.editingFinished(text)
             Layout.fillWidth: true
             color: Theme.p.inkPrimary
             placeholderTextColor: Theme.p.inkFaint

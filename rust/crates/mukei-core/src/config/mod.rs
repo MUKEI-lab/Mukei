@@ -177,6 +177,75 @@ pub struct WrappedSecretRef {
     pub created: chrono::DateTime<chrono::Utc>,
 }
 
+/// Runtime deployment mode. This is intentionally independent from Cargo's
+/// compiler profile (`dev`, `release`, `release-hardening`) and from feature
+/// flags. Production fail-closed checks key off this mode explicitly.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeEnvironmentMode {
+    Development,
+    Test,
+    Production,
+}
+
+/// Source hardening policy, independent from the compiler profile name.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HardeningMode {
+    Standard,
+    Hardened,
+}
+
+/// Build/runtime capabilities relevant to production fail-closed policy.
+///
+/// This consumes public status facts and does not own inference, vector, or
+/// observability implementations.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProductionSafetyStatus {
+    pub mock_inference_active: bool,
+    pub insecure_database_mode: bool,
+    pub mock_embedding_backend: bool,
+    pub debug_vector_backend: bool,
+    pub diagnostics_export_enabled: bool,
+}
+
+impl ProductionSafetyStatus {
+    pub fn validate_for_environment(&self, mode: RuntimeEnvironmentMode) -> Result<()> {
+        if mode != RuntimeEnvironmentMode::Production {
+            return Ok(());
+        }
+
+        let mut prohibited = Vec::new();
+        if self.mock_inference_active {
+            prohibited.push("mock_inference");
+        }
+        if self.insecure_database_mode {
+            prohibited.push("insecure_database");
+        }
+        if self.mock_embedding_backend {
+            prohibited.push("mock_embedding_backend");
+        }
+        if self.debug_vector_backend {
+            prohibited.push("debug_vector_backend");
+        }
+        if self.diagnostics_export_enabled {
+            prohibited.push("diagnostics_export");
+        }
+
+        if prohibited.is_empty() {
+            Ok(())
+        } else {
+            Err(MukeiError::ConfigInvalid {
+                field: "production_safety".into(),
+                reason: format!(
+                    "production mode rejected prohibited capability state: {}",
+                    prohibited.join(",")
+                ),
+            })
+        }
+    }
+}
+
 /// Lenient first-pass deserialiser. Used internally — the public API
 /// is [`MukeiConfig::load_and_validate`] which pokes the keys not in
 /// [`Self::KNOWN_KEYS`] through a tighter filter.
@@ -212,6 +281,77 @@ impl MukeiConfig {
             "search",
             "wrapped_secrets",
         ]
+    }
+
+    /// Build a first-run configuration rooted below an app-owned data
+    /// directory. Mobile callers should pass the parent directory of
+    /// `mukei.toml` (normally Android `Context.getFilesDir()`). Keeping
+    /// every path below one root prevents server defaults such as
+    /// `/var/mukei` from reaching a phone build.
+    pub fn default_for_data_root(data_root: &Path) -> Self {
+        Self {
+            models_dir: data_root.join("models"),
+            vectors_dir: data_root.join("vectors"),
+            database_path: data_root.join("db/mukei.db"),
+            saf_tokens_db: data_root.join("db/saf_tokens.db"),
+            crashes_dir: data_root.join("crashes"),
+            logs_dir: data_root.join("logs"),
+            max_blocking: BlockingPoolCfg {
+                max_blocking_threads_android: 6,
+                max_blocking_threads_desktop: 8,
+                tool_slots: 2,
+            },
+            gpu_layers: 32,
+            n_ctx: 4096,
+            n_threads: 4,
+            watchdog: WatchdogCfg {
+                max_iterations: 8,
+                max_token_budget: 8192,
+                max_wall_seconds: 600,
+            },
+            storage: StorageCfg {
+                sqlcipher_kdf_iter: 256_000,
+                wal_autocheckpoint_pages: 1_000,
+            },
+            saf: SafCfg {
+                persist_grants_to_db: true,
+                prompt_on_first_use: true,
+            },
+            agent: AgentCfg {
+                max_failures_per_tool: 5,
+                recovered_history_window: 12,
+                repeat_output_window: AgentCfg::default_repeat_output_window(),
+                repeat_output_backoff_secs: AgentCfg::default_repeat_output_backoff_secs(),
+                max_concurrent_tools: AgentCfg::default_max_concurrent_tools(),
+            },
+            defaults: DefaultsCfg {
+                prompt_card_auto_send: false,
+                thermal_autopause: true,
+                first_run_completed: false,
+            },
+            search: SearchCfg::default(),
+            wrapped_secrets: Vec::new(),
+        }
+    }
+
+    /// Create every app-owned directory required by this configuration.
+    /// Database file paths contribute their parent directories; the files
+    /// themselves remain created by SQLite/SQLCipher.
+    pub fn ensure_storage_directories(&self) -> io::Result<()> {
+        for dir in [
+            self.models_dir.as_path(),
+            self.vectors_dir.as_path(),
+            self.crashes_dir.as_path(),
+            self.logs_dir.as_path(),
+        ] {
+            fs::create_dir_all(dir)?;
+        }
+        for file in [self.database_path.as_path(), self.saf_tokens_db.as_path()] {
+            if let Some(parent) = file.parent() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+        Ok(())
     }
 
     /// Load + validate. Strict. The bridge crate's `boot()` calls this.
@@ -339,10 +479,12 @@ impl MukeiConfig {
 /// Helper used by tests + the bridge crate to write a default
 /// `mukei.toml` to disk on first run.
 pub fn write_default(path: &Path) -> io::Result<()> {
-    let toml_text = include_str!("../../../../migrations/000_default_config.toml");
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    let data_root = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(data_root)?;
+    let cfg = MukeiConfig::default_for_data_root(data_root);
+    cfg.ensure_storage_directories()?;
+    let toml_text = toml::to_string_pretty(&cfg)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
     fs::write(path, toml_text)
 }
 
@@ -487,6 +629,20 @@ first_run_completed    = false
         ));
     }
 
+    #[test]
+    fn generated_first_run_config_stays_below_config_parent() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("mukei.toml");
+        write_default(&config_path).unwrap();
+        let cfg = MukeiConfig::load_and_validate(&config_path).unwrap();
+
+        assert_eq!(cfg.models_dir, temp.path().join("models"));
+        assert_eq!(cfg.vectors_dir, temp.path().join("vectors"));
+        assert_eq!(cfg.database_path, temp.path().join("db/mukei.db"));
+        assert!(cfg.models_dir.is_dir());
+        assert!(cfg.database_path.parent().unwrap().is_dir());
+    }
+
     // ------------------------------------------------------------------
     // Regression: v0.8 static review flagged that the shipped default
     // config (`migrations/000_default_config.toml`) used `;` for
@@ -513,11 +669,55 @@ first_run_completed    = false
     }
 
     #[test]
+    fn sol03_compiler_profile_feature_and_runtime_environment_are_distinct_concepts() {
+        let runtime = RuntimeEnvironmentMode::Production;
+        let hardening = HardeningMode::Hardened;
+        assert_ne!(format!("{runtime:?}"), format!("{hardening:?}"));
+        assert_eq!(runtime, RuntimeEnvironmentMode::Production);
+        assert_eq!(hardening, HardeningMode::Hardened);
+    }
+
+    #[test]
+    fn sol03_prohibited_production_state_fails_closed() {
+        let status = ProductionSafetyStatus {
+            mock_inference_active: true,
+            insecure_database_mode: false,
+            mock_embedding_backend: false,
+            debug_vector_backend: false,
+            diagnostics_export_enabled: false,
+        };
+        let error = status
+            .validate_for_environment(RuntimeEnvironmentMode::Production)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            MukeiError::ConfigInvalid { field, .. } if field == "production_safety"
+        ));
+        assert!(status
+            .validate_for_environment(RuntimeEnvironmentMode::Development)
+            .is_ok());
+    }
+
+    #[test]
+    fn sol03_hardened_production_capability_set_is_accepted() {
+        let status = ProductionSafetyStatus {
+            mock_inference_active: false,
+            insecure_database_mode: false,
+            mock_embedding_backend: false,
+            debug_vector_backend: false,
+            diagnostics_export_enabled: false,
+        };
+        assert!(status
+            .validate_for_environment(RuntimeEnvironmentMode::Production)
+            .is_ok());
+    }
+
+    #[test]
     fn shipped_default_config_uses_only_hash_comments() {
         // Belt-and-braces: even if the TOML parser one day tolerates
         // `;`-prefixed lines, our shipped default must never contain
-        // one, because the reference file is copied verbatim into user
-        // installs and semicolon comments are a well-known footgun.
+        // one, because the reference file is used by documentation and
+        // release review even though runtime defaults are generated.
         for (idx, line) in SHIPPED_DEFAULT_CONFIG.lines().enumerate() {
             let trimmed = line.trim_start();
             assert!(

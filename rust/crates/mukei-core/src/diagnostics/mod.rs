@@ -1,24 +1,18 @@
 //! `mukei_core::diagnostics` — TRD §37.
 //!
-//! Two responsibilities, both absolutely-critical FMEA mitigations:
-//!
-//! 1. `panic_hook` — intercept every `unwind` at the FFI boundary so
-//!    a `unwrap()` in Rust never tears down the whole Qt process (see
-//!    REQ-ARCH-01 / §1.5 / PRD §4.2). Logs the trace locally; surfaces
-//!    only the safe error class across the CXX-Qt bridge.
-//!
-//! 2. `crash_logger` — when an unrecoverable `MukeiError::CrashLoopDetected`
-//!    fires (§36.1) the runtime writes a fingerprint to
-//!    `/sdcard/Mukei/crashes/<sha256>.json` so the next boot can refuse
-//!    to enter an infinite crash cycle.
+//! Existing crash, panic, logger and redaction entry points remain available.
+//! The `observability` module adds an owned, privacy-safe and bounded local
+//! instrumentation foundation without introducing a remote telemetry backend.
 
 pub mod crash_logger;
 pub mod logger;
+pub mod observability;
 pub mod panic_hook;
 pub mod redaction;
 
 pub use crash_logger::{CrashFingerprint, CrashRecord, CrashSink};
 pub use logger::{initialize_tracing, log_error};
+pub use observability::*;
 pub use panic_hook::{install_panic_hook, PanicSink};
 pub use redaction::{
     redact_content, redact_path, redact_secret, sanitize_error_message, sanitize_log_value,

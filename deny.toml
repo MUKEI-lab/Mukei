@@ -3,11 +3,11 @@
 # Run via `cargo deny check advisories sources licenses bans`.
 #
 # The matrix below intentionally errs on the strict side; loosen only
-# with explicit sign-off — this is a privacy-critical, zero-telemetry,
-# proprietary product and every dep is a supply-chain attack surface.
+# with explicit sign-off — this is a privacy-critical, zero-telemetry product and every
+# dependency is a supply-chain attack surface.
 #
 # Policy intent (PRD §III + user sign-off):
-#   * First-party code:           LicenseRef-Mukei-Proprietary
+#   * First-party code:           Apache-2.0
 #   * Allowed third-party FOSS:   permissive only (Apache-2.0 / MIT
 #                                 family + a few well-known permissive
 #                                 data licenses for trust roots).
@@ -49,7 +49,7 @@ unsound       = "all"
 ignore = []
 
 [licenses]
-# Mukei itself uses a private custom SPDX identifier.
+# Mukei first-party crates use Apache-2.0.
 unused-allowed-license = "allow"
 allow      = [
     "MIT",
@@ -71,8 +71,6 @@ allow      = [
     #   https://github.com/rustls/webpki-roots
     #   https://cdla.dev/permissive-2-0/
     "CDLA-Permissive-2.0",
-    # Private first-party workspace crates.
-    "LicenseRef-Mukei-Proprietary",
 ]
 confidence-threshold = 0.93
 private = { ignore = true }

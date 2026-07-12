@@ -1,0 +1,98 @@
+Mukei v1.0 QML Solution — Historical Merge Validation + Current Snapshot Notice
+Documentation refresh: 2026-07-12
+
+CURRENT SNAPSHOT NOTICE
+- Current archive: Mukei_v1.0_qml_sol_plus_hardening_13plans_merged_syntax_fixed.
+- The validation evidence below predates the full post-merge hardening set.
+- It validated migrations through V012; the current migrator now registers V013.
+- It does not certify the current Protocol V2, activation, observability, scoped-RAG, SaaS transport/domain, async-bridge, secure-bootstrap, or provenance additions.
+- No Cargo/Rust or Qt toolchain was available during this documentation refresh, so no new native pass is claimed.
+- Current lockfile still contains crossbeam-epoch 0.9.18 and cxx 1.0.194, versions flagged by the latest recorded project dependency-security run.
+- Canonical current status: docs/CURRENT_IMPLEMENTATION_STATUS.md.
+
+--- HISTORICAL VALIDATION RECORD FOLLOWS ---
+
+Mukei v1.0 QML Solution — Merge Validation
+Date: 2026-07-11
+Status: SOURCE-INTEGRATED / NATIVE RELEASE VALIDATION PENDING
+
+INPUT ARCHIVES
+- mukei_v0.6_sol.zip: ZIP integrity PASS; 1,985 entries; contained Rust target artifacts that were deliberately excluded.
+- Mukei_v0.15_qml_phase6.zip: ZIP integrity PASS; 1,742 entries.
+- Common ancestor used for classification: mukei_v0.9.zip.
+
+MERGE RESULT
+- Common files identical across v0.6 and v0.15: 1,609.
+- Files independently changed by both branches: 2.
+  * rust/crates/mukei-bridge/src/lib.rs
+  * rust/crates/mukei-core/src/storage/settings.rs
+- Three-way textual conflicts: 0.
+- QML tree differences from v0.15 after merge: 0.
+- v0.6-only Rust fixes/tests retained: PASS.
+- Build artifacts, .git metadata, merge temporaries, pycache: excluded.
+
+RUST FIXES RETAINED
+- AgentRunRequest typed request replaces the eight-argument AgentLoop::run API.
+- Bridge call site updated while preserving v0.15 conversation/branch event scoping.
+- Conversation + branch history-isolation tests retained.
+- Interrupted-turn resume/regenerate tests retained.
+- Vector-store Clippy iterator cleanup retained.
+- Desktop cfg/dead-code cleanup retained.
+- FFI raw-pointer entry points marked unsafe and documented.
+- FFI header/export static coverage: 10 exports, 10 declarations, 0 missing.
+- Four post-v0.6 redundant map_err(Into::into) conversions removed.
+- Known duplicate mock-inference chunk binding absent.
+
+QML ARCHITECTURE RETAINED
+- Persistent reactive projection architecture and scoped stores.
+- Fail-closed QML/Rust contract negotiation.
+- Lifecycle-derived navigation and capability gating.
+- Persistent UI session and per-branch drafts.
+- Native timeline adapter, pagination, snapshot hydration, and batched streaming.
+- Recovery, models, downloads, storage, documents, settings, diagnostics, operations, accessibility, and responsive projections.
+- Android document-access boundary and durable ingestion projection.
+- QML tests contain no test_stub / verify(true)-only placeholders.
+
+STATIC VALIDATION
+- QML architecture analyzer: PASS — 0 errors, 0 warnings.
+- QML/Rust contract guard: PASS — 0 errors.
+- QML security analyzer: PASS for critical findings — 0 critical/high; 5 expected medium FileDialog/file-operation heuristics.
+- Python analyzer syntax: PASS.
+- TOML parsing: PASS — 11 files.
+- XML/QRC parsing: PASS — 2 files.
+- QRC resources: PASS — 36 present, 0 missing.
+- CMake QML/C++/Java references: PASS — 97 present, 0 missing.
+- SVG icons: 27 preserved.
+- Fonts: 8 preserved.
+- Merge-marker scan: PASS.
+- Diff whitespace check for merged source delta: PASS.
+- Total packaged source files before this report: 1,744.
+
+DATABASE
+- Fresh SQLite application of V001 through V012: PASS.
+- Required tables present: conversations, messages, preferences, ui_session_state, ui_drafts, document_ingestion_jobs.
+- schema_metadata.last_migration: 12.
+
+NATIVE BUILD PATHS
+- Vendored llama.cpp host CMake configure: PASS.
+- QML CMake configure: BLOCKED_BY_MISSING_TOOL — Qt6Config.cmake / Qt 6.5 SDK is not installed in this validation environment.
+- Cargo/rustc/rustfmt/clippy: unavailable in this validation environment.
+
+EVIDENCE FROM v0.6 COMMAND LOG
+- cargo check --workspace: recorded PASS before this merge.
+- mukei-core std/tokio, rusqlite, sqlcipher, and network checks: recorded PASS.
+- mukei-bridge sqlcipher,network check: recorded PASS.
+- The last recorded all-feature Clippy run found four errors. The exact four source issues are fixed in this merged tree, but Clippy was not rerun here.
+
+RELEASE GATES STILL REQUIRED
+1. cargo fmt --all -- --check
+2. cargo check --workspace and full feature matrix
+3. cargo clippy for core and bridge with -D warnings
+4. cargo test -p mukei-core --all-features
+5. cargo test -p mukei-ffi-shim
+6. Qt 6.5+ QML/C++ compile, qmllint, QuickTest, and CTest
+7. Android JNI/Gradle build
+8. Physical-device tests for SQLCipher, lifecycle recovery, SAF, downloads, model sessions, accessibility, and low-memory behavior
+
+VERDICT
+The merge is structurally clean and preserves both the v0.6 Rust fixes and the complete v0.15 QML architecture without QML degradation. It is a production-oriented integration candidate, not yet a release-certified binary source tree until the native gates above pass.

@@ -1,0 +1,24 @@
+Mukei v0.5 Sol validation
+========================
+
+PASS: archive-source TOML parsing
+PASS: XML/QRC parsing
+PASS: QML resources (36 references, 0 missing)
+PASS: fresh SQLite migration chain V001-V010
+PASS: critical settings/tombstone/download-reservation tables
+PASS: legacy v0.9 V008 upgrade simulation
+PASS: Cargo workspace member and local path dependency presence
+PASS: Rust/Java delimiter and lexical-balance scan
+PASS: AgentRunOutcome field-completeness scan
+PASS: vendored llama.cpp CMake configure (host fallback)
+PASS: Android SecretStore Java source/package path present
+PASS: Android target dependencies declared (`jni`, `ndk-context`)
+
+IMPORTANT: Cargo.lock was not regenerated for the two new Android-only
+crates because Cargo is unavailable. Run a normal Cargo command without
+`--locked`, inspect the lockfile update, and commit it before using
+`--locked` in release automation.
+
+NOT RUN: cargo fmt/check/clippy/test (cargo/rustc unavailable)
+NOT RUN: Qt/QML compile (Qt SDK unavailable)
+NOT RUN: Android APK build (Android SDK/NDK unavailable)

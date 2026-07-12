@@ -20,6 +20,7 @@ use std::collections::HashMap;
 
 use crate::error::{MukeiError, Result};
 use crate::rag::embedder::Embedder;
+use crate::rag::retriever::RetrievalScope;
 use crate::rag::vector_store::VectorStore;
 
 #[cfg(feature = "rusqlite")]
@@ -46,6 +47,10 @@ pub struct StagedChunk {
     pub embedding_dim: u32,
     /// Raw chunk text.
     pub content: String,
+    /// Explicit tenant/workspace scope for scope-safe vector retrieval.
+    /// `None` is retained only for legacy local indexing compatibility; such
+    /// vectors are not eligible for scoped retrieval.
+    pub scope: Option<RetrievalScope>,
 }
 
 /// Atomic per-batch envelope:
@@ -107,7 +112,12 @@ impl<'a> IndexingTransaction<'a> {
         text_for_embed: &str,
     ) -> Result<()> {
         let emb = self.embedder.embed(text_for_embed).await?;
-        self.store.add(chunk.chunk_id, emb.0, chunk.sha256.clone());
+        if let Some(scope) = chunk.scope.clone() {
+            self.store
+                .add_scoped(chunk.chunk_id, emb.0, chunk.sha256.clone(), scope);
+        } else {
+            self.store.add(chunk.chunk_id, emb.0, chunk.sha256.clone());
+        }
         self.pending.push(chunk);
         Ok(())
     }
@@ -133,6 +143,7 @@ impl<'a> IndexingTransaction<'a> {
                 token_count: 0,
                 embedding_dim: self.embedder.dim() as u32,
                 content: text.to_owned(),
+                scope: None,
             },
             text,
         )
@@ -521,6 +532,7 @@ mod tests {
             token_count: 12,
             embedding_dim: 384,
             content: "hello world".to_string(),
+            scope: Some(RetrievalScope::new("tenant-test", "workspace-test")),
         };
         tx.embed_and_stage(chunk, "hello world").await.unwrap();
         assert_eq!(tx.pending_count(), 1);

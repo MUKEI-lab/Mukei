@@ -30,6 +30,8 @@ pub mod audit_log;
 #[cfg(feature = "rusqlite")]
 pub mod conversation;
 #[cfg(feature = "rusqlite")]
+pub mod download_jobs;
+#[cfg(feature = "rusqlite")]
 pub mod migrations;
 #[cfg(feature = "rusqlite")]
 pub mod pool;
@@ -37,23 +39,47 @@ pub mod pool;
 pub mod recovery;
 #[cfg(feature = "rusqlite")]
 pub mod saf;
+#[cfg(feature = "rusqlite")]
+pub mod saas;
+#[cfg(feature = "rusqlite")]
+pub mod settings;
+#[cfg(feature = "rusqlite")]
+pub mod ui_session;
 
 #[cfg(feature = "rusqlite")]
 pub use audit_log::{AuditChainStatus, AuditEntry, AuditLogReader, AuditLogWriter};
 #[cfg(feature = "rusqlite")]
 pub use conversation::{
-    ConversationRecord, ConversationRepository, MessageRecord, MessageStatus, PersistedTurn,
+    ConversationRecord, ConversationRepository, ConversationSummary, MessageRecord, MessageStatus,
+    PersistedTurn, TimelinePage, TimelineRow,
 };
 #[cfg(feature = "rusqlite")]
-pub use migrations::{MigrationRecord, Migrator, MIGRATIONS_DIR, MIGRATION_FILE_PREFIX};
+pub use download_jobs::{DownloadJobRecord, DownloadJobRepository, DownloadJobStatus, DownloadReservation};
+#[cfg(feature = "rusqlite")]
+pub use migrations::{
+    MigrationBackup, MigrationRecord, Migrator, MIGRATIONS_DIR, MIGRATION_FILE_PREFIX,
+};
 #[cfg(feature = "rusqlite")]
 pub use pool::{
     DatabaseEncryptionStatus, DatabaseOpenResult, DatabasePool, DbError, PooledConnectionExt,
 };
 #[cfg(feature = "rusqlite")]
-pub use recovery::{RecoveryState, RecoveryStore};
+pub use recovery::{InterruptedTurn, RecoveryAttempt, RecoveryMode, RecoveryState, RecoveryStore};
 #[cfg(feature = "rusqlite")]
-pub use saf::{SafRegistry, SafTokenRow};
+pub use saf::{DocumentProjection, SafCleanupPlan, SafRegistry, SafTokenRow};
+#[cfg(feature = "rusqlite")]
+pub use saas::{
+    EntitlementRepository, MembershipRepository, QuotaPolicyRepository, RecordApplyOutcome,
+    SnapshotApplyOutcome, SubscriptionRepository, TenantWorkspaceRepository, UsageAppendOutcome,
+    UsageLedgerRepository,
+};
+#[cfg(feature = "rusqlite")]
+pub use settings::{PreferenceRecord, PreferenceValue, SecretRefRecord, SettingsRepository};
+#[cfg(feature = "rusqlite")]
+pub use ui_session::{
+    UiDraftRecord, UiSessionRecord, UiSessionRepository, DEFAULT_UI_PROFILE,
+    UI_SESSION_SCHEMA_VERSION,
+};
 
 // TRD §8.1 / PRD REQ-MOD-01 — on-device GGUF downloader. Independent of
 // the rusqlite-gated persistence layer because testers must be able to

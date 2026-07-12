@@ -9,6 +9,9 @@ use std::time::Duration;
 
 use crate::error::{MukeiError, Result};
 
+/// Production-oriented SaaS cloud transport boundary.
+pub mod saas;
+
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 pub const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(60);
 pub const DEFAULT_MAX_REDIRECTS: usize = 3;
@@ -94,6 +97,105 @@ pub fn http_status_error(operation: &str, status: reqwest::StatusCode) -> MukeiE
             operation,
         },
         _ => MukeiError::NetworkError(format!("HTTP {status} during {operation}")),
+    }
+}
+
+/// Send an idempotent HTTP request with bounded exponential backoff.
+///
+/// The request builder is rebuilt for every attempt because reqwest
+/// request bodies are consumed by `send`. `accept_status` lets callers
+/// preserve protocol-specific statuses such as HTTP 416 for resumable
+/// downloads while still retrying 408/429/5xx responses.
+pub async fn send_request_with_retry<F, A>(
+    operation: &str,
+    policy: RetryPolicy,
+    build_request: F,
+    accept_status: A,
+) -> Result<reqwest::Response>
+where
+    F: FnMut() -> reqwest::RequestBuilder,
+    A: Fn(reqwest::StatusCode) -> bool,
+{
+    send_request_with_retry_inner(operation, policy, build_request, accept_status, None).await
+}
+
+/// Cancellable variant used by long-running mobile downloads. A user
+/// cancellation interrupts both an in-flight request and backoff sleep.
+pub async fn send_request_with_retry_cancellable<F, A>(
+    operation: &str,
+    policy: RetryPolicy,
+    build_request: F,
+    accept_status: A,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<reqwest::Response>
+where
+    F: FnMut() -> reqwest::RequestBuilder,
+    A: Fn(reqwest::StatusCode) -> bool,
+{
+    send_request_with_retry_inner(
+        operation,
+        policy,
+        build_request,
+        accept_status,
+        Some(cancel),
+    )
+    .await
+}
+
+async fn send_request_with_retry_inner<F, A>(
+    operation: &str,
+    policy: RetryPolicy,
+    mut build_request: F,
+    accept_status: A,
+    cancel: Option<&tokio_util::sync::CancellationToken>,
+) -> Result<reqwest::Response>
+where
+    F: FnMut() -> reqwest::RequestBuilder,
+    A: Fn(reqwest::StatusCode) -> bool,
+{
+    let mut retries_completed = 0u32;
+    loop {
+        let send = build_request().send();
+        let outcome = if let Some(cancel) = cancel {
+            tokio::select! {
+                _ = cancel.cancelled() => return Err(MukeiError::Cancelled),
+                response = send => response,
+            }
+        } else {
+            send.await
+        };
+
+        let result = match outcome {
+            Ok(response) if accept_status(response.status()) => Ok(response),
+            Ok(response) => Err(http_status_error(operation, response.status())),
+            Err(error) => Err(map_reqwest_error(operation, error)),
+        };
+
+        match result {
+            Ok(response) => return Ok(response),
+            Err(error)
+                if retries_completed < policy.max_attempts && RetryPolicy::is_retryable(&error) =>
+            {
+                retries_completed = retries_completed.saturating_add(1);
+                let delay = policy.next_delay(retries_completed);
+                tracing::warn!(
+                    operation = %crate::diagnostics::sanitize_log_value(operation),
+                    attempt = retries_completed,
+                    delay_ms = delay.as_millis(),
+                    error_code = error.error_code(),
+                    "retrying transient network request"
+                );
+                if let Some(cancel) = cancel {
+                    tokio::select! {
+                        _ = cancel.cancelled() => return Err(MukeiError::Cancelled),
+                        _ = tokio::time::sleep(delay) => {},
+                    }
+                } else {
+                    tokio::time::sleep(delay).await;
+                }
+            }
+            Err(error) => return Err(error),
+        }
     }
 }
 
@@ -208,7 +310,7 @@ impl RetryPolicy {
 
     /// Convenience: returns `Ok(())` if the error is retryable and
     /// attempts remain, `Err(clone)` otherwise.
-    pub fn check_attempt(&self, attempt: u32, err: &MukeiError) -> Result<(), MukeiError> {
+    pub fn check_attempt(&self, attempt: u32, err: &MukeiError) -> Result<()> {
         if attempt >= self.max_attempts || !Self::is_retryable(err) {
             return Err(clone_network_error(err));
         }

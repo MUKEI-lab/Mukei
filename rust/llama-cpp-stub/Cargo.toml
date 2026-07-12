@@ -3,7 +3,7 @@ name    = "llama-cpp-rs"
 version = "0.1.0-stub"
 edition = "2021"
 description = "Mukei-internal placeholder for llama-cpp-rs. Replaced at build time by the prebuilt static archive under rust/llama-cpp-prebuilt/. See TRD §8.2."
-license = "LicenseRef-Mukei-Proprietary"
+license = "Apache-2.0"
 publish = false
 
 [lib]

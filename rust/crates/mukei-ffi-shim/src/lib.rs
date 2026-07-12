@@ -53,8 +53,13 @@ pub extern "C" fn mukei_acquire_callback_guard() -> *const Inner {
 
 /// Release a guard. After this call the `guard_ptr` is invalid; all
 /// in-flight callbacks observe `GuardError::Released` and drop.
+///
+/// # Safety
+///
+/// `guard_ptr` must have been returned by [`mukei_acquire_callback_guard`]
+/// and must be released exactly once.
 #[no_mangle]
-pub extern "C" fn mukei_release_callback_guard(guard_ptr: *const Inner) {
+pub unsafe extern "C" fn mukei_release_callback_guard(guard_ptr: *const Inner) {
     if guard_ptr.is_null() {
         return;
     }
@@ -66,8 +71,13 @@ pub extern "C" fn mukei_release_callback_guard(guard_ptr: *const Inner) {
 
 /// Read the current generation counter. Used by the C side when it wants
 /// to bind a callback against the current guard state.
+///
+/// # Safety
+///
+/// `guard_ptr` must be a live pointer returned by
+/// [`mukei_acquire_callback_guard`] and not yet released.
 #[no_mangle]
-pub extern "C" fn mukei_callback_guard_current_generation(guard_ptr: *const Inner) -> u64 {
+pub unsafe extern "C" fn mukei_callback_guard_current_generation(guard_ptr: *const Inner) -> u64 {
     if guard_ptr.is_null() {
         return 0;
     }
@@ -80,8 +90,13 @@ pub extern "C" fn mukei_callback_guard_current_generation(guard_ptr: *const Inne
 /// Atomically bump the generation. Returns the **new** generation
 /// number, or 0 on a NULL guard. Equivalent to "logically cancel every
 /// in-flight callback bound against the previous generation".
+///
+/// # Safety
+///
+/// `guard_ptr` must be a live pointer returned by
+/// [`mukei_acquire_callback_guard`] and not yet released.
 #[no_mangle]
-pub extern "C" fn mukei_callback_guard_bump_generation(guard_ptr: *const Inner) -> u64 {
+pub unsafe extern "C" fn mukei_callback_guard_bump_generation(guard_ptr: *const Inner) -> u64 {
     if guard_ptr.is_null() {
         return 0;
     }
@@ -91,8 +106,16 @@ pub extern "C" fn mukei_callback_guard_bump_generation(guard_ptr: *const Inner) 
 }
 
 /// True iff `generation` matches the guard's current generation.
+///
+/// # Safety
+///
+/// `guard_ptr` must be a live pointer returned by
+/// [`mukei_acquire_callback_guard`] and not yet released.
 #[no_mangle]
-pub extern "C" fn mukei_callback_guard_matches(guard_ptr: *const Inner, generation: u64) -> bool {
+pub unsafe extern "C" fn mukei_callback_guard_matches(
+    guard_ptr: *const Inner,
+    generation: u64,
+) -> bool {
     if guard_ptr.is_null() {
         return false;
     }
@@ -104,8 +127,13 @@ pub extern "C" fn mukei_callback_guard_matches(guard_ptr: *const Inner, generati
 /// True iff `(generation, instance_id)` matches the live guard. This is
 /// the full ABA-safe predicate; `mukei_callback_guard_matches` remains
 /// for legacy callers that only understand generation snapshots.
+///
+/// # Safety
+///
+/// `guard_ptr` must be a live pointer returned by
+/// [`mukei_acquire_callback_guard`] and not yet released.
 #[no_mangle]
-pub extern "C" fn mukei_callback_guard_matches_instance(
+pub unsafe extern "C" fn mukei_callback_guard_matches_instance(
     guard_ptr: *const Inner,
     generation: u64,
     instance_id: u64,
@@ -121,9 +149,15 @@ pub extern "C" fn mukei_callback_guard_matches_instance(
 /// Bump the guard's generation as the "stop the world" signal. Any
 /// callback still scheduled against the previous generation will be
 /// dropped on its next dispatch.
+///
+/// # Safety
+///
+/// `guard_ptr` must be a live pointer returned by
+/// [`mukei_acquire_callback_guard`] and not yet released.
 #[no_mangle]
-pub extern "C" fn mukei_stop_generation(guard_ptr: *const Inner) {
-    let _ = mukei_callback_guard_bump_generation(guard_ptr);
+pub unsafe extern "C" fn mukei_stop_generation(guard_ptr: *const Inner) {
+    // SAFETY: this function has the same live-guard precondition.
+    let _ = unsafe { mukei_callback_guard_bump_generation(guard_ptr) };
 }
 
 /// Read the process-unique `instance_id` assigned at guard
@@ -134,8 +168,13 @@ pub extern "C" fn mukei_stop_generation(guard_ptr: *const Inner) {
 /// acquire, the new Inner carries a different instance_id so a caller
 /// who captured the old (pointer, generation, instance_id) triple will
 /// detect the reuse and drop the stale callback.
+///
+/// # Safety
+///
+/// `guard_ptr` must be a live pointer returned by
+/// [`mukei_acquire_callback_guard`] and not yet released.
 #[no_mangle]
-pub extern "C" fn mukei_callback_guard_instance_id(guard_ptr: *const Inner) -> u64 {
+pub unsafe extern "C" fn mukei_callback_guard_instance_id(guard_ptr: *const Inner) -> u64 {
     if guard_ptr.is_null() {
         return 0;
     }
@@ -160,8 +199,14 @@ pub extern "C" fn mukei_initialize(_config_path: *const c_char) -> bool {
 // Streamed send_message — fully guard-protected
 // ---------------------------------------------------------------------
 
+/// # Safety
+///
+/// `user_input` must point to a valid NUL-terminated UTF-8 string for the
+/// duration of the call. `context_ptr` and `guard_ptr` must both be live
+/// pointers paired with the provided callback contract; `guard_ptr` must come
+/// from [`mukei_acquire_callback_guard`] and remain valid until release.
 #[no_mangle]
-pub extern "C" fn mukei_send_message(
+pub unsafe extern "C" fn mukei_send_message(
     user_input: *const c_char,
     context_ptr: *mut c_void,
     guard_ptr: *const Inner,
@@ -180,8 +225,8 @@ pub extern "C" fn mukei_send_message(
     // Bind the callback against a fresh generation. Any pending callback
     // bound to a prior generation is logically cancelled (see
     // `mukei_callback_guard_bump_generation`).
-    let generation = mukei_callback_guard_bump_generation(guard_ptr);
-    let instance_id = mukei_callback_guard_instance_id(guard_ptr);
+    let generation = unsafe { mukei_callback_guard_bump_generation(guard_ptr) };
+    let instance_id = unsafe { mukei_callback_guard_instance_id(guard_ptr) };
     let context_addr = context_ptr as usize;
     let guard_addr = guard_ptr as usize;
 
@@ -217,28 +262,30 @@ mod tests {
     #[test]
     fn generation_round_trip_via_canonical_guard() {
         let guard = mukei_acquire_callback_guard();
-        let gen_after_1st_bump = mukei_callback_guard_bump_generation(guard);
+        let gen_after_1st_bump = unsafe { mukei_callback_guard_bump_generation(guard) };
         assert!(gen_after_1st_bump > 0);
-        assert!(mukei_callback_guard_matches(guard, gen_after_1st_bump));
+        assert!(unsafe { mukei_callback_guard_matches(guard, gen_after_1st_bump) });
 
-        let gen_after_2nd_bump = mukei_callback_guard_bump_generation(guard);
+        let gen_after_2nd_bump = unsafe { mukei_callback_guard_bump_generation(guard) };
         assert!(gen_after_2nd_bump > gen_after_1st_bump);
-        assert!(!mukei_callback_guard_matches(guard, gen_after_1st_bump));
-        assert!(mukei_callback_guard_matches(guard, gen_after_2nd_bump));
+        assert!(!unsafe { mukei_callback_guard_matches(guard, gen_after_1st_bump) });
+        assert!(unsafe { mukei_callback_guard_matches(guard, gen_after_2nd_bump) });
 
-        mukei_release_callback_guard(guard);
+        unsafe { mukei_release_callback_guard(guard) };
     }
 
     extern "C" fn drop_callback(_ctx: *mut c_void, _gen: u64, _tok: *const c_char) {}
 
     #[test]
     fn null_arguments_are_rejected() {
-        let gen = mukei_send_message(
-            std::ptr::null(),
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            drop_callback,
-        );
+        let gen = unsafe {
+            mukei_send_message(
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                drop_callback,
+            )
+        };
         assert_eq!(gen, 0);
     }
 

@@ -1,0 +1,29 @@
+Mukei QML Phase 5 — Validation
+
+PASS  ZIP/source tree integrity before packaging
+PASS  QML architecture analyzer: 0 errors, 0 warnings
+PASS  QML security analyzer: 0 critical issues (5 expected medium FileDialog/export findings)
+PASS  TOML parsing: 11 files
+PASS  XML/QRC parsing
+PASS  QRC references: 36, missing: 0
+PASS  SVG icons: 27
+PASS  CMake QML references: 88, missing: 0
+PASS  Direct backend calls in screens: 0
+PASS  Private Android/server path literals in production QML: 0
+PASS  Fresh SQLite migration simulation: V001–V012
+PASS  saf_tokens.os_permission_state present
+PASS  document_ingestion_jobs present
+PASS  schema_metadata.last_migration = 12
+PASS  llama.cpp host CMake configure (vendored fallback)
+PASS  Modified C++/Java/QML delimiter scan
+
+ENVIRONMENT BLOCKERS
+- cargo/rustc/rustfmt/clippy unavailable in this environment
+- Qt 6 development SDK and qmllint unavailable
+- Android SDK/NDK unavailable
+- Android JNI and persistable URI permission require device/provider verification
+
+HONEST OPEN BOUNDARIES
+- document content reader/parser/embedder worker is not connected
+- live llama.cpp model activation is not connected
+- Qt 6.5–6.7 accessibility adapter emits the batched architecture signal but cannot use QAccessibleAnnouncementEvent

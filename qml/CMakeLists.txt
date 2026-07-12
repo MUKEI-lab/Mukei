@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.22)
-project(MukeiQml VERSION 0.7.5 LANGUAGES CXX)
+
+# Product semantic version has one source of truth: rust/Cargo.toml [workspace.package].
+# Protocol and database schema versions intentionally remain independent.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../rust/Cargo.toml" _MUKEI_WORKSPACE_MANIFEST)
+string(REGEX MATCH "\nversion[ \t]*=[ \t]*\"([0-9]+[.][0-9]+[.][0-9]+)\"" _MUKEI_VERSION_MATCH "${_MUKEI_WORKSPACE_MANIFEST}")
+if(NOT CMAKE_MATCH_1)
+    message(FATAL_ERROR "Could not derive Mukei product version from rust/Cargo.toml")
+endif()
+set(MUKEI_PRODUCT_VERSION "${CMAKE_MATCH_1}")
+project(MukeiQml VERSION ${MUKEI_PRODUCT_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,19 +16,25 @@ set(CMAKE_AUTOMOC ON)
 set(QT_QUICK_CONTROLS_STYLE "Basic")
 include(CTest)
 
-option(MUKEI_USE_REAL_BRIDGE "Instantiate CXX-Qt bridge objects instead of local QML stubs" OFF)
+if(ANDROID)
+    set(_MUKEI_REAL_BRIDGE_DEFAULT ON)
+else()
+    set(_MUKEI_REAL_BRIDGE_DEFAULT OFF)
+endif()
+option(MUKEI_USE_REAL_BRIDGE "Instantiate CXX-Qt bridge objects instead of local QML stubs" ${_MUKEI_REAL_BRIDGE_DEFAULT})
 
-# Ubuntu 24.04 ships Qt 6.4.x; that baseline is sufficient for the checked-in
-# QML scaffold, QuickTest runners, and variable fonts used by CI smoke tests.
-# Newer Qt builds remain supported, but CI must stay green on the distro toolchain.
-find_package(Qt6 6.4 REQUIRED COMPONENTS
-    Core Gui Quick Qml QuickControls2 QuickEffects QuickLayouts QuickTest Widgets Svg
+# Qt Quick Effects / MultiEffect entered the supported Qt 6 API in 6.5.
+# Keep the declared build floor aligned with the QML imports instead of
+# allowing configure to succeed against an SDK that cannot load the module.
+find_package(Qt6 6.5 REQUIRED COMPONENTS
+    Core Gui Quick Qml QuickControls2 QuickDialogs2 QuickEffects QuickLayouts QuickTest Test Widgets Svg
 )
 
 # Cargo build directory selection. Android builds still cross-compile to
 # `aarch64-linux-android/release`; every other host (Linux/macOS desktop
 # smoke-runs) uses the plain `release` directory. Both the .so and .dylib
 # suffixes are probed so a macOS build picks up libmukei_bridge.dylib.
+
 if(ANDROID)
     set(_MUKEI_BRIDGE_DEFAULT
         ${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/aarch64-linux-android/release/libmukei_bridge.so
@@ -39,10 +54,39 @@ set(MUKEI_BRIDGE_LIB "${_MUKEI_BRIDGE_DEFAULT}"
 
 add_executable(mukei
     main.cpp
+    timeline_model.cpp
+    timeline_model.h
     qml.qrc
 )
+target_compile_definitions(mukei PRIVATE MUKEI_PRODUCT_VERSION="${MUKEI_PRODUCT_VERSION}")
 
-set_source_files_properties(events/EventDispatcher.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set(_MUKEI_QML_SINGLETONS
+    events/EventDispatcher.qml
+    architecture/AppCoordinator.qml
+    architecture/AppStateHub.qml
+    architecture/IntentDispatcher.qml
+    architecture/PresentationPolicy.qml
+    architecture/SnapshotController.qml
+    stores/ContractStore.qml
+    stores/LifecycleStore.qml
+    stores/CapabilityStore.qml
+    stores/ConversationStore.qml
+    stores/NavigationStore.qml
+    stores/UiSessionStore.qml
+    stores/ChatStore.qml
+    stores/RecoveryStore.qml
+    stores/ModelStore.qml
+    stores/DownloadStore.qml
+    stores/DocumentStore.qml
+    stores/StorageStore.qml
+    stores/SettingsStore.qml
+    stores/ResponsiveStore.qml
+    stores/OperationStore.qml
+    stores/ErrorStore.qml
+    stores/DiagnosticsStore.qml
+    stores/AccessibilityStore.qml
+)
+set_source_files_properties(${_MUKEI_QML_SINGLETONS} PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(mukei
     URI com.mukei.app
@@ -51,10 +95,42 @@ qt_add_qml_module(mukei
     QML_FILES
         MainWindow.qml
         events/EventDispatcher.qml
+        architecture/AppCoordinator.qml
+        architecture/AppStateHub.qml
+        architecture/IntentDispatcher.qml
+        architecture/PresentationPolicy.qml
+        architecture/SnapshotController.qml
+        stores/ContractStore.qml
+        stores/LifecycleStore.qml
+        stores/CapabilityStore.qml
+        stores/ConversationStore.qml
+        stores/NavigationStore.qml
+        stores/UiSessionStore.qml
+        stores/ChatStore.qml
+        stores/RecoveryStore.qml
+        stores/ModelStore.qml
+        stores/DownloadStore.qml
+        stores/DocumentStore.qml
+        stores/StorageStore.qml
+        stores/SettingsStore.qml
+        stores/ResponsiveStore.qml
+        stores/OperationStore.qml
+        stores/ErrorStore.qml
+        stores/DiagnosticsStore.qml
+        stores/AccessibilityStore.qml
+        shell/AppShell.qml
+        shell/AdaptiveNavigation.qml
+        shell/RouterHost.qml
+        shell/BannerHost.qml
+        shell/SnackbarHost.qml
+        shell/OperationOverlayHost.qml
+        shell/SheetHost.qml
+        shell/DialogHost.qml
         theme/Theme.qml
         theme/Type.qml
         theme/Spacing.qml
         theme/Motion.qml
+        components/AccessibilityAnnouncer.qml
         components/AIMessageBubble.qml
         components/BranchSwitcherSheet.qml
         components/ChatComposer.qml
@@ -72,6 +148,7 @@ qt_add_qml_module(mukei
         components/IconButton.qml
         components/LeftDrawer.qml
         components/MarkdownRenderer.qml
+        components/MukeiIcon.qml
         components/ModalSheet.qml
         components/NetworkBanner.qml
         components/PrimaryButton.qml
@@ -84,18 +161,25 @@ qt_add_qml_module(mukei
         components/SkeletonLoader.qml
         components/Spinner.qml
         components/StatusPill.qml
+        components/StoragePressureCard.qml
         components/StreamingCaret.qml
         components/ThinkingAccordion.qml
         components/ToastNotification.qml
         components/ToolResultCard.qml
         components/UserMessageBubble.qml
         screens/ChatScreen.qml
+        screens/CompatibilityScreen.qml
+        screens/DownloadsScreen.qml
+        screens/DocumentsScreen.qml
+        screens/DiagnosticsScreen.qml
         screens/EmptyChatScreen.qml
         screens/ModelManagerScreen.qml
         screens/ModelPickerScreen.qml
         screens/RagRebuildPromptScreen.qml
+        screens/RecoveryScreen.qml
         screens/SafeModeScreen.qml
         screens/SettingsScreen.qml
+        screens/StartupScreen.qml
         screens/ToolResultExpandedScreen.qml
         screens/VerificationScreen.qml
         screens/WelcomeScreen.qml
@@ -107,6 +191,7 @@ target_link_libraries(mukei PRIVATE
     Qt6::Quick
     Qt6::Qml
     Qt6::QuickControls2
+    Qt6::QuickDialogs2
     Qt6::QuickEffects
     Qt6::QuickLayouts
     Qt6::Widgets
@@ -150,9 +235,46 @@ target_link_libraries(tst_Security PRIVATE
     Qt6::Quick
     Qt6::Qml
     Qt6::QuickControls2
+    Qt6::QuickDialogs2
     Qt6::QuickLayouts
     Qt6::QuickTest
 )
+
+qt_add_executable(tst_QmlArchitecture
+    tests/tst_QmlArchitecture.cpp
+)
+
+target_compile_definitions(tst_QmlArchitecture PRIVATE
+    QML_ARCHITECTURE_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
+)
+
+target_link_libraries(tst_QmlArchitecture PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Quick
+    Qt6::Qml
+    Qt6::QuickControls2
+    Qt6::QuickDialogs2
+    Qt6::QuickEffects
+    Qt6::QuickLayouts
+    Qt6::QuickTest
+)
+
+qt_add_executable(tst_TimelineModel
+    tests/tst_TimelineModel.cpp
+    timeline_model.cpp
+    timeline_model.h
+)
+
+target_link_libraries(tst_TimelineModel PRIVATE
+    Qt6::Core
+    Qt6::Test
+)
+
+add_test(NAME tst_QmlArchitecture COMMAND tst_QmlArchitecture -platform offscreen)
+set_tests_properties(tst_QmlArchitecture PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_test(NAME tst_TimelineModel COMMAND tst_TimelineModel)
 
 add_test(NAME tst_EventDispatcher COMMAND tst_EventDispatcher -platform offscreen -input ${CMAKE_CURRENT_SOURCE_DIR}/tests/tst_EventDispatcher.qml)
 set_tests_properties(tst_EventDispatcher PROPERTIES

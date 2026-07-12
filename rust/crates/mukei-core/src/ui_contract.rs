@@ -7,7 +7,92 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::MukeiError;
-use crate::types::{ConversationId, MessageId};
+use crate::types::{BranchId, ConversationId, MessageId};
+use crate::ui_protocol::ProtocolCapabilitySnapshot;
+
+/// Current QML/Rust architecture contract version.
+pub const UI_CONTRACT_VERSION: u32 = 1;
+/// Oldest QML contract version accepted by this bridge.
+pub const MIN_QML_CONTRACT_VERSION: u32 = 1;
+/// Newest QML contract version accepted by this bridge.
+pub const MAX_QML_CONTRACT_VERSION: u32 = 1;
+
+/// Version-negotiation snapshot returned before private storage is opened.
+///
+/// This keeps frontend and bridge upgrades fail-closed: an incompatible QML
+/// bundle is routed to a blocking compatibility page instead of continuing
+/// with partially-understood commands or event payloads.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiContractSnapshot {
+    /// Serialization schema version of this negotiation snapshot.
+    ///
+    /// This value describes the JSON shape of `UiContractSnapshot`; it is not
+    /// the application product version and is not persisted as user data.
+    pub schema_version: u32,
+    /// Current Rust/QML architecture contract version implemented by the bridge.
+    pub contract_version: u32,
+    /// Oldest QML contract version that this bridge can safely consume.
+    pub min_qml_contract_version: u32,
+    /// Newest QML contract version that this bridge can safely consume.
+    pub max_qml_contract_version: u32,
+    /// Version of the typed command-envelope schema accepted by the bridge.
+    pub command_schema_version: u32,
+    /// Version of the typed event-envelope schema emitted by the bridge.
+    pub event_schema_version: u32,
+    /// Version of the UI snapshot/projection schema.
+    pub snapshot_schema_version: u32,
+    /// Stable feature names QML must understand before normal navigation is allowed.
+    ///
+    /// Compatibility is directional: the QML bundle must support every feature
+    /// listed here. Unknown extra features advertised by QML are not required by
+    /// this bridge unless they also appear in this list.
+    pub required_features: Vec<String>,
+    /// Versioned command/event protocol capabilities implemented by this bridge.
+    pub protocol: ProtocolCapabilitySnapshot,
+}
+
+impl UiContractSnapshot {
+    /// Return the compile-time contract implemented by the current Rust bridge.
+    ///
+    /// The returned values are negotiated at startup and are not mutable user
+    /// preferences or persisted settings.
+    pub fn current() -> Self {
+        Self {
+            schema_version: 1,
+            contract_version: UI_CONTRACT_VERSION,
+            min_qml_contract_version: MIN_QML_CONTRACT_VERSION,
+            max_qml_contract_version: MAX_QML_CONTRACT_VERSION,
+            command_schema_version: 2,
+            event_schema_version: 2,
+            snapshot_schema_version: 1,
+            required_features: vec![
+                "typed_commands".into(),
+                "typed_events".into(),
+                "snapshot_delta_sync".into(),
+                "persistent_ui_session".into(),
+                "capability_gating".into(),
+                "command_envelope_v2".into(),
+                "command_acknowledgement".into(),
+                "event_identity".into(),
+                "per_stream_sequencing".into(),
+                "idempotent_command_replay".into(),
+                "operation_lifecycle_events".into(),
+                "legacy_event_v1_compatibility".into(),
+            ],
+            protocol: ProtocolCapabilitySnapshot::current(),
+        }
+    }
+
+    /// Return whether a QML bundle version is within the inclusive compatibility range.
+    ///
+    /// Values below the minimum or above the maximum are rejected so the UI can
+    /// route to the blocking compatibility state instead of partially executing
+    /// an unknown contract.
+    pub fn accepts_qml(&self, qml_contract_version: u32) -> bool {
+        qml_contract_version >= self.min_qml_contract_version
+            && qml_contract_version <= self.max_qml_contract_version
+    }
+}
 
 /// Current high-level application lifecycle state.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,10 +106,26 @@ pub enum AppLifecycleState {
     NeedsConfig,
     /// A database key is required before encrypted storage can open.
     NeedsDatabaseKey,
+    /// The platform wrapping-key capability is being created/verified.
+    CreatingWrappingKey,
+    /// A fresh random database key is being created in zeroizing memory.
+    CreatingDatabaseKey,
+    /// The database key is being wrapped by the platform secret provider.
+    WrappingDatabaseKey,
+    /// A persisted wrapped database key is being unwrapped by the platform provider.
+    UnwrappingDatabaseKey,
     /// The config file is being loaded and validated.
     LoadingConfig,
     /// SQLite or SQLCipher storage is being opened.
     OpeningDatabase,
+    /// The platform wrapping key is no longer usable.
+    KeyInvalidated,
+    /// Persisted wrapped database-key material is malformed or damaged.
+    WrappedKeyCorrupt,
+    /// The encrypted database could not be opened.
+    DatabaseOpenFailed,
+    /// Startup cannot proceed until explicit recovery/reset action is taken.
+    ResetRequired,
     /// Pending migrations are being applied.
     ApplyingMigrations,
     /// Persisted Android SAF grants are being loaded.
@@ -383,17 +484,14 @@ pub struct BridgeEvent {
     pub schema_version: u32,
     /// UTC event timestamp.
     pub timestamp: chrono::DateTime<chrono::Utc>,
-    /// Optional conversation id when a chat turn is involved.
-    ///
-    /// In the current bridge integration this id is bridge-local and
-    /// process-local. It is not yet the persisted conversation id from
-    /// storage, so QML must treat it as an event-correlation id only.
+    /// Optional durable conversation id when a chat turn is involved.
+    /// QML uses it with `branch_id` to scope snapshots and persisted drafts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<ConversationId>,
+    /// Optional durable branch id when a chat turn is involved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_id: Option<BranchId>,
     /// Optional turn id when a chat turn is involved.
-    ///
-    /// In the current bridge integration this id is generated by the
-    /// bridge for the live turn and is not yet persisted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
     /// Optional message id when a specific message is involved.
@@ -417,6 +515,7 @@ impl BridgeEvent {
             schema_version: Self::SCHEMA_VERSION,
             timestamp: chrono::Utc::now(),
             conversation_id: None,
+            branch_id: None,
             turn_id: None,
             message_id: None,
             sequence: None,
@@ -431,6 +530,19 @@ impl BridgeEvent {
         turn_id: impl Into<String>,
     ) -> Self {
         self.conversation_id = Some(conversation_id);
+        self.turn_id = Some(turn_id.into());
+        self
+    }
+
+    /// Attach the durable conversation and branch scope to a chat event.
+    pub fn with_chat_scope(
+        mut self,
+        conversation_id: ConversationId,
+        branch_id: BranchId,
+        turn_id: impl Into<String>,
+    ) -> Self {
+        self.conversation_id = Some(conversation_id);
+        self.branch_id = Some(branch_id);
         self.turn_id = Some(turn_id.into());
         self
     }
@@ -495,7 +607,8 @@ pub enum BridgeEventKind {
         /// Optional model id when known.
         #[serde(skip_serializing_if = "Option::is_none")]
         model_id: Option<String>,
-        /// Optional destination path when known.
+        /// Optional opaque destination token when known. Must not be
+        /// an absolute local path.
         #[serde(skip_serializing_if = "Option::is_none")]
         destination: Option<String>,
         /// Current capabilities.
@@ -515,14 +628,20 @@ pub enum BridgeEventKind {
         /// Optional model id when known.
         #[serde(skip_serializing_if = "Option::is_none")]
         model_id: Option<String>,
-        /// Optional destination path when known.
+        /// Optional opaque destination token when known. Must not be
+        /// an absolute local path.
         #[serde(skip_serializing_if = "Option::is_none")]
         destination: Option<String>,
     },
     /// Download completed.
     DownloadCompleted {
-        /// Verified final path.
+        /// Opaque identifier for the verified final model. Must not be
+        /// an absolute local path.
         final_path: String,
+        /// Catalog model identifier when known. Required by the UI to
+        /// reconcile parallel downloads without guessing.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model_id: Option<String>,
     },
     /// Download failed.
     DownloadFailed {
@@ -542,6 +661,7 @@ fn severity_for(error: &MukeiError) -> ErrorSeverity {
         | MukeiError::SecretLeaked(_)
         | MukeiError::DatabaseCorruption
         | MukeiError::MigrationOrderConflict { .. }
+        | MukeiError::SchemaTooNew { .. }
         | MukeiError::AuditLogTampered { .. }
         | MukeiError::CrashLoopDetected { .. }
         | MukeiError::Invariant(_) => ErrorSeverity::Fatal,
@@ -566,6 +686,7 @@ fn recoverable_for(error: &MukeiError) -> bool {
             | MukeiError::SecretLeaked(_)
             | MukeiError::DatabaseCorruption
             | MukeiError::MigrationOrderConflict { .. }
+            | MukeiError::SchemaTooNew { .. }
             | MukeiError::AuditLogTampered { .. }
             | MukeiError::CrashLoopDetected { .. }
             | MukeiError::Invariant(_)
@@ -606,8 +727,10 @@ fn suggested_action_for(error: &MukeiError) -> SuggestedUiAction {
         MukeiError::FFIPanic
         | MukeiError::DatabaseCorruption
         | MukeiError::MigrationOrderConflict { .. }
+        | MukeiError::SchemaTooNew { .. }
         | MukeiError::AuditLogTampered { .. }
         | MukeiError::CrashLoopDetected { .. } => SuggestedUiAction::RestartApp,
+        MukeiError::MigrationLocked => SuggestedUiAction::Retry,
         MukeiError::SecretLeaked(_) | MukeiError::PromptLeakage | MukeiError::Invariant(_) => {
             SuggestedUiAction::ReportIssue
         }
@@ -624,6 +747,8 @@ fn user_message_for(error: &MukeiError) -> String {
         | MukeiError::DatabaseCorruption
         | MukeiError::MigrationFailed(_, _)
         | MukeiError::MigrationOrderConflict { .. }
+        | MukeiError::MigrationLocked
+        | MukeiError::SchemaTooNew { .. }
         | MukeiError::AuditLogTampered { .. }
         | MukeiError::DatabaseEncryptionUnavailable
         | MukeiError::DatabaseEncryptionMigrationRequired
@@ -711,7 +836,7 @@ mod tests {
             bytes_downloaded: 512,
             total_bytes: Some(2048),
             model_id: Some("gemma-4-e2b-it".into()),
-            destination: Some("/models/gemma.gguf".into()),
+            destination: Some("model:gemma-4-e2b-it".into()),
         });
         let value = serde_json::to_value(event).unwrap();
         assert_eq!(value["category"], "download_progress");
@@ -761,6 +886,23 @@ mod tests {
             "technical_message should clearly mark redactions: {}",
             ui.technical_message
         );
+    }
+
+
+    #[test]
+    fn current_ui_contract_accepts_only_supported_qml_versions() {
+        let contract = UiContractSnapshot::current();
+        assert!(contract.accepts_qml(UI_CONTRACT_VERSION));
+        assert!(!contract.accepts_qml(0));
+        assert_eq!(contract.command_schema_version, 2);
+        assert_eq!(contract.event_schema_version, 2);
+        assert_eq!(contract.protocol.current_version.major, 2);
+        assert!(contract
+            .protocol
+            .capabilities
+            .iter()
+            .any(|f| f == "command_acknowledgement"));
+        assert!(contract.required_features.iter().any(|f| f == "snapshot_delta_sync"));
     }
 
     #[test]
@@ -871,14 +1013,15 @@ mod tests {
     }
 
     #[test]
-    fn bridge_chat_ids_are_documented_as_process_local() {
+    fn bridge_chat_events_carry_durable_conversation_and_branch_scope() {
         let event = BridgeEvent::new(BridgeEventKind::ChatState {
             state: ChatTurnState::Submitting,
             capabilities: CapabilitySnapshot::inferencing(),
         })
-        .with_chat_context(ConversationId::new(), MessageId::new().0.to_string());
+        .with_chat_scope(ConversationId::new(), BranchId::new(), MessageId::new().0.to_string());
         let json = serde_json::to_value(event).unwrap();
         assert!(json.get("conversation_id").is_some());
+        assert!(json.get("branch_id").is_some());
         assert!(json.get("turn_id").is_some());
     }
 
@@ -894,13 +1037,13 @@ mod tests {
         let failed = BridgeEvent::new(BridgeEventKind::DownloadState {
             state: DownloadState::Failed,
             model_id: Some("gemma-4-e2b-it".into()),
-            destination: Some("/models/gemma.gguf".into()),
+            destination: Some("model:gemma-4-e2b-it".into()),
             capabilities: CapabilitySnapshot::ready(),
         });
         let cancelled = BridgeEvent::new(BridgeEventKind::DownloadState {
             state: DownloadState::Cancelled,
             model_id: Some("gemma-4-e2b-it".into()),
-            destination: Some("/models/gemma.gguf".into()),
+            destination: Some("model:gemma-4-e2b-it".into()),
             capabilities: CapabilitySnapshot::ready(),
         });
 
@@ -910,8 +1053,8 @@ mod tests {
         assert_eq!(cancelled_json["state"], "cancelled");
         assert_eq!(failed_json["model_id"], "gemma-4-e2b-it");
         assert_eq!(cancelled_json["model_id"], "gemma-4-e2b-it");
-        assert_eq!(failed_json["destination"], "/models/gemma.gguf");
-        assert_eq!(cancelled_json["destination"], "/models/gemma.gguf");
+        assert_eq!(failed_json["destination"], "model:gemma-4-e2b-it");
+        assert_eq!(cancelled_json["destination"], "model:gemma-4-e2b-it");
     }
 
     #[test]

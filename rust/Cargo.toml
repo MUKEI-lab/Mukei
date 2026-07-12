@@ -21,7 +21,7 @@ exclude  = [
 version     = "0.7.5"
 edition     = "2021"
 rust-version = "1.78"           # ≥ MSRV required by cxx-qt 0.6
-license     = "LicenseRef-Mukei-Proprietary"
+license     = "Apache-2.0"
 authors     = ["Mukei AI Architecture Pass"]
 
 [workspace.dependencies]
@@ -101,8 +101,8 @@ bloomfilter = "1.0"
 
 # ----- Misc -------------------------------------------------------------
 uuid       = { version = "1.10", features = ["v4", "serde"] }
+getrandom   = "0.2"
 chrono     = { version = "0.4", default-features = false, features = ["clock", "serde"] }
-meval      = "0.2"
 
 # ============================================================================
 # Workspace metadata

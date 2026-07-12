@@ -4,7 +4,11 @@ import QtQuick
 QtObject {
     readonly property var enter: [0.16, 1, 0.3, 1]
     readonly property var exit: [0.7, 0, 0.84, 0]
-    readonly property int bubbleAppear: 220
+    readonly property int immediateFeedback: 110
+    readonly property int microTransition: 160
+    readonly property int contentChange: 220
+    readonly property int sheetDialog: 280
+    readonly property int bubbleAppear: contentChange
     readonly property int modalEnter: 280
     readonly property int modalExit: 200
     readonly property int fullScreenEnter: 300

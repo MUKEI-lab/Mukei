@@ -84,10 +84,23 @@ impl StorageQuotaManager {
     /// if either the single-download cap or aggregate model quota would
     /// be exceeded.
     pub fn ensure_model_download_allowed(&self, expected_bytes: u64) -> Result<StorageUsage> {
-        if expected_bytes > self.policy.max_single_download_bytes {
+        self.ensure_model_download_allowed_with_additional(expected_bytes, expected_bytes)
+    }
+
+    /// Resume-aware quota check. `total_file_bytes` enforces the maximum
+    /// artifact size, while `additional_bytes` is the amount that will be
+    /// newly written. Existing `.partial` bytes are already included in
+    /// [`StorageUsage`], so adding the full total again would double-count
+    /// the resume prefix and incorrectly reject safe resumptions.
+    pub fn ensure_model_download_allowed_with_additional(
+        &self,
+        total_file_bytes: u64,
+        additional_bytes: u64,
+    ) -> Result<StorageUsage> {
+        if total_file_bytes > self.policy.max_single_download_bytes {
             return Err(MukeiError::DownloadTooLarge {
                 max_bytes: self.policy.max_single_download_bytes,
-                actual_bytes: expected_bytes,
+                actual_bytes: total_file_bytes,
             });
         }
 
@@ -101,10 +114,10 @@ impl StorageQuotaManager {
         }
 
         let used = usage.accounted_model_bytes();
-        if used.saturating_add(expected_bytes) > self.policy.max_model_storage_bytes {
+        if used.saturating_add(additional_bytes) > self.policy.max_model_storage_bytes {
             return Err(MukeiError::StorageQuotaExceeded {
                 max_bytes: self.policy.max_model_storage_bytes,
-                requested_bytes: expected_bytes,
+                requested_bytes: additional_bytes,
                 used_bytes: used,
             });
         }
@@ -218,5 +231,21 @@ mod tests {
                 used_bytes: 12,
             }
         ));
+    }
+    #[test]
+    fn resume_quota_does_not_double_count_existing_partial_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        write_bytes(&dir.path().join("resume.gguf.partial"), 40);
+        let policy = StorageQuotaPolicy {
+            max_model_storage_bytes: 100,
+            max_partial_storage_bytes: 100,
+            max_single_download_bytes: 100,
+        };
+        let manager = StorageQuotaManager::with_policy(dir.path(), policy);
+
+        // Final file is 70 bytes, but only 30 more bytes will be written.
+        manager
+            .ensure_model_download_allowed_with_additional(70, 30)
+            .unwrap();
     }
 }

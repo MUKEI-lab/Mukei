@@ -4,7 +4,16 @@ import QtTest
 TestCase {
     name: "RTLMirror"
 
-    function test_stub() {
-        verify(true, "Senior frontend specification stub pending bridge-backed assertions");
+    Item {
+        id: mirrored
+        LayoutMirroring.enabled: true
+        LayoutMirroring.childrenInherit: true
+        Item { id: child }
+    }
+
+    function test_children_inherit_mirroring() {
+        verify(mirrored.LayoutMirroring.enabled)
+        verify(mirrored.LayoutMirroring.childrenInherit)
+        verify(child.LayoutMirroring.enabled)
     }
 }

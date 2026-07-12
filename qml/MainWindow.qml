@@ -1,10 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import "events"
 import "theme"
-import "components"
-import "screens"
 
 ApplicationWindow {
     id: root
@@ -16,7 +13,6 @@ ApplicationWindow {
     minimumHeight: Spacing.huge * 5
     color: Theme.p.background
     title: qsTr("Mukei")
-    readonly property var __eventDispatcher: EventDispatcher
 
     Behavior on color {
         enabled: !Theme.reduceMotion
@@ -28,21 +24,45 @@ ApplicationWindow {
 
     signal accessibilityAnnouncementRequested(string text)
 
-    StackView {
-        id: stack
+    AppShell {
         anchors.fill: parent
-        initialItem: ChatScreen {
+    }
+
+    onWidthChanged: ResponsiveStore.updateViewport(width, height)
+    onHeightChanged: ResponsiveStore.updateViewport(width, height)
+
+    Component.onCompleted: {
+        ResponsiveStore.updateViewport(width, height)
+        AppCoordinator.configure(mukeiAgent, mukeiBridge, mukeiRuntime)
+        AppCoordinator.start()
+    }
+
+
+    Connections {
+        target: AccessibilityStore
+        function onAnnouncementReady(text) {
+            root.accessibilityAnnouncementRequested(text)
+        }
+    }
+
+    Connections {
+        target: Qt.application
+        function onStateChanged() {
+            AppCoordinator.onApplicationStateChanged(Qt.application.state)
         }
     }
 
     Shortcut {
         sequence: StandardKey.Preferences
-        onActivated: stack.push(settingsComponent)
+        enabled: CapabilityStore.canOpenSettings
+        onActivated: IntentDispatcher.dispatch({
+            type: "navigation.open",
+            route: "settings"
+        })
     }
 
-    Component {
-        id: settingsComponent
-        SettingsScreen {
-        }
+    Shortcut {
+        sequence: StandardKey.Back
+        onActivated: IntentDispatcher.dispatch({ type: "navigation.back" })
     }
 }

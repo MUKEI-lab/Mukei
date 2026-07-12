@@ -11,8 +11,6 @@
 use async_trait::async_trait;
 use zeroize::Zeroizing;
 
-#[cfg(feature = "network")]
-use crate::error::MukeiError;
 use crate::error::Result;
 use crate::search::engines::{SearchEngine, SearchEngineKind, SearchRequest};
 use crate::search::SearchHit;
@@ -28,8 +26,14 @@ pub struct BraveEngine {
 impl BraveEngine {
     /// Standard production constructor.
     pub fn new(api_key: impl Into<String>) -> Self {
+        Self::from_secret(Zeroizing::new(api_key.into()))
+    }
+
+    /// Construct directly from zeroizing storage so bridge registry
+    /// rebuilds do not keep an additional ordinary `String` alive.
+    pub fn from_secret(api_key: Zeroizing<String>) -> Self {
         Self {
-            api_key: Zeroizing::new(api_key.into()),
+            api_key,
             base_url: "https://api.search.brave.com/res/v1/web/search".to_string(),
         }
     }
@@ -100,17 +104,24 @@ async fn execute_brave(engine: &BraveEngine, request: &SearchRequest) -> Result<
         params.push(("freshness", max_age_str.as_str()));
     }
 
-    let payload: BraveEnvelope = client
-        .get(&engine.base_url)
-        .query(&params)
-        .header("Accept", "application/json")
-        .header("X-Subscription-Token", &*engine.api_key)
-        .send()
-        .await
-        .map_err(|e| MukeiError::WebSearchFailed(format!("brave http: {e}")))?
+    let response = crate::network::send_request_with_retry(
+        "brave search",
+        crate::network::RetryPolicy::web_search(),
+        || {
+            client
+                .get(&engine.base_url)
+                .query(&params)
+                .header("Accept", "application/json")
+                .header("X-Subscription-Token", &*engine.api_key)
+        },
+        |status| status.is_success(),
+    )
+    .await?;
+
+    let payload: BraveEnvelope = response
         .json()
         .await
-        .map_err(|e| MukeiError::WebSearchFailed(format!("brave parse: {e}")))?;
+        .map_err(|error| crate::network::map_reqwest_error("brave response", error))?;
 
     let mut out = Vec::new();
     if let Some(web) = payload.web {

@@ -1,4 +1,5 @@
 module com.mukei.components
+AccessibilityAnnouncer 1.0 AccessibilityAnnouncer.qml
 PrimaryButton 1.0 PrimaryButton.qml
 SecondaryButton 1.0 SecondaryButton.qml
 GhostButton 1.0 GhostButton.qml
@@ -33,3 +34,4 @@ LeftDrawer 1.0 LeftDrawer.qml
 BranchSwitcherSheet 1.0 BranchSwitcherSheet.qml
 FontLoader 1.0 FontLoader.qml
 HapticFeedback 1.0 HapticFeedback.qml
+MukeiIcon 1.0 MukeiIcon.qml

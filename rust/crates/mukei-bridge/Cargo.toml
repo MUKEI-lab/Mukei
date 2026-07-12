@@ -1,12 +1,12 @@
 [package]
 name               = "mukei-bridge"
-version            = "0.7.5"
+version.workspace  = true
 edition            = "2021"
 rust-version       = "1.78"
 description        = "Mukei CXX-Qt bridge — exposes MukeiAgent, MukeiBridge, and JNI helpers to Qt/QML (TRD §1.2, §1.3, §9.4)"
-license            = "LicenseRef-Mukei-Proprietary"
+license            = "Apache-2.0"
 authors            = ["Mukei AI Architecture Pass"]
-# First-party proprietary crate; see mukei-core/Cargo.toml for why
+# First-party Apache-2.0 crate; see mukei-core/Cargo.toml for why
 # `publish = false` is also required for cargo-deny.
 publish            = false
 
@@ -19,12 +19,23 @@ path               = "src/lib.rs"
 # stack so the QML `download_model` flow actually downloads on a
 # tester's phone (TRD §8.1 / REQ-MOD-01). Drop `network` only when
 # building a lab variant that explicitly forbids egress.
-default            = ["android_keystore", "network", "sqlcipher"]
+default            = ["android_keystore", "network", "sqlcipher", "runtime_development", "diagnostics_export"]
 android_keystore   = []
 desktop            = []
 rusqlite           = ["mukei-core/rusqlite"]
 sqlcipher          = ["rusqlite", "mukei-core/sqlcipher"]
 network            = ["mukei-core/network"]
+llama_cpp          = ["mukei-core/llama_cpp"]
+candle             = ["mukei-core/candle"]
+usearch_hnsw       = ["mukei-core/usearch_hnsw"]
+# Runtime deployment mode is explicit and separate from Cargo compiler profiles.
+runtime_development = []
+runtime_test        = []
+runtime_production  = []
+# Runtime hardening policy feature; distinct from Cargo compiler profile `release-hardening`.
+runtime_hardening   = ["mukei-core/runtime_hardening"]
+# Export is a policy capability and may be omitted from production builds.
+diagnostics_export  = []
 
 [dependencies]
 mukei-core = { path = "../mukei-core", default-features = false, features = ["std", "tokio"] }
@@ -47,10 +58,14 @@ serde        = { workspace = true, features = ["derive"] }
 serde_json   = { workspace = true }
 chrono       = { workspace = true }
 uuid         = { workspace = true }
+getrandom    = { workspace = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
 # JNI bindings are only meaningful on Android (TRD §9.4).
-# On desktop builds the feature `desktop` replaces the JNI surface.
+# `ndk-context` exposes the Qt-created JavaVM; the non-exportable AES-GCM
+# key itself remains inside AndroidKeyStore.
+jni = "0.21"
+ndk-context = "0.1"
 nix = { version = "0.27", features = ["term"] }   # terminal helpers & signal handling
 
 [build-dependencies]

@@ -38,7 +38,9 @@ pub use tokio;
 pub mod error;
 pub mod ffi;
 pub mod guard;
+pub mod saas;
 pub mod ui_contract;
+pub mod ui_protocol;
 
 // ----- Crate-internal scaffolding: missing_docs allow-listed for now ----
 // Each of these has a top-level `# Invariants` block; the per-item doc

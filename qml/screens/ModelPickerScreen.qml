@@ -6,69 +6,78 @@ import "../components"
 
 Page {
     id: root
-    property var catalogue: []
-    background: Rectangle {
-        color: Theme.p.background
-    }
+    signal modelChosen(string modelId)
+    background: Rectangle { color: Theme.p.background }
     Accessible.role: Accessible.Pane
-    Accessible.name: qsTr("Model picker")
-    Accessible.description: qsTr("Choose a model to run locally")
+    Accessible.name: qsTr("Choose a model")
+
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: Spacing.lg
-        spacing: Spacing.md
+        anchors.margins: ResponsiveStore.compact ? Spacing.md : Spacing.xl
+        spacing: Spacing.lg
         RowLayout {
+            Layout.fillWidth: true
             IconButton {
                 iconSource: "qrc:/icons/back.svg"
-                Accessible.name: qsTr("Go back")
+                text: qsTr("Back")
+                onClicked: IntentDispatcher.dispatch({ type: "navigation.back" })
             }
             Text {
                 Layout.fillWidth: true
-                text: qsTr("Choose a Model")
+                text: qsTr("Choose a model")
                 color: Theme.p.inkPrimary
                 Component.onCompleted: Type.apply(this, Type.h1)
             }
         }
-        Repeater {
-            model: catalogue.length > 0 ? catalogue : [{
-                    "name": "Gemma 3 4B Instruct",
-                    "size": "2.5 GB",
-                    "quant": "Q4_K_M",
-                    "blurb": "Fast. Good for general chat."
-                }]
+        ListView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            model: ModelStore.models
+            spacing: Spacing.md
+            clip: true
             delegate: Rectangle {
-                Layout.fillWidth: true
+                required property string modelId
+                required property string displayName
+                required property string description
+                required property string sizeLabel
+                required property bool installed
+                width: ListView.view.width
+                implicitHeight: pickerContent.implicitHeight + Spacing.lg * 2
                 radius: Theme.radiusLg
                 color: Theme.p.surface
-                implicitHeight: cardColumn.implicitHeight + Spacing.md * 2
+                border.width: 1
+                border.color: Theme.p.divider
                 ColumnLayout {
-                    id: cardColumn
+                    id: pickerContent
                     anchors.fill: parent
-                    anchors.margins: Spacing.md
+                    anchors.margins: Spacing.lg
                     Text {
-                        text: modelData.name
+                        Layout.fillWidth: true
+                        text: displayName
                         color: Theme.p.inkPrimary
+                        wrapMode: Text.Wrap
                         Component.onCompleted: Type.apply(this, Type.h3)
                     }
                     Text {
-                        text: modelData.size + qsTr(" · ") + modelData.quant
+                        text: sizeLabel
                         color: Theme.p.inkSecondary
                         Component.onCompleted: Type.apply(this, Type.bodySmall)
                     }
                     Text {
-                        text: modelData.blurb
+                        Layout.fillWidth: true
+                        text: description
                         color: Theme.p.inkSecondary
                         wrapMode: Text.Wrap
-                        Component.onCompleted: Type.apply(this, Type.bodySmallItalic)
+                        Component.onCompleted: Type.apply(this, Type.bodyUI)
                     }
                     SecondaryButton {
-                        text: qsTr("Download")
+                        text: installed ? qsTr("Installed") : qsTr("Download")
+                        enabled: !installed && CapabilityStore.canDownloadModel && !StorageStore.critical
+                        onClicked: IntentDispatcher.dispatch({ type: "model.download", modelId: modelId })
                     }
                 }
             }
         }
-        GhostButton {
-            text: qsTr("Use a custom GGUF file")
-        }
     }
+    Component.onCompleted: IntentDispatcher.dispatch({ type: "models.refresh" })
 }

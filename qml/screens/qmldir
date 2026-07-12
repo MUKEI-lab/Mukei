@@ -9,3 +9,4 @@ SettingsScreen 1.0 SettingsScreen.qml
 SafeModeScreen 1.0 SafeModeScreen.qml
 RagRebuildPromptScreen 1.0 RagRebuildPromptScreen.qml
 ToolResultExpandedScreen 1.0 ToolResultExpandedScreen.qml
+StartupScreen 1.0 StartupScreen.qml

@@ -21,6 +21,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+use zeroize::Zeroizing;
 
 use crate::error::{MukeiError, Result};
 use crate::search::engines::{BraveEngine, SearchEngine, SearchEngineKind, TavilyEngine};
@@ -72,14 +73,29 @@ impl WebSearchTool {
         tavily_key: impl Into<String>,
         remote_policy: RemoteFeaturePolicy,
     ) -> Self {
+        Self::with_secret_keys_and_policy(
+            Zeroizing::new(brave_key.into()),
+            Zeroizing::new(tavily_key.into()),
+            remote_policy,
+        )
+    }
+
+    /// Zeroizing-key constructor used by the bridge. Ownership moves all
+    /// the way into the provider engines without an intermediate normal
+    /// `String` binding.
+    pub fn with_secret_keys_and_policy(
+        brave_key: Zeroizing<String>,
+        tavily_key: Zeroizing<String>,
+        remote_policy: RemoteFeaturePolicy,
+    ) -> Self {
         let mut engines: HashMap<SearchEngineKind, Arc<dyn SearchEngine>> = HashMap::new();
         engines.insert(
             SearchEngineKind::Brave,
-            Arc::new(BraveEngine::new(brave_key.into())),
+            Arc::new(BraveEngine::from_secret(brave_key)),
         );
         engines.insert(
             SearchEngineKind::Tavily,
-            Arc::new(TavilyEngine::new(tavily_key.into())),
+            Arc::new(TavilyEngine::from_secret(tavily_key)),
         );
         Self {
             planner: Arc::new(SearchPlanner::new(engines, PlannerPolicy::default())),

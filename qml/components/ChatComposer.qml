@@ -7,7 +7,9 @@ FocusScope {
     id: root
 
     property alias text: textArea.text
+    property alias cursorPosition: textArea.cursorPosition
     property bool isStreaming: false
+    property bool canSend: true
     signal sendRequested(string text)
     signal stopRequested
     signal attachRequested
@@ -52,7 +54,8 @@ FocusScope {
             Component.onCompleted: Type.apply(this, Type.bodyUI)
             Keys.onPressed: function (event) {
                 if ((event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)) && event.key === Qt.Key_Return) {
-                    root.sendRequested(textArea.text);
+                    if (!root.isStreaming && root.canSend && textArea.text.trim().length > 0)
+                        root.sendRequested(textArea.text);
                     event.accepted = true;
                 }
             }
@@ -60,7 +63,7 @@ FocusScope {
 
         IconButton {
             iconSource: root.isStreaming ? "qrc:/icons/stop.svg" : "qrc:/icons/send.svg"
-            enabled: root.isStreaming || textArea.text.trim().length > 0
+            enabled: root.isStreaming ? true : (root.canSend && textArea.text.trim().length > 0)
             Accessible.name: root.isStreaming ? qsTr("Stop response") : qsTr("Send message")
             Accessible.description: root.isStreaming ? qsTr("Stop the current model response") : qsTr("Send this message to Mukei")
             onClicked: root.isStreaming ? root.stopRequested() : root.sendRequested(textArea.text)

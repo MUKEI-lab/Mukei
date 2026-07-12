@@ -141,8 +141,15 @@ pub struct ChatMessage {
 
 impl ChatMessage {
     pub fn user(branch: BranchId, content: impl Into<String>) -> Self {
+        Self::user_with_id(MessageId::new(), branch, content)
+    }
+
+    /// Construct the active user message with the durable repository ID.
+    /// This lets the context backend remove the just-persisted turn from
+    /// loaded history instead of injecting the same prompt twice.
+    pub fn user_with_id(id: MessageId, branch: BranchId, content: impl Into<String>) -> Self {
         Self {
-            id: MessageId::new(),
+            id,
             role: Role::User,
             branch,
             is_active: true,

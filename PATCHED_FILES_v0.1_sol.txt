@@ -1,0 +1,21 @@
+Restored/added:
+rust/crates/mukei-core/src/storage/settings.rs
+rust/migrations/V008__settings_and_secret_refs.sql
+rust/migrations/V008__down.sql
+rust/migrations/V009__schema_metadata_and_rag_tombstones.sql
+rust/migrations/V009__down.sql
+rust/migrations/legacy/V008__schema_metadata_and_rag_tombstones.sql
+
+Modified:
+rust/crates/mukei-core/src/storage/mod.rs
+rust/crates/mukei-core/src/storage/migrations.rs
+rust/crates/mukei-core/src/error.rs
+rust/crates/mukei-core/src/ui_contract.rs
+rust/crates/mukei-bridge/src/lib.rs
+
+Preserved from v0.9:
+.github/workflows/ci.yml
+.gitignore
+rust/crates/mukei-core/src/network.rs
+rust/crates/mukei-core/src/config/mod.rs
+rust/migrations/000_default_config.toml

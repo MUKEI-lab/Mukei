@@ -33,6 +33,101 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::{MukeiError, Result};
 
+/// Stable identity class for an inference backend. Production readiness must
+/// never infer this from a Rust type name or a debug string.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackendKind {
+    /// A real production inference implementation backed by the selected model.
+    Production,
+    /// Explicit development/test backend. It may be active, but is never product-ready.
+    DevelopmentMock,
+    /// No runnable backend is available.
+    Unavailable,
+}
+
+impl BackendKind {
+    pub const fn as_tag(self) -> &'static str {
+        match self {
+            Self::Production => "production",
+            Self::DevelopmentMock => "development_mock",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+/// Stable unavailable-state reason. This lets supervision distinguish a
+/// failed activation from a backend that was never injected without parsing
+/// error strings or Rust type names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackendUnavailableReason {
+    Unspecified,
+    NotInjected,
+    NoModelSelected,
+    ModelMissing,
+    ModelVerifying,
+    ModelVerifiedNotActivated,
+    ActivationInProgress,
+    ActivationFailed,
+    Deactivating,
+}
+
+impl BackendUnavailableReason {
+    pub const fn as_tag(self) -> &'static str {
+        match self {
+            Self::Unspecified => "unspecified",
+            Self::NotInjected => "not_injected",
+            Self::NoModelSelected => "no_model_selected",
+            Self::ModelMissing => "model_missing",
+            Self::ModelVerifying => "model_verifying",
+            Self::ModelVerifiedNotActivated => "model_verified_not_activated",
+            Self::ActivationInProgress => "activation_in_progress",
+            Self::ActivationFailed => "activation_failed",
+            Self::Deactivating => "deactivating",
+        }
+    }
+}
+
+/// Stable backend identity used by activation/readiness projections.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BackendIdentity {
+    pub kind: BackendKind,
+    pub implementation: &'static str,
+    pub unavailable_reason: Option<BackendUnavailableReason>,
+}
+
+impl BackendIdentity {
+    pub const fn production(implementation: &'static str) -> Self {
+        Self {
+            kind: BackendKind::Production,
+            implementation,
+            unavailable_reason: None,
+        }
+    }
+
+    pub const fn development_mock(implementation: &'static str) -> Self {
+        Self {
+            kind: BackendKind::DevelopmentMock,
+            implementation,
+            unavailable_reason: None,
+        }
+    }
+
+    pub const fn unavailable(implementation: &'static str) -> Self {
+        Self::unavailable_with_reason(implementation, BackendUnavailableReason::Unspecified)
+    }
+
+    pub const fn unavailable_with_reason(
+        implementation: &'static str,
+        reason: BackendUnavailableReason,
+    ) -> Self {
+        Self {
+            kind: BackendKind::Unavailable,
+            implementation,
+            unavailable_reason: Some(reason),
+        }
+    }
+}
+
 /// 1 MiB read window for the full-file SHA stream. Matches the GGUF
 /// chunked-write step so the verifier and the writer share a rhythm.
 const SHA_STREAM_CHUNK: usize = 1024 * 1024;
@@ -297,6 +392,13 @@ pub fn has_tool_call(text: &str) -> bool {
 /// [`MockInferenceBackend`].
 #[async_trait::async_trait]
 pub trait InferenceBackend: Send + Sync {
+    /// Stable backend identity. The conservative default is unavailable so an
+    /// implementation that forgets to declare itself can never become
+    /// product-ready accidentally.
+    fn identity(&self) -> BackendIdentity {
+        BackendIdentity::unavailable("unspecified_backend")
+    }
+
     /// Run the model on `prompt`, streaming tokens through
     /// `token_sender`. Honour `cancel_token` for the typed
     /// `StopReason::UserStopped` path.
@@ -306,6 +408,55 @@ pub trait InferenceBackend: Send + Sync {
         cancel: CancellationToken,
         token_sender: mpsc::Sender<String>,
     ) -> Result<InferenceOutcome>;
+}
+
+/// Explicit non-runnable backend used when production activation has not
+/// supplied a real backend yet. This is deliberately different from a mock:
+/// chat fails closed instead of fabricating a model response.
+#[derive(Clone, Debug)]
+pub struct UnavailableInferenceBackend {
+    implementation: &'static str,
+    reason: BackendUnavailableReason,
+}
+
+impl UnavailableInferenceBackend {
+    pub const fn new(implementation: &'static str) -> Self {
+        Self::new_with_reason(implementation, BackendUnavailableReason::Unspecified)
+    }
+
+    pub const fn new_with_reason(
+        implementation: &'static str,
+        reason: BackendUnavailableReason,
+    ) -> Self {
+        Self {
+            implementation,
+            reason,
+        }
+    }
+}
+
+impl Default for UnavailableInferenceBackend {
+    fn default() -> Self {
+        Self::new_with_reason("backend_not_activated", BackendUnavailableReason::NotInjected)
+    }
+}
+
+#[async_trait::async_trait]
+impl InferenceBackend for UnavailableInferenceBackend {
+    fn identity(&self) -> BackendIdentity {
+        BackendIdentity::unavailable_with_reason(self.implementation, self.reason)
+    }
+
+    async fn run(
+        &self,
+        _prompt: &str,
+        _cancel: CancellationToken,
+        _token_sender: mpsc::Sender<String>,
+    ) -> Result<InferenceOutcome> {
+        Err(MukeiError::ModelLoadFailed(
+            "inference backend is unavailable until model activation succeeds".to_string(),
+        ))
+    }
 }
 
 /// Configurable test-time backend. Used by the sandbox build and by
@@ -333,6 +484,10 @@ impl Default for MockInferenceBackend {
 
 #[async_trait::async_trait]
 impl InferenceBackend for MockInferenceBackend {
+    fn identity(&self) -> BackendIdentity {
+        BackendIdentity::development_mock("mock_inference")
+    }
+
     async fn run(
         &self,
         prompt: &str,
@@ -347,8 +502,6 @@ impl InferenceBackend for MockInferenceBackend {
 
         let mut acc = String::new();
         let mut idx = 0usize;
-        let chunk = self.chunk_bytes.max(1);
-        let _ = chunk; // silence false-positive lint when bytes.len() < chunk
         let chunk = self.chunk_bytes.max(1);
 
         while idx < bytes.len() {
@@ -391,10 +544,25 @@ fn is_utf8_boundary(bytes: &[u8], at: usize) -> bool {
     at == bytes.len() || (bytes[at] & 0b1100_0000) != 0b1000_0000
 }
 
-/// Default async entry-point used by [`crate::agent::loop_`]. Falls
-/// back to [`MockInferenceBackend`] when `feature = "llama_cpp"` is off
-/// so the sandbox build is still exercised end-to-end.
+/// Legacy compatibility entry-point for callers that do not inject an
+/// [`InferenceBackend`]. It now fails closed through an explicit unavailable
+/// backend instead of silently constructing a mock. New production callers
+/// should use [`run_inference_typed`] with an activated backend.
 pub async fn run_inference(
+    context_text: &str,
+    cancel_token: CancellationToken,
+    token_sender: mpsc::Sender<String>,
+) -> Result<(String, u64)> {
+    let backend = UnavailableInferenceBackend::default();
+    let outcome = backend
+        .run(context_text, cancel_token, token_sender)
+        .await?;
+    Ok((outcome.assistant_text, outcome.used_tokens))
+}
+
+/// Explicit test/development compatibility helper. The name intentionally
+/// makes mock selection visible at every call site.
+pub async fn run_inference_with_mock_for_tests(
     context_text: &str,
     cancel_token: CancellationToken,
     token_sender: mpsc::Sender<String>,
@@ -406,8 +574,8 @@ pub async fn run_inference(
     Ok((outcome.assistant_text, outcome.used_tokens))
 }
 
-/// Typed entry-point used by the bridge crate and the agent loop's
-/// recovery / stop-reason aware path.
+/// Typed compatibility entry-point for callers that already own an
+/// inference backend but prefer a free-function adapter.
 pub async fn run_inference_typed(
     backend: &dyn InferenceBackend,
     context_text: &str,
@@ -533,10 +701,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn legacy_run_inference_fails_closed_without_an_injected_backend() {
+        let (tx, _rx) = mpsc::channel::<String>(4);
+        let err = run_inference("hello world", CancellationToken::new(), tx)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, MukeiError::ModelLoadFailed(_)));
+    }
+
+    #[test]
+    fn backend_identity_distinguishes_mock_from_unavailable() {
+        assert_eq!(
+            MockInferenceBackend::default().identity().kind,
+            BackendKind::DevelopmentMock
+        );
+        assert_eq!(
+            UnavailableInferenceBackend::default().identity().kind,
+            BackendKind::Unavailable
+        );
+    }
+
+    #[tokio::test]
     async fn run_inference_compat_shim_returns_tokens() {
         let (tx, mut rx) = mpsc::channel::<String>(64);
         let tok = CancellationToken::new();
-        let (out, n) = run_inference("hello world", tok, tx).await.unwrap();
+        let (out, n) = run_inference_with_mock_for_tests("hello world", tok, tx).await.unwrap();
         assert_eq!(out, "hello world");
         assert!(n > 0);
         while rx.try_recv().is_ok() {}

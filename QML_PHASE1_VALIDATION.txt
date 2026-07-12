@@ -1,0 +1,20 @@
+Mukei QML Architecture Phase 1 Validation
+=========================================
+
+Static architecture guard: PASS (0 errors, 0 warnings)
+QML security scan: PASS for production QML (0 critical; one test-harness-only medium finding)
+QML module file references: 71 present, 0 missing
+QRC resources: 36 present, 0 missing
+SVG icons: 27 present
+Singleton registrations: 13 valid
+QML delimiter structural scan: PASS
+TOML parse: PASS
+XML/QRC parse: PASS
+CMake syntax reached Qt discovery successfully
+Qt configure/build: BLOCKED — Qt6 development package unavailable in this environment
+qmllint/qmlformat: BLOCKED — tools unavailable in this environment
+Rust backend compilation: not rerun; backend remains Codex Phase-2 work
+
+Architecture implementation boundary:
+- Phase 1 foundation implemented
+- Native Rust projection models and durable UI-session repository remain Phase 2

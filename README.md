@@ -2,13 +2,13 @@
 
 # Mukei
 
-**A zero-telemetry, fault-tolerant, on-device AI agent.**
-Built in Rust, fronted by Qt 6 + QML, accelerated by llama.cpp.
+**A local-first, privacy-preserving, fault-tolerant AI agent.**
+Built in Rust, fronted by Qt 6 + QML, with an on-device llama.cpp inference path.
 
-[![tests](https://img.shields.io/badge/tests-251%20passing-success)](#tests)
+[![tests](https://img.shields.io/badge/tests-native%20validation%20pending-yellow)](#tests)
 [![rust](https://img.shields.io/badge/rust-1.78%2B-orange)](#requirements)
-[![license](https://img.shields.io/badge/license-Proprietary-lightgrey)](#license)
-[![status](https://img.shields.io/badge/status-main%20CI%20green-blue)](#project-status)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](#license)
+[![status](https://img.shields.io/badge/status-post--merge%20hardening%20snapshot-yellow)](#project-status)
 
 </div>
 
@@ -16,12 +16,12 @@ Built in Rust, fronted by Qt 6 + QML, accelerated by llama.cpp.
 
 ## What is Mukei?
 
-Mukei is a privacy-first AI agent designed to run **entirely on the user's device** — no telemetry, no cloud round-trips, no opaque background calls. It targets mid-range Android phones and Linux/macOS desktops, with a clean separation between a pure-Rust kernel and the Qt/QML user interface.
+Mukei is a privacy-first, **local-first** AI agent. Core chat, storage, recovery, and the intended production inference path are designed for on-device execution. Optional network-backed capabilities are separate, policy-gated surfaces rather than an implicit requirement. The project targets mid-range Android phones and desktop development hosts, with a clean separation between a pure-Rust kernel and the Qt/QML user interface.
 
 | | |
 |---|---|
 | 🎯 **Mission** | A trustworthy on-device agent that survives OOM kills, thermal throttling, KV-cache corruption, and tool-loop death spirals. |
-| 🛡️ **Privacy** | Zero telemetry. Local inference via `llama.cpp`. All secrets wrapped with Android Keystore. |
+| 🛡️ **Privacy** | Local-first execution, no default remote observability export, explicit remote-feature policy, local inference via `llama.cpp`, and Android Keystore-backed database-key wrapping. |
 | 🧱 **Architecture** | Rust core (`mukei-core`) + CXX-Qt bridge (`mukei-bridge`) + manual C-FFI fallback (`mukei-ffi-shim`). |
 | 🪪 **Provenance** | Every requirement traces to the [TRD](rust/docs/TRD.md), [PRD](rust/docs/PRD.md), [Backend Schema](rust/docs/BS.md), [Application Flow](rust/docs/AF.md), or [UX Brief](rust/docs/UXB.md). |
 | 🤖 **Models** | Gemma 4 E2B (3.46 GB Q4_K_M) for 4-6 GB devices, Gemma 4 E4B (5.41 GB Q4_K_M) for 8 GB+ devices, downloaded on-device and SHA-256 verified before mmap. |
@@ -66,40 +66,49 @@ Three crates, one direction of dependency. `mukei-core` never links Qt — that 
 
 ## Project status
 
+The canonical current-state summary is [docs/CURRENT_IMPLEMENTATION_STATUS.md](docs/CURRENT_IMPLEMENTATION_STATUS.md).
+
 | Area | Status | Notes |
 |---|---|---|
-| **Rust kernel** | ✅ Verified on main | All-features verification restored: 248 `mukei-core` tests passing (219 unit + 12 integration + 6 + 3 + 3 + 4 suites + 1 doc-test) |
-| **C-FFI shim** | ✅ Stable scaffold | 3 unit tests; checked-in C header with drift-detector test |
-| **CXX-Qt bridge** | 🟡 Compiles under Qt | Qt 6.5+ required on the host; sandbox CI skips this crate |
-| **Migrations V001–V005** | ✅ Authored | Conversations, messages, chunks, recovery, audit, SAF tokens, branches, audit-chain checks |
-| **GBNF tool grammar** | ✅ Per-tool schema | `grammars/tool_calling.gbnf` |
-| **llama.cpp integration** | ✅ Prebuilt path merged | Real load lives in the bridge; the vendored/prebuilt `libllama.a` per-ABI pipeline is now merged into `main` |
-| **Gemma 4 downloader** | ✅ Wired | Commit-pinned HF URLs, full-file SHA-256 verify, resumable, 416-restart safe |
-| **Candle MiniLM embedder** | ✅ Verified on main | Default build still uses the deterministic mock embedder, but the real candle path now compiles and tests cleanly under `--all-features` after the `half = =2.4.1` compatibility repin |
-| **QML editorial-luxury UI** | 🟡 Scaffold on `codex/create-qml-directory-structure-and-files` | 10 screens + 34 components + 4 theme singletons; real SIL OFL variable fonts and 27 unique Phosphor icons; `qml-check` CI enforces qmllint / SVG uniqueness / TTF magic / DDG regression / cmake configure |
+| **Rust kernel** | 🟡 Hardened source snapshot | Post-merge activation, Protocol V2, observability, scoped RAG, SaaS-domain, and remote-policy foundations are present. Fresh full Cargo/Clippy/test validation is still required. |
+| **Inference activation** | 🟡 Truthful lifecycle integrated | Downloaded/verified/active are separate states; production readiness requires a real active backend. Real per-ABI llama.cpp activation remains a release gate. |
+| **C-FFI shim** | 🟡 Hardened, revalidation required | Guarding and ABI-safety work are present; the current combined tree still needs a fresh shim test pass. |
+| **CXX-Qt bridge** | 🟡 Source-integrated | Protocol V2, non-chat async request tracking, secure bootstrap, provenance, recovery, persistence, and QML projection surfaces are present. Qt/CXX-Qt native compilation remains a gate. |
+| **Database migrations** | 🟡 V001–V013 registered | V013 adds local-first tenancy, entitlements, usage ledger, and quota policy. Historical fresh-database validation covered only through V012; V013 needs a new migration pass. |
+| **QML architecture** | ✅ Integrated source baseline | Scoped stores, contract negotiation, lifecycle routing, operation projection, recovery, models, documents, diagnostics, accessibility, responsive shell, and Protocol V2 tests are present. |
+| **Observability** | 🟡 Local-first foundation | Bounded events/metrics/health/SLO and privacy policy exist; this is not proof of production telemetry operations. |
+| **SaaS foundation** | 🟡 Domain/transport foundation only | Tenant/workspace/entitlement/usage/quota primitives and a hardened transport boundary exist. Complete cloud product, authz, billing, and QML SaaS flows are not claimed. |
+| **Dependency security** | 🔴 Release gate open | Lockfile still contains `crossbeam-epoch 0.9.18` and `cxx 1.0.194`, which the latest recorded audit flagged for upgrade. |
+| **Android release** | 🔴 Not release-certified | Requires dependency remediation, full Rust/Qt/JNI/Gradle validation, real backend linkage, and physical-device testing. |
 
 ---
 
 ## Tests
 
+Run the complete merged validation from `rust/`:
+
 ```bash
-cd rust
-cargo test -p mukei-core      --no-default-features --features "std,tokio"
+cargo fmt --all -- --check
+cargo check --workspace
+cargo clippy -p mukei-core --all-targets --all-features -- -D warnings
+cargo clippy -p mukei-bridge --all-targets --features "sqlcipher,network" -- -D warnings
+cargo test -p mukei-core --all-features
 cargo test -p mukei-ffi-shim
 ```
 
-Current run on **`main`**:
+The current archive contains **467 Rust test annotations** and **23 QML `tst_*.qml` files**. These are source-inventory counts, not pass counts. Historical logs under `reports/` predate the full post-merge hardening set and therefore do not certify this snapshot. This documentation refresh did not have a Rust/Cargo or Qt toolchain available, so **no new native pass is claimed**.
 
-> **Verification Pass — 2026-06-30.** The post-merge mainline is green end-to-end: `cargo fmt --all -- --check`, the three-way clippy matrix (`std,tokio`, `std,tokio,rusqlite`, `std,tokio,network`), sandbox invariants, `cargo test -p mukei-core --no-default-features --features "std,tokio,rusqlite"`, `cargo test -p mukei-ffi-shim`, `cargo test -p mukei-core --all-features`, `cargo deny --all-features -D warnings`, and `cargo audit` all pass. The previous candle/half/rand verification blocker is closed on `main`; explicit root `[search]` config is now admitted by `MukeiConfig::known_keys()`.
+Current dependency-security status is also not green: the checked-in lockfile still contains `crossbeam-epoch 0.9.18` and `cxx 1.0.194`, versions flagged by the latest recorded project audit. See the current status document for release gates.
 
-```
-mukei-core  (--all-features) 219 unit + 12 integration + 6 fingerprint
-                             + 3 grammar + 3 migrator + 4 sentinel
-                             + 1 doc-test                 ──► 248 passed
-mukei-ffi-shim                                                 3 passed
-                                                           ─────────
-                                                           251 passed total
-```
+### Post-merge hardening now represented in source
+
+- **Truthful inference activation:** verified artifact state is separate from active-backend readiness; stale activations cannot overwrite newer selections; production failure never silently becomes a mock success.
+- **Protocol V2 reliability:** bounded command envelopes, explicit acknowledgements, idempotent replay protection, event identity, per-stream sequencing, and operation lifecycle projection.
+- **Async bridge safety:** non-chat I/O uses request/domain generations so late completions cannot overwrite newer projections.
+- **Secure bootstrap and provenance:** wrapped database-key lifecycle, zeroizing key memory, and distinct product/protocol/schema/build/runtime metadata.
+- **Privacy-safe observability:** bounded local-first events, metrics, health, SLO state, sensitivity checks, and privacy-epoch invalidation.
+- **Scope-safe RAG:** explicit tenant/workspace retrieval scope, persisted scope metadata, capability truthfulness, and context-budget enforcement.
+- **SaaS foundation:** V013 tenancy/workspace/entitlement/usage/quota persistence plus a separate production-oriented transport boundary; not a complete SaaS product.
 
 ### Verified invariants
 
@@ -298,7 +307,7 @@ Mukei/
 │   ├── Cargo.toml               ← panic = "unwind" pinned on every profile
 │   ├── README.md                ← engineering README
 │   ├── crates/
-│   │   ├── mukei-core/          ← pure-Rust kernel · 248 tests passing on `main` (--all-features)
+│   │   ├── mukei-core/          ← pure-Rust kernel · merged v1.0 integration candidate
 │   │   ├── mukei-bridge/        ← CXX-Qt + JNI surface (Qt host required)
 │   │   └── mukei-ffi-shim/      ← manual extern "C" escape hatch · 3 tests
 │   ├── llama-cpp-stub/          ← workspace placeholder (release-hardened)
@@ -360,5 +369,5 @@ For the Qt-integrated bridge build, follow the dedicated guide in [`rust/README.
 
 ## License
 
-Proprietary. Copyright (c) 2026 Mukei. All rights reserved. See
-[LICENSE](LICENSE).
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE)
+and [NOTICE](NOTICE).

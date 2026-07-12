@@ -1,0 +1,15 @@
+ADDED    PATCH_NOTES_v0.5_sol.md
+ADDED    VALIDATION_v0.5_sol.txt
+ADDED    qml/android/src/com/mukei/security/MukeiSecretStore.java
+MODIFIED rust/crates/mukei-bridge/Cargo.toml
+MODIFIED rust/crates/mukei-bridge/src/agent_runtime.rs
+ADDED    rust/crates/mukei-bridge/src/android_secret_store.rs
+MODIFIED rust/crates/mukei-bridge/src/bridge_state.rs
+MODIFIED rust/crates/mukei-bridge/src/lib.rs
+MODIFIED rust/crates/mukei-core/src/agent/loop_.rs
+MODIFIED rust/crates/mukei-core/src/storage/audit_log.rs
+MODIFIED rust/crates/mukei-core/src/storage/download_jobs.rs
+MODIFIED rust/crates/mukei-core/src/storage/migrations.rs
+MODIFIED rust/crates/mukei-core/src/storage/mod.rs
+MODIFIED rust/crates/mukei-core/src/storage/recovery.rs
+MODIFIED rust/crates/mukei-core/src/storage/saf.rs

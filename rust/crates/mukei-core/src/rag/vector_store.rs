@@ -36,12 +36,14 @@ compile_error!(
      `usearch_hnsw` feature in release builds."
 );
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use parking_lot::Mutex;
 
 use crate::error::{MukeiError, Result};
+use crate::rag::retriever::RetrievalScope;
 
 /// Suffix appended to the live path while writing.
 pub const ATOMIC_SUFFIX: &str = "swap";
@@ -142,6 +144,11 @@ struct Inner {
     #[serde(default)]
     header: Option<StoreHeader>,
     vectors: Vec<(u64, Vec<f32>, String)>,
+    /// Explicit scope metadata for vectors indexed through the scoped API.
+    /// Legacy vectors intentionally remain absent and are therefore not
+    /// eligible for scoped retrieval.
+    #[serde(default)]
+    scopes: BTreeMap<u64, RetrievalScope>,
 }
 
 impl VectorStore {
@@ -264,7 +271,28 @@ impl VectorStore {
         if let Some(index) = self.hnsw.lock().as_ref() {
             let _ = index.add(chunk_id, &vec);
         }
-        self.inner.lock().vectors.push((chunk_id, vec, digest));
+        let mut inner = self.inner.lock();
+        inner.scopes.remove(&chunk_id);
+        inner.vectors.push((chunk_id, vec, digest));
+    }
+
+    /// Add a vector with explicit tenant/workspace scope. Scoped retrieval
+    /// only returns vectors added through this API, so legacy unscoped vectors
+    /// cannot accidentally cross an authorization boundary.
+    pub fn add_scoped(
+        &self,
+        chunk_id: u64,
+        vec: Vec<f32>,
+        digest: String,
+        scope: RetrievalScope,
+    ) {
+        #[cfg(feature = "usearch_hnsw")]
+        if let Some(index) = self.hnsw.lock().as_ref() {
+            let _ = index.add(chunk_id, &vec);
+        }
+        let mut inner = self.inner.lock();
+        inner.scopes.insert(chunk_id, scope);
+        inner.vectors.push((chunk_id, vec, digest));
     }
 
     /// Remove a single chunk by id. No-op when the id is absent.
@@ -273,10 +301,9 @@ impl VectorStore {
         if let Some(index) = self.hnsw.lock().as_ref() {
             let _ = index.remove(chunk_id);
         }
-        self.inner
-            .lock()
-            .vectors
-            .retain(|(id, _, _)| *id != chunk_id);
+        let mut inner = self.inner.lock();
+        inner.vectors.retain(|(id, _, _)| *id != chunk_id);
+        inner.scopes.remove(&chunk_id);
     }
 
     /// Forget every chunk that matches `digest`. Vector bytes are
@@ -285,8 +312,9 @@ impl VectorStore {
     /// (PRD REQ-RAG-03 — "Forget this source" UX.)
     pub fn shred(&self, digest: &str) -> usize {
         let mut removed = 0usize;
+        let mut removed_ids = Vec::new();
         let mut g = self.inner.lock();
-        g.vectors.retain_mut(|(_id, vec, d)| {
+        g.vectors.retain_mut(|(id, vec, d)| {
             if d == digest {
                 // Zeroise the vector floats in place.
                 for v in vec.iter_mut() {
@@ -294,14 +322,18 @@ impl VectorStore {
                 }
                 #[cfg(feature = "usearch_hnsw")]
                 if let Some(index) = self.hnsw.lock().as_ref() {
-                    let _ = index.remove(*_id);
+                    let _ = index.remove(*id);
                 }
+                removed_ids.push(*id);
                 removed += 1;
                 false
             } else {
                 true
             }
         });
+        for id in removed_ids {
+            g.scopes.remove(&id);
+        }
         removed
     }
 
@@ -310,6 +342,7 @@ impl VectorStore {
     /// side; this method only handles the in-memory mirror.
     pub fn shred_many(&self, chunk_ids: &[u64]) -> usize {
         let mut removed = 0usize;
+        let mut removed_ids = Vec::new();
         let mut g = self.inner.lock();
         g.vectors.retain_mut(|(id, vec, _d)| {
             if chunk_ids.contains(id) {
@@ -320,18 +353,33 @@ impl VectorStore {
                 if let Some(index) = self.hnsw.lock().as_ref() {
                     let _ = index.remove(*id);
                 }
+                removed_ids.push(*id);
                 removed += 1;
                 false
             } else {
                 true
             }
         });
+        for id in removed_ids {
+            g.scopes.remove(&id);
+        }
         removed
     }
 
     /// Number of vectors currently in the store.
     pub fn count(&self) -> usize {
         self.inner.lock().vectors.len()
+    }
+
+    /// Number of vectors carrying explicit scope metadata and therefore
+    /// eligible for scoped retrieval.
+    pub fn scoped_count(&self) -> usize {
+        let inner = self.inner.lock();
+        inner
+            .vectors
+            .iter()
+            .filter(|(id, _, _)| inner.scopes.contains_key(id))
+            .count()
     }
 
     /// Snapshot of every `chunk_id` currently in the store. Used by
@@ -379,12 +427,49 @@ impl VectorStore {
         Ok(())
     }
 
-    /// Top-K cosine-similarity search.
-    ///
-    /// With `feature = "usearch_hnsw"`, this delegates to the real HNSW
-    /// backend (sub-30 ms target on production hardware). Without the
-    /// feature, it falls back to a pure-Rust linear scan — acceptable
-    /// for sandbox / unit tests but NOT production.
+    /// Scope-filtered top-K cosine search. The store boundary filters by the
+    /// exact tenant/workspace/actor/authorization scope before any candidate
+    /// ids are returned to the resolver. Legacy vectors without scope metadata
+    /// are intentionally ineligible.
+    pub fn search_scoped(
+        &self,
+        q: &[f32],
+        scope: &RetrievalScope,
+        k: usize,
+    ) -> Vec<(u64, f32)> {
+        if k == 0 {
+            return Vec::new();
+        }
+        let scoped_ids: std::collections::BTreeSet<u64> = {
+            let inner = self.inner.lock();
+            inner
+                .scopes
+                .iter()
+                .filter_map(|(id, candidate_scope)| (candidate_scope == scope).then_some(*id))
+                .collect()
+        };
+        if scoped_ids.is_empty() {
+            return Vec::new();
+        }
+
+        // Ask the backend for the full local candidate set, then apply the
+        // persisted scope filter and deterministic score/id ordering. This is
+        // intentionally conservative for the current single-index layout; a
+        // future physically-partitioned index can optimize this without
+        // changing the authorization contract.
+        let mut matches = self.search(q, self.count());
+        matches.retain(|(id, _)| scoped_ids.contains(id));
+        matches.sort_by(|(left_id, left_score), (right_id, right_score)| {
+            right_score
+                .total_cmp(left_score)
+                .then_with(|| left_id.cmp(right_id))
+        });
+        matches.truncate(k);
+        matches
+    }
+
+    /// Top-K cosine-similarity search without authorization filtering.
+    /// Scoped production retrieval should use [`Self::search_scoped`].
     pub fn search(&self, q: &[f32], k: usize) -> Vec<(u64, f32)> {
         #[cfg(feature = "usearch_hnsw")]
         {
@@ -393,7 +478,7 @@ impl VectorStore {
                     let scored: Vec<(u64, f32)> = matches
                         .keys
                         .into_iter()
-                        .zip(matches.distances.into_iter())
+                        .zip(matches.distances)
                         // usearch returns distances; convert to a
                         // similarity score in `[-1, 1]` for callers
                         // that previously relied on cosine.

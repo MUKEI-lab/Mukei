@@ -18,6 +18,12 @@ Drawer {
         spacing: Spacing.md
         PrimaryButton {
             text: qsTr("New Chat")
+            enabled: CapabilityStore.canClearConversation || CapabilityStore.canSendMessage
+            onClicked: {
+                if (CapabilityStore.canClearConversation)
+                    IntentDispatcher.dispatch({ type: "chat.clearConversation" })
+                root.close()
+            }
         }
         SearchField {
             Layout.fillWidth: true
@@ -25,9 +31,22 @@ Drawer {
         ConversationList {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            onConversationSelected: function(conversationId, branchId) {
+                IntentDispatcher.dispatch({
+                    type: "conversation.open",
+                    conversationId: conversationId,
+                    branchId: branchId
+                })
+                root.close()
+            }
         }
         GhostButton {
             text: qsTr("Open Settings")
+            enabled: CapabilityStore.canOpenSettings
+            onClicked: {
+                IntentDispatcher.dispatch({ type: "navigation.open", route: "settings" })
+                root.close()
+            }
         }
     }
 }

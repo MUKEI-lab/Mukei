@@ -57,6 +57,11 @@ pub enum DbError {
     Sqlite(#[from] rusqlite::Error),
     #[error("connection manager error: {0}")]
     Manager(String),
+    /// Domain error produced inside a blocking database operation. This
+    /// preserves the original stable error code instead of flattening it
+    /// into ERR_DB_INIT at the async pool boundary.
+    #[error(transparent)]
+    Domain(#[from] MukeiError),
 }
 
 #[cfg(feature = "rusqlite")]
@@ -66,6 +71,7 @@ impl From<DbError> for MukeiError {
             DbError::Sqlite(_) => MukeiError::DatabaseInitFailed(e.to_string()),
             DbError::Manager(_) => MukeiError::DatabaseInitFailed(e.to_string()),
             DbError::PoolTimeout(_) => MukeiError::DatabaseInitFailed(e.to_string()),
+            DbError::Domain(error) => error,
         }
     }
 }
@@ -137,7 +143,10 @@ impl DatabasePool {
     ///   `rusqlite` builds do not understand `PRAGMA key`. On non-cipher
     ///   builds the bridge should call [`Self::open`] instead.
     #[cfg(feature = "sqlcipher")]
-    pub fn open_with_cipher_key(path: &Path, unwrapped_key: Vec<u8>) -> Result<Self> {
+    pub fn open_with_cipher_key(
+        path: &Path,
+        unwrapped_key: zeroize::Zeroizing<Vec<u8>>,
+    ) -> Result<Self> {
         Self::open_with_cipher_key_result(path, unwrapped_key).map(|result| result.pool)
     }
 
@@ -146,7 +155,7 @@ impl DatabasePool {
     #[cfg(feature = "sqlcipher")]
     pub fn open_with_cipher_key_result(
         path: &Path,
-        unwrapped_key: Vec<u8>,
+        unwrapped_key: zeroize::Zeroizing<Vec<u8>>,
     ) -> Result<DatabaseOpenResult> {
         use zeroize::Zeroizing;
 
@@ -163,7 +172,7 @@ impl DatabasePool {
             | DatabaseHeaderState::NotPlainSqlite => {}
         }
 
-        let key = std::sync::Arc::new(Zeroizing::new(unwrapped_key));
+        let key = std::sync::Arc::new(unwrapped_key);
 
         let key_for_init = key.clone();
         let manager = r2d2_sqlite::SqliteConnectionManager::file(path).with_init(move |c| {
@@ -388,7 +397,10 @@ mod tests {
         let plain = dir.path().join("plain.db");
         std::fs::write(&plain, SQLITE_PLAIN_HEADER).unwrap();
 
-        let err = match DatabasePool::open_with_cipher_key_result(&plain, vec![7_u8; 32]) {
+        let err = match DatabasePool::open_with_cipher_key_result(
+            &plain,
+            zeroize::Zeroizing::new(vec![7_u8; 32]),
+        ) {
             Ok(_) => panic!("plain SQLite header must not open as encrypted DB"),
             Err(err) => err,
         };
@@ -404,7 +416,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("encrypted.db");
 
-        let opened = DatabasePool::open_with_cipher_key_result(&path, vec![9_u8; 32]).unwrap();
+        let opened = DatabasePool::open_with_cipher_key_result(
+            &path,
+            zeroize::Zeroizing::new(vec![9_u8; 32]),
+        )
+        .unwrap();
         assert_eq!(
             opened.encryption_status,
             DatabaseEncryptionStatus::Encrypted

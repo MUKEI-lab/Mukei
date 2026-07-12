@@ -52,9 +52,8 @@ pub enum MukeiError {
     /// `stop_download()` to cancel it before re-issuing.
     #[error("download already in flight for destination {dest}")]
     DownloadBusy {
-        /// Absolute destination path of the in-flight download. Stable
-        /// enough for QML to dedup a UI prompt against, never contains
-        /// secret material.
+        /// Opaque destination token for the in-flight download. This
+        /// must not be an absolute local path.
         dest: String,
     },
 
@@ -122,6 +121,17 @@ pub enum MukeiError {
         applied: String,
         /// Checksum computed from the bundled migration body.
         bundled: String,
+    },
+    /// Another process currently owns the database migration lease.
+    #[error("database migration is already running")]
+    MigrationLocked,
+    /// The database schema was produced by a newer application build.
+    #[error("database schema version {found} is newer than this build supports ({supported})")]
+    SchemaTooNew {
+        /// Highest migration recorded by the database.
+        found: u32,
+        /// Highest migration bundled into this binary.
+        supported: u32,
     },
     /// The append-only audit hash chain failed verification during boot.
     /// Normal startup must stop so the app cannot append over a tampered
@@ -382,6 +392,26 @@ pub enum MukeiError {
     /// Catch-all for unclassified internal errors; prefer a typed variant.
     #[error("internal error: {0}")]
     Internal(String),
+
+    // ------------------------------------------------------------------
+    // SaaS domain persistence (Plan 05; append-only enum additions)
+    // ------------------------------------------------------------------
+    /// A replay-protection key was reused with a different usage mutation.
+    #[error("usage idempotency conflict for tenant {tenant_id} dimension {dimension}")]
+    UsageIdempotencyConflict {
+        /// Tenant whose replay key conflicted.
+        tenant_id: String,
+        /// Usage dimension whose replay key conflicted.
+        dimension: String,
+    },
+    /// A remote snapshot reused a revision for different immutable content.
+    #[error("SaaS snapshot revision conflict for {entity} at revision {revision}")]
+    SaasRevisionConflict {
+        /// Stable entity category such as `entitlement` or `subscription`.
+        entity: &'static str,
+        /// Conflicting monotonic source revision.
+        revision: u64,
+    },
 }
 
 impl MukeiError {
@@ -409,11 +439,15 @@ impl MukeiError {
             Self::MigrationFailed(_, _) => "ERR_MIGRATION",
             Self::MigrationOrderConflict { .. } => "ERR_MIGRATION_ORDER",
             Self::MigrationChecksumMismatch { .. } => "ERR_MIGRATION_CHECKSUM",
+            Self::MigrationLocked => "ERR_MIGRATION_LOCKED",
+            Self::SchemaTooNew { .. } => "ERR_SCHEMA_TOO_NEW",
             Self::AuditLogTampered { .. } => "ERR_AUDIT_TAMPERED",
             Self::DatabaseEncryptionUnavailable => "ERR_DB_ENCRYPTION_UNAVAILABLE",
             Self::DatabaseEncryptionMigrationRequired => "ERR_DB_ENCRYPTION_MIGRATION_REQUIRED",
             Self::DatabaseEncryptionInvalidKey => "ERR_DB_ENCRYPTION_INVALID_KEY",
             Self::DatabaseEncryptionCorrupted => "ERR_DB_ENCRYPTION_CORRUPTED",
+            Self::UsageIdempotencyConflict { .. } => "ERR_USAGE_IDEMPOTENCY_CONFLICT",
+            Self::SaasRevisionConflict { .. } => "ERR_SAAS_REVISION_CONFLICT",
 
             Self::ConfigMissingField(_) => "ERR_CONFIG_MISSING",
             Self::ConfigInvalid { .. } => "ERR_CONFIG_INVALID",
@@ -481,11 +515,15 @@ impl MukeiError {
             | Self::MigrationFailed(_, _)
             | Self::MigrationOrderConflict { .. }
             | Self::MigrationChecksumMismatch { .. }
+            | Self::MigrationLocked
+            | Self::SchemaTooNew { .. }
             | Self::AuditLogTampered { .. }
             | Self::DatabaseEncryptionUnavailable
             | Self::DatabaseEncryptionMigrationRequired
             | Self::DatabaseEncryptionInvalidKey
-            | Self::DatabaseEncryptionCorrupted => ErrorClass::Storage,
+            | Self::DatabaseEncryptionCorrupted
+            | Self::UsageIdempotencyConflict { .. }
+            | Self::SaasRevisionConflict { .. } => ErrorClass::Storage,
             Self::ConfigInvalid { .. }
             | Self::ConfigMissingField(_)
             | Self::ConfigUnknownField(_) => ErrorClass::Config,
@@ -690,13 +728,13 @@ mod tests {
     #[test]
     fn download_busy_has_stable_code_and_classification() {
         let err = MukeiError::DownloadBusy {
-            dest: "/data/models/gemma-4-E2B-it-Q4_K_M.gguf".into(),
+            dest: "model:gemma-4-e2b-it".into(),
         };
         assert_eq!(err.error_code(), "ERR_DOWNLOAD_BUSY");
         assert_eq!(err.classification(), ErrorClass::Agent);
         let rendered = format!("{err}");
         assert!(rendered.contains("already in flight"));
-        assert!(rendered.contains("gemma-4-E2B-it-Q4_K_M.gguf"));
+        assert!(rendered.contains("model:gemma-4-e2b-it"));
     }
 
     #[test]

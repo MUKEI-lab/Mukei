@@ -111,10 +111,13 @@ impl AuditLogWriter {
     /// `SHA256(previous_hash || canonical_fields)` and the rolling
     /// previous-hash is advanced on success.
     pub async fn record(&self, pool: &DatabasePool, entry: AuditEntry) -> Result<()> {
-        // Serialize the read/compute/write/advance sequence. Holding a
-        // Tokio mutex across the awaited DB write is intentional here:
-        // audit-chain correctness is more important than write
-        // parallelism, and `tokio::sync::MutexGuard` is async-aware.
+        self.record_with_id(pool, entry).await.map(|_| ())
+    }
+
+    /// Same as [`Self::record`] but returns the durable row id so domain
+    /// records such as document tombstones can link to the exact audit
+    /// event without weakening the hash chain.
+    pub async fn record_with_id(&self, pool: &DatabasePool, entry: AuditEntry) -> Result<i64> {
         let mut previous_guard = self.previous_hash.lock().await;
         let previous = previous_guard.clone();
         let prev_for_hash = previous.clone().unwrap_or_default();
@@ -124,36 +127,35 @@ impl AuditLogWriter {
         let prev_for_db = previous.clone();
         let entry_for_db = entry.clone();
 
-        pool.with_conn(move |c| {
-            c.execute(
-                "INSERT INTO tool_audit_log \
-                   (conversation_id, message_id, tool_call_id, tool_name, \
-                    args_json, result_preview, success, duration_ms, error_code, \
-                    fingerprint_sha256, previous_hash, entry_hash) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                rusqlite::params![
-                    entry_for_db.conversation_id,
-                    entry_for_db.message_id,
-                    entry_for_db.tool_call_id,
-                    entry_for_db.tool_name,
-                    entry_for_db.args_json,
-                    truncate_preview(&entry_for_db.result_preview),
-                    if entry_for_db.success { 1_i64 } else { 0 },
-                    entry_for_db.duration_ms as i64,
-                    entry_for_db.error_code,
-                    entry_for_db.fingerprint_sha256,
-                    prev_for_db,
-                    entry_hash_for_db,
-                ],
-            )?;
-            Ok::<_, DbError>(())
-        })
-        .await?;
+        let row_id = pool
+            .with_conn(move |c| {
+                c.execute(
+                    "INSERT INTO tool_audit_log \
+                       (conversation_id, message_id, tool_call_id, tool_name, \
+                        args_json, result_preview, success, duration_ms, error_code, \
+                        fingerprint_sha256, previous_hash, entry_hash) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                    rusqlite::params![
+                        entry_for_db.conversation_id,
+                        entry_for_db.message_id,
+                        entry_for_db.tool_call_id,
+                        entry_for_db.tool_name,
+                        entry_for_db.args_json,
+                        truncate_preview(&entry_for_db.result_preview),
+                        if entry_for_db.success { 1_i64 } else { 0 },
+                        entry_for_db.duration_ms as i64,
+                        entry_for_db.error_code,
+                        entry_for_db.fingerprint_sha256,
+                        prev_for_db,
+                        entry_hash_for_db,
+                    ],
+                )?;
+                Ok::<_, DbError>(c.last_insert_rowid())
+            })
+            .await?;
 
-        // Advance the chain. Failure to write makes us NOT advance —
-        // re-trying after a transient error preserves continuity.
         *previous_guard = Some(entry_hash);
-        Ok(())
+        Ok(row_id)
     }
 
     /// Current chain tip (testing / forensics).

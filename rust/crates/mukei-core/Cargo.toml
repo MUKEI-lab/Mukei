@@ -1,12 +1,12 @@
 [package]
 name               = "mukei-core"
-version            = "0.7.5"
+version.workspace  = true
 edition            = "2021"
 rust-version       = "1.78"
 description        = "Mukei Agent Core — ReAct loop, RAG engine, tool executor, storage, diagnostics (TRD v0.7.5)"
-license            = "LicenseRef-Mukei-Proprietary"
+license            = "Apache-2.0"
 authors            = ["Mukei AI Architecture Pass"]
-# First-party proprietary crate, never published to crates.io. The
+# First-party Apache-2.0 crate, currently not published to crates.io. The
 # explicit `publish = false` also tells cargo-deny to treat this
 # member as private, which is the only way to make
 # `allow-wildcard-paths = true` actually apply to intra-workspace
@@ -22,7 +22,9 @@ path               = "src/lib.rs"
 #
 # Naming policy:
 #   * snake_case identifiers (no quoted feature names).
-#   * One capability per feature; no aliases.
+#   * One capability per public feature. The legacy internal
+#     `release-hardening` tripwire is retained only as a compatibility adapter
+#     for existing guarded internals; app-facing builds use `runtime_hardening`.
 #   * `sqlcipher` is a strict superset of `rusqlite` and enables
 #     rusqlite's bundled SQLCipher backend, not just the plain bundled
 #     SQLite fallback.
@@ -39,10 +41,15 @@ sqlcipher          = ["rusqlite", "rusqlite/bundled-sqlcipher"]
 # `scraper` removed in v0.7.5 (see workspace Cargo.toml note): the
 # current search engines use JSON-only APIs and `scraper` pulls in
 # MPL-2.0 transitives that violate the Apache/MIT-only license policy.
-network            = ["dep:reqwest", "dep:url"]
+network            = ["dep:reqwest", "dep:url", "tokio"]
 candle             = ["dep:half", "dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers"]
 android_keystore   = []
+# Internal compatibility tripwire used by existing hardened-only cfg guards.
+# Do not expose this as the application deployment feature.
 release-hardening  = []
+# Public policy feature; deliberately distinct from compiler profile
+# `[profile.release-hardening]` and from runtime environment mode.
+runtime_hardening  = ["release-hardening"]
 
 [dependencies]
 # Workspace-shared deps (see ../Cargo.toml)
@@ -72,7 +79,6 @@ bloomfilter   = { workspace = true }
 
 uuid          = { workspace = true }
 chrono        = { workspace = true }
-meval         = { workspace = true }
 
 # Optional integrations ----------------------------------------------------
 rusqlite    = { workspace = true, optional = true }

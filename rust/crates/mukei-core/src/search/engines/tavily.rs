@@ -12,8 +12,6 @@
 use async_trait::async_trait;
 use zeroize::Zeroizing;
 
-#[cfg(feature = "network")]
-use crate::error::MukeiError;
 use crate::error::Result;
 use crate::search::engines::{SearchEngine, SearchEngineKind, SearchRequest};
 use crate::search::SearchHit;
@@ -28,8 +26,14 @@ pub struct TavilyEngine {
 impl TavilyEngine {
     /// Standard production constructor.
     pub fn new(api_key: impl Into<String>) -> Self {
+        Self::from_secret(Zeroizing::new(api_key.into()))
+    }
+
+    /// Construct directly from zeroizing storage so bridge registry
+    /// rebuilds do not keep an additional ordinary `String` alive.
+    pub fn from_secret(api_key: Zeroizing<String>) -> Self {
         Self {
-            api_key: Zeroizing::new(api_key.into()),
+            api_key,
             base_url: "https://api.tavily.com/search".to_string(),
         }
     }
@@ -100,15 +104,18 @@ async fn execute_tavily(engine: &TavilyEngine, request: &SearchRequest) -> Resul
         body["days"] = json!(days);
     }
 
-    let payload: TavilyEnvelope = client
-        .post(&engine.base_url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| MukeiError::WebSearchFailed(format!("tavily http: {e}")))?
+    let response = crate::network::send_request_with_retry(
+        "tavily search",
+        crate::network::RetryPolicy::web_search(),
+        || client.post(&engine.base_url).json(&body),
+        |status| status.is_success(),
+    )
+    .await?;
+
+    let payload: TavilyEnvelope = response
         .json()
         .await
-        .map_err(|e| MukeiError::WebSearchFailed(format!("tavily parse: {e}")))?;
+        .map_err(|error| crate::network::map_reqwest_error("tavily response", error))?;
 
     let mut out = Vec::new();
     // Surface the answer field as a synthetic high-confidence hit so

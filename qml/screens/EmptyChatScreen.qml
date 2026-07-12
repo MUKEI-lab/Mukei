@@ -75,6 +75,7 @@ Page {
         }
         NetworkBanner {
             Layout.fillWidth: true
+            remoteAllowed: SettingsStore.remotePolicy === "remote_allowed"
         }
         ChatComposer {
             Layout.fillWidth: true

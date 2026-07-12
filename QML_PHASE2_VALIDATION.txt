@@ -1,0 +1,27 @@
+Mukei QML Architecture Phase 2 — Static Validation
+
+PASS: archive source tree integrity
+PASS: QML architecture analyzer (0 errors, 0 warnings)
+PASS: QML security analyzer (0 critical production issues)
+PASS: QML/C++ delimiter scan
+PASS: modified Rust delimiter/lexical scan
+PASS: QML theme-token reference scan
+PASS: CMake QML file registration scan
+PASS: QRC resources (0 missing)
+PASS: 27 SVG icons preserved
+PASS: TOML parsing
+PASS: SQLite fresh migration chain V001-V011
+PASS: ui_session_state and ui_drafts table creation
+PASS: native timeline model test source and CMake target registered
+PASS: no .git, target, or build cache intended in release archive
+
+ENVIRONMENT BLOCKED:
+- cargo/rustc/rustfmt/clippy unavailable in this environment
+- Qt6 development package and qmllint unavailable
+- Android SDK/NDK/Gradle unavailable
+
+Required external validation:
+- cargo fmt/check/clippy/test
+- Qt CMake configure/build and CTest
+- qmllint
+- Android arm64 build, emulator, and physical-device lifecycle tests

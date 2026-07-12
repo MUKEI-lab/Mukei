@@ -1,0 +1,69 @@
+Mukei v0.13 QML Phase 4 — Validation Report
+================================================
+
+Scope
+-----
+Static/source validation of the cumulative Phase 4 tree. Rust, Qt, Android,
+Clippy, and device compilation were not available in this environment.
+
+Passed
+------
+- QML architecture analyzer: 0 errors, 0 warnings
+- QML security analyzer: 0 critical issues
+- QML security analyzer medium findings: 4 expected findings
+  * Diagnostics screen keyword false-positive
+  * Two QtQuick.Dialogs FileDialog findings; Rust validates accepted URI scheme
+  * Security test keyword false-positive
+- TOML parsing: 11 files, 0 errors
+- XML/QRC parsing: 2 files, 0 errors
+- qml.qrc: 36 references, 0 missing
+- SVG icons: 27 present
+- CMake QML references: 88 unique files, 0 missing
+- New Rust bridge invokable declarations/implementations/stub parity: PASS
+- Production screen/component direct backend calls: 0
+- Placeholder QML tests (`test_stub` / `verify(true)`): 0
+- Rust/QML lexical delimiter validation: PASS
+- Fresh SQLite migration execution V001–V011: PASS
+- Migration tables created: 17
+- Phase 4 diff: 6 files added, 33 modified, 0 removed
+
+CMake configure
+---------------
+Attempted:
+  cmake -S qml -B /tmp/mukei-v13-qml-build -G Ninja
+
+Result: ENVIRONMENT BLOCKED
+Qt6Config.cmake / qt6-config.cmake was not installed in this environment.
+The project requests Qt 6.5 with QuickDialogs2, QuickEffects, QuickLayouts,
+QuickTest, Test, Widgets, and Svg.
+
+Privacy / correctness notes
+---------------------------
+- Model selection is validated for the next engine session; live hot-swap is
+  not claimed.
+- Model deletion rejects inference-busy and matching active-download states,
+  validates canonical app-private containment, and is idempotent if missing.
+- QML receives one-way document IDs, not raw SAF tokens.
+- Document indexing is not claimed merely because access was registered.
+- Android persistable URI permission is not yet compile/device-verified.
+- Diagnostics snapshot excludes prompts, document contents, secrets, and
+  private paths.
+- Diagnostics export uses temporary create-new, write, sync, and atomic rename.
+- Accessibility stream text is batched and emitted through the architecture
+  announcement signal. Native assistive-technology delivery remains a Qt/
+  Android integration verification item.
+
+Pending external validation
+---------------------------
+- cargo fmt/check/clippy/test
+- CXX-Qt bridge compilation
+- Qt QML compilation and qmllint
+- QuickTest execution
+- Android SDK/NDK build
+- Android persistent URI permission integration/device test
+- Screen-reader announcement delivery on physical devices
+- Model deletion against a genuinely loaded engine session
+
+Static result
+-------------
+PASS_WITH_COMPILE_AND_DEVICE_BLOCKERS

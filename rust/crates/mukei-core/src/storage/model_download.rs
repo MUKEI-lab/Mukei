@@ -304,15 +304,21 @@ mod real {
             crate::network::NetworkClientPolicy::model_download(),
         )?;
 
-        let mut request = client.get(&req.url);
-        if resume_from > 0 {
-            request = request.header("Range", format!("bytes={resume_from}-"));
-        }
-
-        let mut resp = request
-            .send()
-            .await
-            .map_err(|e| crate::network::map_reqwest_error("model download", e))?;
+        let mut resp = crate::network::send_request_with_retry_cancellable(
+            "model download",
+            crate::network::RetryPolicy::model_download(),
+            || {
+                let request = client.get(&req.url);
+                if resume_from > 0 {
+                    request.header("Range", format!("bytes={resume_from}-"))
+                } else {
+                    request
+                }
+            },
+            |status| status.is_success() || status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE,
+            &cancel,
+        )
+        .await?;
 
         let status = resp.status();
 
@@ -347,11 +353,14 @@ mod real {
 
             // Re-issue the request without a `Range` header.
             drop(resp);
-            let resp_retry = client
-                .get(&req.url)
-                .send()
-                .await
-                .map_err(|e| crate::network::map_reqwest_error("model download restart", e))?;
+            let resp_retry = crate::network::send_request_with_retry_cancellable(
+                "model download restart",
+                crate::network::RetryPolicy::model_download(),
+                || client.get(&req.url),
+                |status| status.is_success(),
+                &cancel,
+            )
+            .await?;
             let retry_status = resp_retry.status();
             if !retry_status.is_success() {
                 let err = crate::network::http_status_error("model download restart", retry_status);
@@ -404,7 +413,9 @@ mod real {
 
         if let Some(parent) = req.dest.parent() {
             let quota = crate::storage::StorageQuotaManager::new(parent);
-            if let Err(err) = quota.ensure_model_download_allowed(total_bytes) {
+            if let Err(err) =
+                quota.ensure_model_download_allowed_with_additional(total_bytes, remaining_bytes)
+            {
                 let _ = tokio::fs::remove_file(&partial).await;
                 let _ = events
                     .send(DownloadEvent::Error {

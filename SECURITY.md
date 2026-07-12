@@ -1,282 +1,289 @@
-# Security Hardening Guide for Mukei
+# Mukei Security and Privacy Engineering
 
-This document outlines the security measures and best practices implemented in the Mukei project.
+This document describes the security posture of the current source snapshot. It
+is not a release certification.
 
-## Overview
+## Current security status
 
-Mukei implements multiple layers of security hardening to protect against common vulnerabilities and attack vectors. This guide covers:
+**Release status: not security-cleared.**
 
-1. FFI Boundary Safety
-2. Input Validation & Fuzzing
-3. Dependency Security
-4. Compiler-Level Protections
-5. Continuous Security Monitoring
+The checked-in `rust/Cargo.lock` currently contains:
 
-## 1. FFI Boundary Safety
+- `crossbeam-epoch 0.9.18`;
+- `cxx 1.0.194`.
 
-### CallbackGuard Pattern
+The latest recorded project dependency-security run flagged those versions and
+required upgrades to at least `crossbeam-epoch 0.9.20` and `cxx 1.0.195`.
 
-All FFI callbacks are protected by the `CallbackGuard` mechanism which prevents use-after-free vulnerabilities:
+`cxx` must be resolved with the CXX-Qt dependency graph rather than blindly
+forced to a top-level version. Re-run `cargo-audit` and `cargo-deny` after the
+targeted dependency resolution.
 
-```rust
-use mukei_core::guard::{callback_with_guard, CallbackGuard, Inner};
+The archive currently contains only `.github/workflows/ci.yml`; it does not
+contain a dedicated automated `cargo-audit`/`cargo-deny` workflow.
 
-// Every FFI callback must use this pattern
-let inner = Inner::new();
-let ptr = Arc::into_raw(Arc::clone(&inner));
-let snapshot = inner.generation.load(Ordering::Acquire);
-let instance_id = inner.instance_id();
+## Security model
 
-let result: Result<i32, GuardError> = callback_with_guard!(ptr, snapshot, instance_id, {
-    // Your callback logic here
-    Ok::<_, GuardError>(42)
-});
-```
+Mukei is local-first, not “network impossible”.
 
-**Key Features:**
-- Generation counter prevents stale callback execution
-- `catch_unwind` wraps all FFI boundary crossings
-- ABA mitigation via process-unique instance IDs
-- Monotonic generation ensures forward progress only
+The intended default posture is:
 
-## 2. Encryption at Rest
+- local storage and local inference path;
+- no default remote observability export;
+- explicit policy before remote-capable features are used;
+- strict separation between compiled capability and permission to exercise it;
+- fail-closed behavior when authority, scope, protocol, or entitlement state is
+  stale or untrusted.
 
-Production persistence must be built with the bridge `sqlcipher`
-feature. In that mode `MukeiAgent.initialize()` fails closed unless
-`MukeiBridge.set_database_cipher_key()` has already supplied the
-Android-Keystore-unwrapped database key as hex text. Raw key bytes must
-not cross the `QString` boundary; the bridge decodes the hex string
-back to bytes, then opens storage through
-`DatabasePool::open_with_cipher_key()`, which binds `PRAGMA key` and
-zeroizes the in-memory key buffer after initialization.
+Optional network features exist for model download, web search, and future SaaS
+transport. Those surfaces must remain explicit and policy-controlled.
 
-Plain `DatabasePool::open()` is the explicit non-cipher fallback for
-development builds that omit the `sqlcipher` feature.
+## 1. FFI and bridge safety
 
-### Testing FFI Safety
+The project uses two native boundaries:
 
-Run the FFI boundary integration tests:
+- `mukei-bridge`: CXX-Qt/JNI integration;
+- `mukei-ffi-shim`: manual C ABI fallback.
+
+Safety controls include:
+
+- `panic = "unwind"` in shipped Rust profiles so `catch_unwind` boundaries can
+  contain panics;
+- generation/instance guarding for callback lifetime and ABA defense;
+- explicit unsafe FFI entry points and safety contracts;
+- ABI drift checks for the manual FFI header;
+- re-entrancy guards around chat and per-destination download operations.
+
+These controls reduce risk but still require native compilation and runtime
+testing on the current snapshot.
+
+## 2. Secure database bootstrap
+
+Android production-oriented storage uses a wrapping-key pattern:
+
+1. a non-exportable Android Keystore key protects wrapped database-key material;
+2. Rust receives plaintext database-key bytes only long enough to open
+   SQLCipher;
+3. plaintext key buffers use zeroizing memory;
+4. key material is not serialized, logged, or exposed to QML.
+
+Bootstrap state distinguishes first-install creation, unwrap, database open, key
+invalidation, wrapped-key corruption, and reset-required states.
+
+Plain `DatabasePool::open()` remains a deliberate non-cipher development path
+when the `sqlcipher` feature is omitted. It must not be mistaken for the Android
+production posture.
+
+## 3. Model integrity and activation truthfulness
+
+Model catalogue entries carry commit-pinned artifact URLs and expected SHA-256
+digests. Model bytes are verified before the engine treats an artifact as
+loadable.
+
+The activation layer separately represents:
+
+- missing;
+- verifying;
+- verified;
+- activating;
+- ready;
+- activation failed;
+- deactivating.
+
+A downloaded or verified model is not automatically “ready”. Product readiness
+requires an active production backend. Production activation failure does not
+silently fall back to a mock backend.
+
+## 4. Protocol and event reliability
+
+Protocol V2 is fail-closed across unknown major versions and validates bounded
+command envelopes before execution.
+
+Security/reliability properties include:
+
+- bounded command and identifier sizes;
+- typed command registry and payload validation;
+- scoped command preflight;
+- bounded idempotent replay protection;
+- stable event identity;
+- per-stream sequence tracking;
+- operation correlation;
+- stale/duplicate event rejection;
+- explicit separation of accepted, running, completed, failed, cancelled, and
+  rejected states.
+
+The desktop compatibility event mode is isolated and explicitly negotiated; it
+must not be represented as equivalent to the production V2 event contract.
+
+## 5. Input validation and tool isolation
+
+Tool calls are parsed into typed calls before execution.
+
+Important controls include:
+
+- post-parse argument validation;
+- rejection of unknown/extra/wrongly typed arguments;
+- SAF-only file references for `read_file`;
+- no raw filesystem path authority through the tool contract;
+- sandboxed math expression evaluation;
+- failure fingerprints and loop/abuse containment;
+- timeout/cancellation containment.
+
+Fuzzing and property-based tests are useful defense layers, but the presence of a
+harness is not evidence that a continuous fuzz campaign has run on this exact
+snapshot.
+
+## 6. RAG scope and context safety
+
+Current RAG code carries explicit tenant/workspace retrieval scope.
+
+Controls include:
+
+- scope metadata on indexed vectors;
+- scoped vector search;
+- resolver-side scope revalidation;
+- index compatibility checks;
+- explicit degraded capability states;
+- bounded result and context budgets.
+
+Legacy unscoped adapters are conservatively degraded and do not prove
+multi-tenant authorization safety.
+
+## 7. Observability privacy
+
+The observability subsystem is local-first and sink-neutral.
+
+It provides:
+
+- bounded event queues;
+- bounded metric series/cardinality;
+- sensitivity classification;
+- privacy policy and privacy modes;
+- privacy-epoch invalidation of already queued data;
+- health and SLO state;
+- failure-isolated sinks.
+
+The module does not create a network exporter by itself. A compiled diagnostics
+export capability must not be equated with user consent or active remote export.
+
+## 8. Remote feature policy
+
+`RemoteFeaturePolicy` defaults to `local_only`.
+
+Supported policy states are:
+
+- `local_only`;
+- `ask_before_remote`;
+- `remote_allowed`;
+- `enterprise_disabled`.
+
+Remote-capable features must pass policy rather than inferring permission from
+network availability.
+
+## 9. SaaS foundation security boundaries
+
+The current source contains provider-neutral tenant, workspace, actor,
+membership, subscription, entitlement, usage-ledger, and quota primitives.
+
+Important invariants include:
+
+- opaque validated public identifiers;
+- tenant/workspace relational consistency;
+- immutable historical snapshots with revision ordering;
+- stale/untrusted entitlement state fails closed;
+- append-only usage accounting;
+- idempotency constraints;
+- bounded scalar metadata;
+- separate correction events rather than mutation of prior usage.
+
+A hardened transport boundary exists, but this snapshot does not claim complete
+production identity, server authorization, billing integration, or cloud
+operations.
+
+## 10. Dependency security
+
+Run from `rust/`:
 
 ```bash
-cd rust
-cargo test -p mukei-core --test ffi_boundaries
-```
-
-## 3. Input Validation & Fuzzing
-
-### Fuzzing Harnesses
-
-The project includes fuzzing targets for critical input validation paths:
-
-**Location:** `rust/crates/mukei-core/fuzz/`
-
-**Available Targets:**
-- `math_expression_fuzzer` - Tests math expression parser
-- `query_input_fuzzer` - Tests query processing pipeline
-
-**Running Fuzzers:**
-
-```bash
-# Install prerequisites
-cargo install cargo-fuzz
-
-# Run a fuzzer
-cd rust/crates/mukei-core/fuzz
-cargo fuzz run math_expression_fuzzer
-
-# Run with timeout
-cargo fuzz run query_input_fuzzer --timeout=60
-
-# Run multiple parallel jobs
-cargo fuzz run math_expression_fuzzer -j4
-```
-
-### Best Practices for Input Validation
-
-1. **Never trust external input** - All user-provided data must be validated
-2. **Use whitelists over blacklists** - Define what's allowed, not what's forbidden
-3. **Fail safely** - Invalid input should produce clear errors, not crashes
-4. **Sanitize before use** - Escape special characters in SQL, shell, etc.
-
-## 4. Dependency Security
-
-### Cargo Audit
-
-Regular dependency vulnerability scanning is automated via GitHub Actions:
-
-```bash
-# Install cargo-audit
-cargo install cargo-audit
-
-# Run audit
-cd rust
 cargo audit
-```
-
-**CI Integration:** The `security-audit.yml` workflow runs:
-- On every PR and push to main
-- Weekly scheduled scans
-- Automatic artifact upload for reports
-
-### Cargo Deny
-
-Supply-chain security is enforced via `cargo-deny`:
-
-```bash
-# Install cargo-deny
-cargo install cargo-deny
-
-# Run all checks
-cd rust
 cargo deny check advisories sources licenses bans
 ```
 
-**Policy Highlights:**
-- Only permissive licenses allowed (MIT, Apache-2.0, BSD, etc.)
-- Copyleft licenses (MPL-2.0, GPL) are denied
-- Known vulnerable crates are blocked
-- Wildcard dependencies are denied (except intra-workspace paths)
+Treat failures as release blockers unless an advisory is explicitly evaluated,
+documented, and accepted through a controlled risk process.
 
-## 5. Compiler-Level Protections
+Duplicate `windows-sys` or `windows-targets` versions are not automatically
+vulnerabilities. Investigate them when they contribute to an advisory, material
+binary impact, or safely resolvable dependency fragmentation.
 
-### Release Hardening Profile
+## 11. Compiler and linker hardening
 
-A special profile with enhanced security flags:
+The Cargo profile itself is stable-Cargo compatible:
 
 ```toml
 [profile.release-hardening]
-inherits      = "release"
-lto           = "fat"
+inherits = "release"
+lto = "fat"
 codegen-units = 1
-panic         = "unwind"
-strip         = "symbols"
-rustflags     = [
+panic = "unwind"
+strip = "symbols"
+opt-level = 3
+```
+
+Android-specific hardening flags live in `rust/.cargo/config.toml`, not in the
+profile:
+
+```toml
+[target.'cfg(all(target_arch = "aarch64", target_os = "android"))']
+rustflags = [
     "-C", "target-feature=+stack-protector-all",
-    "-C", "link-arg=-Wl,-z,relro,-z,now"
+    "-C", "link-arg=-Wl,-z,relro,-z,now",
 ]
 ```
 
-**Build with hardening:**
+This avoids the unstable `profile-rustflags` Cargo feature while applying the
+flags to the Android aarch64 build target.
 
-```bash
-cd rust
-cargo build --profile release-hardening --features release-hardening
-```
+## 12. CI truth
 
-**Security Features:**
-- **Stack Protector**: Detects stack buffer overflows
-- **Full RELRO**: Makes GOT read-only after relocation
-- **LTO**: Enables whole-program optimization and analysis
-- **Symbol Stripping**: Reduces attack surface by removing debug symbols
+The current `.github/workflows/ci.yml` covers:
 
-### Clippy Security Lints
+- Rust formatting;
+- narrow `mukei-core` Clippy for `std,tokio`;
+- narrow `mukei-core` unit tests for `std,tokio`;
+- QML architecture, cross-language contract, and QML security analyzers.
 
-CI enforces additional security-focused lints:
+It does not currently certify:
 
-```bash
-cargo clippy -- -D clippy::unwrap_in_result \
-               -D clippy::expect_used \
-               -D clippy::arithmetic_side_effects \
-               -D clippy::panic_in_result_fn
-```
+- all features;
+- CXX-Qt bridge compilation;
+- Qt Quick tests;
+- Android JNI/Gradle packaging;
+- cargo-audit;
+- cargo-deny;
+- per-ABI llama.cpp linkage;
+- physical-device behavior.
 
-**Enforced Rules:**
-- No `unwrap()` or `expect()` in production code
-- No arithmetic side effects (overflow checking)
-- No panics in functions returning `Result`
-- Warnings on `todo!()` and `unimplemented!()`
+## 13. Security validation checklist
 
-## 6. Continuous Security Monitoring
+Before release certification:
 
-### GitHub Actions Workflows
+- [ ] Resolve the recorded `crossbeam-epoch` and `cxx` advisories compatibly.
+- [ ] Run `cargo-audit` and `cargo-deny` on the resolved graph.
+- [ ] Run full Cargo check/Clippy/test matrices.
+- [ ] Apply V001–V013 to a fresh database and test upgrade paths.
+- [ ] Build CXX-Qt/Qt 6.5+ surfaces.
+- [ ] Run QML QuickTest/CTest and static guards.
+- [ ] Build Android JNI/Gradle artifacts.
+- [ ] Verify SQLCipher bootstrap and Keystore invalidation/reset behavior.
+- [ ] Verify real llama.cpp activation for each shipped ABI.
+- [ ] Exercise cancellation, OOM/low-memory, lifecycle recovery, SAF revoke,
+      download resume, and protocol resynchronization on physical devices.
+- [ ] Confirm remote features remain policy-gated and observability export is
+      consistent with the configured privacy policy.
 
-**lint.yml** - Code quality and security lints
-- Runs on every PR
-- Enforces rustfmt, clippy, and security lints
-- Tests multiple feature combinations
+## Reporting vulnerabilities
 
-**security-audit.yml** - Vulnerability scanning
-- Runs on every PR and weekly
-- Executes `cargo audit` for dependency vulnerabilities
-- Runs fuzz regression tests
-- Generates and uploads audit reports
-
-### Recommended Schedule
-
-| Task | Frequency | Automation |
-|------|-----------|------------|
-| Cargo Audit | Weekly + PR | GitHub Actions |
-| Fuzzing | Continuous | Local/CI |
-| Dependency Review | Per PR | Manual + CI |
-| Security Lint | Every PR | GitHub Actions |
-| Full Penetration Test | Quarterly | Manual |
-
-## 7. Property-Based Testing
-
-### Proptest Integration
-
-The project uses `proptest` for property-based testing of edge cases:
-
-```rust
-// Example from existing tests
-use proptest::prelude::*;
-
-proptest! {
-    #[test]
-    fn test_property(input in any::<String>()) {
-        // Test invariant holds for all inputs
-        prop_assert!(some_invariant(&input));
-    }
-}
-```
-
-**Existing Proptest Suites:**
-- `fingerprint_proptest.rs` - Fingerprint canonicalization
-- `migrator_proptest.rs` - Database migration ordering
-- `sentinel_proptest.rs` - Sentinel escape sequences
-
-**Adding New Property Tests:**
-
-1. Add test file in `crates/mukei-core/tests/`
-2. Use `proptest!` macro to define properties
-3. Ensure properties are deterministic and fast
-4. Run with: `cargo test --test <name>_proptest`
-
-## 7. Incident Response
-
-### If a Vulnerability is Found
-
-1. **Do not disclose publicly** until fixed
-2. **Create a private security advisory** on GitHub
-3. **Assess impact** using the following criteria:
-   - Is user data at risk?
-   - Can the vulnerability be exploited remotely?
-   - Does it require authentication?
-4. **Develop and test a fix**
-5. **Release a patch** with appropriate disclosure
-
-### Reporting Security Issues
-
-For external security researchers:
-- Use GitHub's private vulnerability reporting feature for this repository
-- Include: affected version, reproduction steps, impact assessment
-
-## 8. Checklist for Contributors
-
-Before submitting a PR:
-
-- [ ] No new `unwrap()` or `expect()` calls in production code
-- [ ] All FFI boundaries use `CallbackGuard` and `catch_unwind`
-- [ ] Input validation added for new user-facing APIs
-- [ ] Dependencies reviewed for license compatibility
-- [ ] Security-sensitive code has unit tests
-- [ ] Proptest or fuzzing considered for complex parsing logic
-- [ ] No TODOs or unimplemented!() in security-critical paths
-
-## Resources
-
-- [Rust Secure Code Working Group](https://github.com/rust-secure-code/)
-- [Cargo Audit Documentation](https://docs.rs/cargo-audit/)
-- [Cargo Fuzz Book](https://rust-fuzz.github.io/book/)
-- [OWASP Rust Top 10](https://owasp.org/www-project-top-10-rust/)
-- [RustSec Advisory Database](https://rustsec.org/)
+Use the repository's private vulnerability reporting mechanism when available.
+Include the affected revision, reproduction conditions, impact, and any relevant
+logs with secrets and user content removed.

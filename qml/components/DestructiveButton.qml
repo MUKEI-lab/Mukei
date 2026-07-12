@@ -1,21 +1,18 @@
 import QtQuick
 import QtQuick.Controls.Basic
-import QtQuick.Layouts
 import "../theme"
 
-Control {
+Button {
     id: root
-
-    property string text: qsTr("Delete")
     property string confirmText: qsTr("Tap again")
     property bool armed: false
     signal committed
-
     Accessible.role: Accessible.Button
     Accessible.name: armed ? confirmText : text
-    Accessible.description: qsTr("Destructive two-tap confirmation button")
-    implicitWidth: Math.max(Spacing.huge, label.implicitWidth + Spacing.xl)
-    implicitHeight: Spacing.xxl
+    Accessible.description: qsTr("Destructive two-step confirmation")
+    activeFocusOnTab: true
+    implicitWidth: Math.max(Spacing.huge, contentItem.implicitWidth + Spacing.xl)
+    implicitHeight: Math.max(44, Spacing.xxl)
 
     Timer {
         id: disarmTimer
@@ -23,29 +20,28 @@ Control {
         onTriggered: root.armed = false
     }
 
+    onClicked: {
+        if (armed) {
+            disarmTimer.stop()
+            armed = false
+            committed()
+        } else {
+            armed = true
+            disarmTimer.restart()
+        }
+    }
+
     background: Rectangle {
         radius: Theme.radiusMd
-        color: Theme.error
+        color: root.down ? Qt.darker(Theme.error, 1.08) : Theme.error
+        border.width: root.visualFocus ? 2 : 0
+        border.color: "white"
     }
     contentItem: Text {
-        id: label
         text: root.armed ? root.confirmText : root.text
-        color: Theme.p.background
+        color: "white"
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
         Component.onCompleted: Type.apply(this, Type.bodyUI)
-    }
-
-    TapHandler {
-        onTapped: {
-            if (root.armed) {
-                disarmTimer.stop();
-                root.armed = false;
-                root.committed();
-            } else {
-                root.armed = true;
-                disarmTimer.restart();
-            }
-        }
     }
 }

@@ -11,7 +11,7 @@ pub mod tools;
 pub mod watchdog;
 
 pub use context::{ContextBudget, ContextBudgetManager};
-pub use loop_::{AgentLoop, AgentLoopHandle};
+pub use loop_::{AgentEventSink, AgentLoop, AgentLoopHandle, AgentRunOutcome, AgentRunRequest};
 pub use tools::{
     FailureKind, FailureTracker, OutputRepeatTracker, ToolExecutionPolicy, ToolExecutor,
     ToolOutcome,

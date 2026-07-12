@@ -1,35 +1,28 @@
 import QtQuick
 import QtQuick.Controls.Basic
-import QtQuick.Layouts
 import "../theme"
 
-Control {
+Button {
     id: root
-    property string text: ""
-    signal clicked
+    property bool active: false
     Accessible.role: Accessible.Button
-    Accessible.name: root.text
-    Accessible.description: qsTr("Activate %1").arg(root.text)
-    implicitWidth: Math.max(Spacing.xxl, label.implicitWidth + Spacing.md)
-    implicitHeight: Spacing.xxl
+    Accessible.name: text
+    activeFocusOnTab: true
+    implicitWidth: Math.max(44, contentItem.implicitWidth + Spacing.md)
+    implicitHeight: Math.max(44, Spacing.xxl)
     background: Rectangle {
         radius: Theme.radiusMd
-        color: (root.hovered || tapHandler.pressed) ? Theme.p.surfaceFaint : "transparent"
-        Behavior on color {
-            enabled: !Theme.reduceMotion
-            ColorAnimation { duration: Motion.buttonPressTint; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.enter }
-        }
+        color: root.down || root.hovered || root.active ? Theme.p.surfaceFaint : "transparent"
+        border.width: root.visualFocus ? 1 : 0
+        border.color: Theme.p.accent
+        Behavior on color { ColorAnimation { duration: Theme.reduceMotion ? 0 : Motion.microTransition } }
     }
     contentItem: Text {
-        id: label
         text: root.text
-        color: Theme.p.accent
+        color: root.enabled ? Theme.p.accent : Theme.p.inkFaint
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
+        elide: Text.ElideRight
         Component.onCompleted: Type.apply(this, Type.bodyUI)
-    }
-    TapHandler {
-        id: tapHandler
-        onTapped: root.clicked()
     }
 }

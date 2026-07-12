@@ -1,84 +1,109 @@
 # Mukei QML Frontend (Qt 6.5+)
 
-Editorial-luxury on-device chat shell for the Mukei kernel. Consumes the
-`mukei-bridge` (CXX-Qt) FFI or, when running standalone for iterative UI
-work, the C++ stubs bundled in `main.cpp`.
+Editorial-luxury local-first UI for the Mukei kernel. The production path consumes
+`mukei-bridge` through CXX-Qt. For standalone desktop UI iteration, `main.cpp`
+also provides an explicit compatibility implementation; it must not be confused
+with proof that the Rust production bridge is active.
 
 ## Layout
 
-```
+```text
 qml/
-├── CMakeLists.txt          Qt6 executable + qt_add_qml_module target
-├── main.cpp                Application entry + agent/bridge/SAF stubs
-├── qml.qrc                 Explicit resource manifest (fonts, icons, code)
+├── CMakeLists.txt          Qt 6 executable + qt_add_qml_module target
+├── main.cpp                Application entry + standalone compatibility bridge
+├── qml.qrc                 Explicit resource manifest
 ├── MainWindow.qml          Root ApplicationWindow
-├── theme/                  Theme, Type, Spacing, Motion singletons
-├── components/             34 reusable QML types (buttons, bubbles, sheets, …)
-├── screens/                10 top-level Pages / FullScreenModals
-├── tests/                  QtTest stubs (auto-run under `qmltestrunner`)
+├── architecture/           Contract/capability architecture helpers
+├── events/                 Raw event acceptance and dispatch
+├── stores/                 Scoped reactive projections
+├── shell/                  Application shell and lifecycle routing
+├── theme/                  Theme, type, spacing, and motion singletons
+├── components/             Reusable QML components
+├── screens/                Top-level pages and full-screen flows
+├── tests/                  23 behavioural Qt Quick Test files
 └── assets/
-    ├── fonts/              8 variable-axis SIL OFL fonts (see fonts/README.md)
-    └── icons/              27 semantically-unique Phosphor v2.0.8 SVGs (MIT)
+    ├── fonts/              8 committed font assets
+    └── icons/              27 committed SVG icons
 ```
 
-## Build (desktop smoke)
+## Runtime contract
+
+The QML layer is projection-oriented:
+
+- screens emit intents through `IntentDispatcher`;
+- `OperationStore` owns command/operation lifecycle projection;
+- `EventDispatcher` is the only raw event parser;
+- scoped stores own chat, recovery, model, document, settings, diagnostics,
+  storage, and operation projections;
+- contract negotiation decides whether the active peer supports Protocol V2
+  or only the isolated legacy compatibility event mode.
+
+Production Protocol V2 provides command acknowledgements, event identity,
+per-stream sequencing, bounded idempotent replay protection, and correlated
+operation lifecycle events. See
+[`../docs/PROTOCOL_V2_ARCHITECTURE.md`](../docs/PROTOCOL_V2_ARCHITECTURE.md).
+
+The standalone desktop compatibility implementation may acknowledge V2 commands
+while advertising legacy event delivery. That mode is intentionally lower
+assurance and is not presented as equivalent to the production Rust bridge.
+
+## Build: desktop smoke
 
 ```bash
-# 1. Install Qt 6.5 or newer (system package manager or Qt online installer).
-#    Ensure QtQuick.Effects / QuickEffects and QtSvg are included.
-#    Fedora:   sudo dnf install qt6-qtdeclarative-devel qt6-qtsvg-devel cmake ninja-build
-#    Debian:   use Qt online installer if distro Qt is older than 6.5.
-#    macOS:    brew install qt cmake ninja
-
-# 2. Configure + build.
-cmake -S qml -B qml/build -G Ninja
-cmake --build qml/build
-
-# 3. Run the shell (standalone stubs, no bridge required).
-./qml/build/mukei
+# Requires Qt 6.5+, CMake, and Ninja.
+cmake -S qml -B /tmp/mukei-qml-build -G Ninja
+cmake --build /tmp/mukei-qml-build
+ctest --test-dir /tmp/mukei-qml-build --output-on-failure
 ```
 
-## Linking to the Rust bridge
+Run the standalone shell from the generated build directory after a successful
+build.
 
-The CMake file probes `../rust/target/{host-triple}/release/libmukei_bridge.{so,dylib}`.
-Build it first:
+## Linking the Rust bridge
+
+Build the bridge first:
 
 ```bash
 cd rust
 cargo build -p mukei-bridge --release
 ```
 
-Android release builds must enable SQLCipher so local storage opens via
-the encrypted path:
+Android production-oriented builds are expected to use SQLCipher and an explicit
+runtime deployment mode. A representative build shape is:
 
 ```bash
 cd rust
-cargo build -p mukei-bridge --profile android-release --target aarch64-linux-android --features sqlcipher
+cargo build   -p mukei-bridge   --profile android-release   --target aarch64-linux-android   --no-default-features   --features "android_keystore,network,sqlcipher,runtime_production,runtime_hardening"
 ```
 
-If the file is present, `target_link_libraries(mukei PRIVATE …)` picks it
-up automatically; if not, the app still launches with the stubs in
-`main.cpp` so pure-QML iteration is never blocked.
+Exact Android packaging still depends on the Qt/NDK/Gradle integration and is a
+release gate.
 
-## Runtime contract
+## Important bridge-facing surfaces
 
-| Context property | Type                | Provided by      |
-| ---------------- | ------------------- | ---------------- |
-| `mukeiAgent`     | `MukeiAgent`        | `mukei-bridge`   |
-| `mukeiBridge`    | `MukeiBridge`       | `mukei-bridge`   |
-| `safRegistry`    | `SafRegistry`       | `mukei-bridge`   |
-| `mukeiClipboard` | `QClipboard` shim   | `mukei-bridge` (optional; CopyButton falls back to warning) |
-| `mukeiHaptics`   | `QVibrator` shim    | `mukei-bridge` (Android only; desktop no-op) |
+Depending on the active build/host integration, QML expects bridge-owned objects
+for agent/bridge operations and SAF/document access, plus optional platform
+helpers such as clipboard and haptics.
+
+Do not infer production capability from object presence alone. Capability and
+protocol negotiation are the source of truth.
+
+## Test inventory
+
+The current source contains 23 `tst_*.qml` behavioural tests covering areas such
+as Protocol V2, event dispatch, operation snapshots, contract negotiation,
+accessibility, RTL, font scaling, tab order, destructive confirmation, and
+low-stimulation behavior.
+
+Presence of these files is not a pass claim. Run the Qt 6.5+ QuickTest/CTest
+matrix for the current snapshot.
 
 ## Assets provenance
 
-- **Fonts** — Playfair Display, Merriweather, Inter, JetBrains Mono (SIL
-  OFL 1.1) fetched from https://github.com/google/fonts. Variable-axis
-  TTFs. See `assets/fonts/README.md`.
-- **Icons** — Phosphor Icons v2.0.8 (MIT) fetched from
-  https://github.com/phosphor-icons/core. 27 semantically distinct
-  `regular` weight glyphs, viewBox 0 0 256 256, `fill="currentColor"` so
-  they respect the QML palette at render time.
+- Fonts are committed under `assets/fonts/`; preserve their upstream license
+  notices and provenance.
+- Icons are committed under `assets/icons/`; preserve their upstream license
+  notices and provenance.
 
-Both asset sets are committed verbatim; do not modify individual files
-in-place — replace the whole set from upstream if you need to refresh.
+Replace asset sets deliberately rather than silently editing third-party
+artifacts in place.

@@ -10,6 +10,9 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{MukeiError, Result};
 
+#[cfg(feature = "rusqlite")]
+use rusqlite::OptionalExtension;
+
 /// Subdirectory inside the project / data root that holds the raw
 /// `.sql` migration files. Reference clone of the on-disk layout from
 /// `BS v1.2` §14.
@@ -27,6 +30,13 @@ pub struct MigrationRecord {
     pub checksum: String, // SHA-256 of the migration body
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MigrationBackup {
+    pub path: PathBuf,
+    pub from_version: u32,
+    pub to_version: u32,
+}
+
 /// Pure-data migrator — does *not* open a SQLite handle. The core
 /// migrator owns the schema; the bridge crate opens the real
 /// connection and invokes `apply_one` on each row.
@@ -38,6 +48,9 @@ enum MigrationSource {
     Directory(PathBuf),
     Embedded,
 }
+
+const LEGACY_V09_V008_TOMBSTONES: &str =
+    include_str!("../../../../migrations/legacy/V008__schema_metadata_and_rag_tombstones.sql",);
 
 const EMBEDDED_MIGRATIONS: &[(u32, &str, &str)] = &[
     (
@@ -77,10 +90,100 @@ const EMBEDDED_MIGRATIONS: &[(u32, &str, &str)] = &[
     ),
     (
         8,
-        "V008__schema_metadata_and_rag_tombstones",
-        include_str!("../../../../migrations/V008__schema_metadata_and_rag_tombstones.sql"),
+        "V008__settings_and_secret_refs",
+        include_str!("../../../../migrations/V008__settings_and_secret_refs.sql"),
+    ),
+    (
+        9,
+        "V009__schema_metadata_and_rag_tombstones",
+        include_str!("../../../../migrations/V009__schema_metadata_and_rag_tombstones.sql"),
+    ),
+    (
+        10,
+        "V010__reliability_hardening",
+        include_str!("../../../../migrations/V010__reliability_hardening.sql"),
+    ),
+    (
+        11,
+        "V011__ui_projection_sessions",
+        include_str!("../../../../migrations/V011__ui_projection_sessions.sql"),
+    ),
+    (
+        12,
+        "V012__document_access_and_ingestion_jobs",
+        include_str!("../../../../migrations/V012__document_access_and_ingestion_jobs.sql"),
+    ),
+    (
+        13,
+        "V013__saas_tenancy_entitlements_usage_ledger",
+        include_str!("../../../../migrations/V013__saas_tenancy_entitlements_usage_ledger.sql"),
     ),
 ];
+
+const MIGRATION_LOCK_STALE_AFTER_SECS: i64 = 15 * 60;
+
+fn table_exists(
+    c: &mut super::pool::Conn,
+    table: &str,
+) -> std::result::Result<bool, super::pool::DbError> {
+    let exists: i64 = c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [table],
+        |row| row.get(0),
+    )?;
+    Ok(exists != 0)
+}
+
+fn acquire_migration_lock(
+    c: &mut super::pool::Conn,
+) -> std::result::Result<String, super::pool::DbError> {
+    let holder = uuid::Uuid::new_v4().to_string();
+    let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let existing: Option<(String, String)> = tx
+        .query_row(
+            "SELECT holder, acquired_at FROM migration_lock WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+
+    if let Some((existing_holder, acquired_at)) = existing {
+        let acquired = chrono::DateTime::parse_from_rfc3339(&acquired_at)
+            .map(|value| value.with_timezone(&chrono::Utc))
+            .ok();
+        let is_stale = existing_holder == "bootstrap"
+            || acquired
+                .map(|value| {
+                    chrono::Utc::now()
+                        .signed_duration_since(value)
+                        .num_seconds()
+                        >= MIGRATION_LOCK_STALE_AFTER_SECS
+                })
+                .unwrap_or(true);
+        if !is_stale {
+            return Err(super::pool::DbError::Domain(MukeiError::MigrationLocked));
+        }
+        tx.execute("DELETE FROM migration_lock WHERE id = 1", [])?;
+    }
+
+    tx.execute(
+        "INSERT INTO migration_lock (id, holder, acquired_at) VALUES (1, ?1, ?2)",
+        rusqlite::params![&holder, chrono::Utc::now().to_rfc3339()],
+    )?;
+    tx.commit()?;
+    Ok(holder)
+}
+
+fn release_migration_lock(
+    c: &mut super::pool::Conn,
+    holder: &str,
+) -> std::result::Result<(), super::pool::DbError> {
+    c.execute(
+        "DELETE FROM migration_lock WHERE id = 1 AND holder = ?1",
+        [holder],
+    )?;
+    Ok(())
+}
 
 impl Migrator {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
@@ -104,6 +207,77 @@ impl Migrator {
             MigrationSource::Directory(dir) => dir,
             MigrationSource::Embedded => Path::new("<embedded>"),
         }
+    }
+
+    pub fn latest_version(&self) -> Result<u32> {
+        Ok(self
+            .list_available()?
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .max()
+            .unwrap_or(0))
+    }
+
+    /// Create an encrypted byte-for-byte backup before applying an
+    /// upgrade. SQLCipher remains at rest because the database file is
+    /// copied, not exported through plaintext SQL. The caller invokes this
+    /// after opening the keyed pool but before any numbered migration.
+    pub async fn create_pre_migration_backup(
+        &self,
+        pool: &super::pool::DatabasePool,
+        database_path: &Path,
+    ) -> Result<Option<MigrationBackup>> {
+        use super::pool::PooledConnectionExt;
+        let latest = self.latest_version()?;
+        let current = pool
+            .with_conn(|c| {
+                if table_exists(c, "migrations_applied")? {
+                    let value: i64 = c.query_row(
+                        "SELECT COALESCE(MAX(version), 0) FROM migrations_applied ",
+                        [],
+                        |row| row.get(0),
+                    )?;
+                    Ok::<_, super::pool::DbError>(value.max(0) as u32)
+                } else {
+                    Ok::<_, super::pool::DbError>(0)
+                }
+            })
+            .await?;
+        if current == 0 || current >= latest || !database_path.exists() {
+            return Ok(None);
+        }
+
+        // Flush WAL pages before the filesystem copy. No application state
+        // is globally published at this boot stage, so there are no writers.
+        pool.with_conn(|c| {
+            c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+            Ok::<_, super::pool::DbError>(())
+        })
+        .await?;
+
+        let source = database_path.to_path_buf();
+        let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+        let backup_path = source.with_extension(format!(
+            "premigration-v{current}-to-v{latest}-{timestamp}.bak"
+        ));
+        let backup_for_copy = backup_path.clone();
+        tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+            std::fs::copy(&source, &backup_for_copy)?;
+            std::fs::OpenOptions::new()
+                .read(true)
+                .open(&backup_for_copy)?
+                .sync_all()?;
+            Ok(())
+        })
+        .await
+        .map_err(|error| MukeiError::BlockingJoinFailed(error.to_string()))?
+        .map_err(|error| MukeiError::Io(error.to_string()))?;
+
+        Ok(Some(MigrationBackup {
+            path: backup_path,
+            from_version: current,
+            to_version: latest,
+        }))
     }
 
     /// Read all migration files in the directory and return them in
@@ -190,7 +364,8 @@ impl Migrator {
     ) -> Result<Vec<MigrationRecord>> {
         use super::pool::PooledConnectionExt;
 
-        // Discover all migrations on disk + their checksums.
+        // Discover all bundled migrations and compute immutable checksums
+        // before entering the blocking database closure.
         let mut bundle = Vec::new();
         for (id, name, body) in self.list_available()? {
             use sha2::{Digest, Sha256};
@@ -201,7 +376,9 @@ impl Migrator {
         }
 
         pool.with_conn(move |c| {
-            // Bootstrap the migrations_applied table itself if absent.
+            // Bootstrap the ledger and the lease table outside numbered
+            // migrations. The lock must exist before V001 can safely run,
+            // otherwise two first-boot processes could both apply V001.
             c.execute_batch(
                 "CREATE TABLE IF NOT EXISTS migrations_applied ( \
                     version INTEGER PRIMARY KEY, \
@@ -210,72 +387,171 @@ impl Migrator {
                     checksum TEXT, \
                     execution_ms INTEGER, \
                     success INTEGER NOT NULL DEFAULT 1 CHECK (success IN (0, 1)) \
-                 )",
+                 ); \
+                 CREATE TABLE IF NOT EXISTS migration_lock ( \
+                    id INTEGER PRIMARY KEY CHECK (id = 1), \
+                    holder TEXT NOT NULL, \
+                    acquired_at TEXT NOT NULL \
+                 );",
             )?;
 
-            // Read the already-applied set.
-            let mut stmt = c.prepare("SELECT version, name, applied_at, checksum FROM migrations_applied ORDER BY version")?;
-            let applied: Vec<MigrationRecord> = stmt
-                .query_map([], |row| {
-                    let applied_at: String = row.get(2)?;
-                    Ok(MigrationRecord {
-                        id: row.get::<_, i64>(0)? as u32,
-                        name: row.get(1)?,
-                        applied_at: chrono::DateTime::parse_from_rfc3339(&applied_at)
-                            .map(|d| d.with_timezone(&chrono::Utc))
-                            .unwrap_or_else(|_| chrono::Utc::now()),
-                        checksum: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                    })
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            drop(stmt);
+            let lock_holder = acquire_migration_lock(c)?;
+            let migration_result =
+                (|| -> std::result::Result<Vec<MigrationRecord>, super::pool::DbError> {
+                    // Read the already-applied set.
+                    let mut stmt = c.prepare(
+                        "SELECT version, name, applied_at, checksum \
+                     FROM migrations_applied ORDER BY version",
+                    )?;
+                    let mut applied: Vec<MigrationRecord> = stmt
+                        .query_map([], |row| {
+                            let applied_at: String = row.get(2)?;
+                            Ok(MigrationRecord {
+                                id: row.get::<_, i64>(0)? as u32,
+                                name: row.get(1)?,
+                                applied_at: chrono::DateTime::parse_from_rfc3339(&applied_at)
+                                    .map(|d| d.with_timezone(&chrono::Utc))
+                                    .unwrap_or_else(|_| chrono::Utc::now()),
+                                checksum: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                            })
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    drop(stmt);
 
-            // Determine pending.
-            let available_brief: Vec<(u32, String, String)> = bundle
-                .iter()
-                .map(|(id, name, body, _)| (*id, name.clone(), body.clone()))
-                .collect();
-            // Order check first — surface conflict BEFORE running any DDL.
-            Self::verify_order(&available_brief, &applied)
-                .map_err(|e| super::pool::DbError::Manager(e.to_string()))?;
-            Self::verify_checksums(&bundle, &applied)
-                .map_err(|e| super::pool::DbError::Manager(e.to_string()))?;
-            let pending_ids: Vec<u32> = Self::pending(&available_brief, &applied)
-                .iter()
-                .map(|(id, _, _)| *id)
-                .collect();
+                    // Compatibility repair for the short-lived v0.9 lineage
+                    // that accidentally reused V008 for tombstones. Only the
+                    // exact known legacy body is accepted; unknown history
+                    // remains fail-closed.
+                    if let Some(record) = applied.iter_mut().find(|record| {
+                        record.id == 8 && record.name == "V008__schema_metadata_and_rag_tombstones"
+                    }) {
+                        use sha2::{Digest, Sha256};
+                        let mut legacy_hasher = Sha256::new();
+                        legacy_hasher.update(LEGACY_V09_V008_TOMBSTONES.as_bytes());
+                        let legacy_checksum =
+                            crate::diagnostics::crash_logger::hex_helper(&legacy_hasher.finalize());
 
-            // Apply each pending migration inside its own SQL transaction.
-            let mut applied_now = Vec::new();
-            for (id, name, body, checksum) in &bundle {
-                if !pending_ids.contains(id) {
-                    continue;
-                }
-                let started = std::time::Instant::now();
-                let tx = c.transaction()?;
-                tx.execute_batch(body)?;
-                let now = chrono::Utc::now();
-                tx.execute(
-                    "INSERT INTO migrations_applied (version, name, applied_at, checksum, execution_ms, success) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, 1)",
-                    rusqlite::params![
-                        *id as i64,
-                        name,
-                        now.to_rfc3339(),
-                        checksum,
-                        started.elapsed().as_millis() as i64,
-                    ],
-                )?;
-                tx.commit()?;
-                applied_now.push(MigrationRecord {
-                    id: *id,
-                    name: name.clone(),
-                    applied_at: now,
-                    checksum: checksum.clone(),
-                });
+                        if record.checksum.is_empty() || record.checksum == legacy_checksum {
+                            let (canonical_name, canonical_body, canonical_checksum) = bundle
+                                .iter()
+                                .find(|(id, _, _, _)| *id == 8)
+                                .map(|(_, name, body, checksum)| {
+                                    (name.clone(), body.clone(), checksum.clone())
+                                })
+                                .ok_or_else(|| {
+                                    super::pool::DbError::Manager(
+                                        "canonical V008 settings migration is missing".to_string(),
+                                    )
+                                })?;
+
+                            let tx = c.transaction()?;
+                            tx.execute_batch(&canonical_body)?;
+                            tx.execute(
+                                "UPDATE migrations_applied \
+                             SET name = ?1, checksum = ?2 WHERE version = 8",
+                                rusqlite::params![&canonical_name, &canonical_checksum],
+                            )?;
+                            tx.commit()?;
+
+                            record.name = canonical_name;
+                            record.checksum = canonical_checksum;
+                        }
+                    }
+
+                    let available_brief: Vec<(u32, String, String)> = bundle
+                        .iter()
+                        .map(|(id, name, body, _)| (*id, name.clone(), body.clone()))
+                        .collect();
+                    let max_supported = available_brief
+                        .iter()
+                        .map(|(id, _, _)| *id)
+                        .max()
+                        .unwrap_or(0);
+
+                    // Reject a DB explicitly marked as newer before any DDL.
+                    if table_exists(c, "schema_metadata")? {
+                        let last_migration: Option<i64> = c
+                            .query_row(
+                                "SELECT last_migration FROM schema_metadata WHERE id = 1",
+                                [],
+                                |row| row.get(0),
+                            )
+                            .optional()?;
+                        if let Some(found) = last_migration {
+                            let found = found.max(0) as u32;
+                            if found > max_supported {
+                                return Err(super::pool::DbError::Domain(
+                                    MukeiError::SchemaTooNew {
+                                        found,
+                                        supported: max_supported,
+                                    },
+                                ));
+                            }
+                        }
+                    }
+
+                    Self::verify_order(&available_brief, &applied)
+                        .map_err(super::pool::DbError::Domain)?;
+                    Self::verify_checksums(&bundle, &applied)
+                        .map_err(super::pool::DbError::Domain)?;
+                    let pending_ids: Vec<u32> = Self::pending(&available_brief, &applied)
+                        .iter()
+                        .map(|(id, _, _)| *id)
+                        .collect();
+
+                    let mut applied_now = Vec::new();
+                    for (id, name, body, checksum) in &bundle {
+                        if !pending_ids.contains(id) {
+                            continue;
+                        }
+                        let started = std::time::Instant::now();
+                        let tx = c.transaction()?;
+                        tx.execute_batch(body)?;
+                        let now = chrono::Utc::now();
+                        tx.execute(
+                            "INSERT INTO migrations_applied \
+                            (version, name, applied_at, checksum, execution_ms, success) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+                            rusqlite::params![
+                                *id as i64,
+                                name,
+                                now.to_rfc3339(),
+                                checksum,
+                                started.elapsed().as_millis() as i64,
+                            ],
+                        )?;
+                        tx.commit()?;
+                        applied_now.push(MigrationRecord {
+                            id: *id,
+                            name: name.clone(),
+                            applied_at: now,
+                            checksum: checksum.clone(),
+                        });
+                    }
+
+                    // Keep metadata truthful even when no migration was pending.
+                    if table_exists(c, "schema_metadata")? {
+                        c.execute(
+                            "UPDATE schema_metadata \
+                         SET app_version = ?1, last_migration = ?2, applied_at = ?3 \
+                         WHERE id = 1",
+                            rusqlite::params![
+                                env!("CARGO_PKG_VERSION"),
+                                max_supported as i64,
+                                chrono::Utc::now().to_rfc3339(),
+                            ],
+                        )?;
+                    }
+
+                    Ok(applied_now)
+                })();
+
+            let release_result = release_migration_lock(c, &lock_holder);
+            match (migration_result, release_result) {
+                (Err(error), _) => Err(error),
+                (Ok(_), Err(error)) => Err(error),
+                (Ok(records), Ok(())) => Ok(records),
             }
-
-            Ok::<_, super::pool::DbError>(applied_now)
         })
         .await
     }
@@ -385,15 +661,36 @@ mod tests {
     fn embedded_migrations_are_available_without_source_tree_scan() {
         let list = Migrator::embedded().list_available().unwrap();
         let ids: Vec<_> = list.iter().map(|(id, _, _)| *id).collect();
-        assert_eq!(ids, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(ids, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
         assert!(list.iter().any(|(_, name, body)| {
             name == "V007__message_status" && body.contains("ALTER TABLE messages")
         }));
         assert!(list.iter().any(|(_, name, body)| {
-            name == "V008__schema_metadata_and_rag_tombstones"
+            name == "V008__settings_and_secret_refs"
+                && body.contains("CREATE TABLE IF NOT EXISTS preferences")
+                && body.contains("CREATE TABLE IF NOT EXISTS secret_refs")
+        }));
+        assert!(list.iter().any(|(_, name, body)| {
+            name == "V009__schema_metadata_and_rag_tombstones"
                 && body.contains("CREATE TABLE IF NOT EXISTS schema_metadata")
                 && body.contains("CREATE TABLE IF NOT EXISTS migration_lock")
                 && body.contains("CREATE TABLE IF NOT EXISTS document_tombstone")
+        }));
+        assert!(list.iter().any(|(_, name, body)| {
+            name == "V010__reliability_hardening"
+                && body.contains("CREATE TABLE IF NOT EXISTS download_jobs")
+                && body.contains("CREATE TABLE IF NOT EXISTS storage_reservations")
+                && body.contains("chunk_ids_json")
+        }));
+        assert!(list.iter().any(|(_, name, body)| {
+            name == "V011__ui_projection_sessions"
+                && body.contains("CREATE TABLE IF NOT EXISTS ui_session_state")
+                && body.contains("CREATE TABLE IF NOT EXISTS ui_drafts")
+        }));
+        assert!(list.iter().any(|(_, name, body)| {
+            name == "V012__document_access_and_ingestion_jobs"
+                && body.contains("document_ingestion_jobs")
+                && body.contains("os_permission_state")
         }));
     }
 

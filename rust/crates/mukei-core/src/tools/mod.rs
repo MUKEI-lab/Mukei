@@ -24,6 +24,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
+use zeroize::Zeroizing;
 
 use crate::error::{MukeiError, Result};
 
@@ -94,10 +95,24 @@ impl ToolRegistry {
         tavily_key: impl Into<String>,
         remote_policy: RemoteFeaturePolicy,
     ) -> Self {
+        Self::with_web_search_secrets_and_policy(
+            Zeroizing::new(brave_key.into()),
+            Zeroizing::new(tavily_key.into()),
+            remote_policy,
+        )
+    }
+
+    /// Bridge-oriented constructor that keeps provider credentials in
+    /// zeroizing owners throughout the registry rebuild.
+    pub fn with_web_search_secrets_and_policy(
+        brave_key: Zeroizing<String>,
+        tavily_key: Zeroizing<String>,
+        remote_policy: RemoteFeaturePolicy,
+    ) -> Self {
         let mut registry = Self {
             inner: HashMap::new(),
         };
-        registry.register(web_search::WebSearchTool::with_keys_and_policy(
+        registry.register(web_search::WebSearchTool::with_secret_keys_and_policy(
             brave_key,
             tavily_key,
             remote_policy,

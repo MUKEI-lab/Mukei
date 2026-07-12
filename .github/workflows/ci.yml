@@ -115,3 +115,18 @@ jobs:
           --no-default-features
           --features std,tokio
           --lib
+
+  # -------------------------------------------------------------------
+  # Job 4 — static QML architecture and security guards.
+  # -------------------------------------------------------------------
+  qml-architecture:
+    name: qml architecture guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Architecture boundary check
+        run: python3 qml/scripts/qml_architecture_analyzer.py qml
+      - name: Cross-language contract check
+        run: python3 qml/scripts/qml_contract_guard.py qml
+      - name: QML security check
+        run: python3 qml/scripts/qml_security_analyzer.py qml

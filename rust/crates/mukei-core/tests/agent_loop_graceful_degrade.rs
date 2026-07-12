@@ -24,7 +24,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use mukei_core::agent::context::{ContextBackend, ContextBudgetManager, TokenCount};
-use mukei_core::agent::loop_::AgentLoop;
+use mukei_core::agent::loop_::{AgentLoop, AgentRunRequest};
 use mukei_core::agent::tools::{
     render_repeat_output_envelope, render_tool_error_envelope, FailureKind, FailureTracker,
     ToolExecutionPolicy, ToolExecutor,
@@ -32,7 +32,7 @@ use mukei_core::agent::tools::{
 use mukei_core::agent::watchdog::{Watchdog, WatchdogHandle};
 use mukei_core::error::MukeiError;
 use mukei_core::tools::ToolRegistry;
-use mukei_core::types::{BranchId, ChatMessage};
+use mukei_core::types::{BranchId, ChatMessage, ConversationId, MessageId};
 
 // ---------------------------------------------------------------------
 // Mock backends
@@ -44,6 +44,8 @@ struct StaticBackend;
 impl ContextBackend for StaticBackend {
     async fn load_history(
         &self,
+        _conversation: ConversationId,
+        _branch: BranchId,
         _active_history: &[ChatMessage],
     ) -> Result<Vec<ChatMessage>, mukei_core::error::MukeiError> {
         Ok(Vec::new())
@@ -96,7 +98,14 @@ async fn run_completes_without_tool_calls() {
     // treat it as a final answer and return Ok(()) on the first
     // iteration.
     let result = agent
-        .run("hello world".to_string(), BranchId::default(), cancel, tx)
+        .run(AgentRunRequest::new(
+            "hello world",
+            ConversationId::new(),
+            BranchId::new(),
+            MessageId::new(),
+            cancel,
+            tx,
+        ))
         .await;
 
     assert!(
@@ -134,8 +143,18 @@ async fn cancellation_is_observed() {
     cancel.cancel(); // pre-cancel — first watchdog check returns Ok, then
                      // the early-return check observes the cancellation.
 
+    // Keep the positional migration adapter covered as well as the
+    // request-object API exercised by the previous test.
     let result = agent
-        .run("hello".to_string(), BranchId::default(), cancel, tx)
+        .run_with_parts(
+            "hello".to_string(),
+            ConversationId::new(),
+            BranchId::new(),
+            MessageId::new(),
+            cancel,
+            tx,
+            None,
+        )
         .await;
 
     // Cancel is graceful — must NOT be reported as an error.

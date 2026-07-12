@@ -36,25 +36,19 @@ cargo check -p mukei-core --features "tokio,rusqlite,candle"
 cargo check -p mukei-core --features "tokio,network"   # enables real reqwest model downloader
 ```
 
-> **Verification note (2026-06-30):** `main` is green across the full Rust matrix. `cargo fmt --all -- --check`, the clippy feature matrix, the sandbox test workflow, `cargo test -p mukei-ffi-shim`, `cargo test -p mukei-core --all-features`, `cargo deny --all-features -D warnings`, and `cargo audit` all pass. The earlier candle/half/rand blocker is closed via the `half = =2.4.1` compatibility repin, and the vendored/prebuilt llama static-library path is now merged into `main`.
+> **Current hardening snapshot:** the source now includes truthful model activation, Protocol V2, non-chat async request generations, secure bootstrap, provenance, privacy-bounded observability, scope-safe/budget-aware RAG, a V013 SaaS domain/persistence foundation, a generic SaaS transport boundary, and explicit remote-feature policy.
 >
-> Note: `usearch`, `candle`, and `llama-cpp-rs` still need per-target setup.
-> `llama-cpp-prebuilt/CMakeLists.txt` produces a one-shot `libllama.a` per ABI.
+> The full Cargo/Clippy/Qt/JNI/device matrix has **not** been rerun for this exact archive. Historical green results belong to older source states.
+>
+> Note: `usearch`, `candle`, and the real `llama.cpp` path still need per-target setup. `llama-cpp-prebuilt/CMakeLists.txt` produces a one-shot `libllama.a` per ABI.
 
-## Test coverage
+## Test inventory
 
-Mirror of the currently-green GitHub Actions matrix on `main`.
+The current source contains **467** Rust `#[test]` / `#[tokio::test]` annotations under `crates/`. This is an inventory count, not a pass count.
 
-```
-mukei-core  (--all-features) 219 unit + 12 integration + 6 fingerprint
-                             + 3 grammar + 3 migrator + 4 sentinel
-                             + 1 doc-test                 ──► 248 passed
-mukei-ffi-shim                                                 3 passed
-                                                           ─────────
-                                                           251 passed total
-```
+The current documentation refresh did not have a Rust/Cargo toolchain available, so no new Cargo, Clippy, or test result is claimed for this exact snapshot.
 
-The sandbox workflow still runs the narrower `(std,tokio)` matrix for fast feedback, while the broader verification pass additionally covers `std,tokio,rusqlite`, `std,tokio,network`, and `--all-features`. When the `rusqlite` feature is enabled the lib-test count rises to 218 (SQLite-only suites unlock). The `network` feature additionally enables the 416-restart loopback integration test (`http_416_on_resume_triggers_restart_and_succeeds`).
+The checked-in lockfile still contains `crossbeam-epoch 0.9.18` and `cxx 1.0.194`, versions flagged by the latest recorded project dependency-security run. Resolve those advisories compatibly and rerun `cargo-audit` plus `cargo-deny`.
 
 Documentation index (under `docs/`):
 
@@ -63,6 +57,21 @@ Documentation index (under `docs/`):
 - [Backend Schema v1.2](docs/BS.md) — SQL schema, migrations, retention policy
 - [Application Flow v1.2](docs/AF.md) — Boot, model acquisition, tool pipeline
 - [UX Brief v2.1](docs/UXB.md) — Editorial-luxury design system
+- [SaaS Foundation](docs/SAAS_FOUNDATION.md) — local-first tenancy, entitlement, usage, quota, and transport boundaries
+- [Current Implementation Status](../docs/CURRENT_IMPLEMENTATION_STATUS.md) — canonical status and release gates for this merged snapshot
+
+### Current hardening surfaces
+
+- `engine::activation`: truthful backend activation/readiness and stale-generation protection.
+- `ui_protocol` + bridge `protocol`: Protocol V2 commands, acknowledgements, event identity, per-stream ordering, and replay protection.
+- bridge `async_bridge`: generation-guarded non-chat asynchronous results.
+- bridge `bootstrap`: SQLCipher/Keystore key lifecycle.
+- bridge `provenance`: distinct product/protocol/schema/build/runtime/hardening metadata.
+- `diagnostics::observability`: bounded privacy-aware local observability.
+- `rag::retriever` + `agent::context`: explicit retrieval scope and context budgets.
+- `saas` + `storage::saas` + V013: local-first tenant/entitlement/usage/quota foundation.
+- `network::saas`: generic hardened SaaS transport boundary.
+- `tools::remote_policy`: explicit remote-feature privacy policy, defaulting to local-only.
 
 ### Verified invariants
 
@@ -242,29 +251,45 @@ Documentation index (under `docs/`):
 
 ## Directory layout
 
-```
+```text
 rust/
-├── Cargo.toml                         (panic = "unwind" pinned, MSRV 1.78)
+├── Cargo.toml
+├── .cargo/config.toml                 Android aarch64 linker/compiler hardening
 ├── crates/
-│   ├── mukei-core/        (lib)       (pure-Rust, no Qt)
-│   ├── mukei-bridge/      (cdylib + staticlib)  (CXX-Qt + JNI; Qt host only)
-│   └── mukei-ffi-shim/    (staticlib) (manual extern "C" escape hatch)
-├── llama-cpp-stub/        (lib)       (release-hardened placeholder)
-├── llama-cpp-prebuilt/                (one-shot libllama.a per ABI, CMake)
+│   ├── mukei-core/                    pure-Rust kernel
+│   │   └── src/
+│   │       ├── agent/                 loop + scope-safe context budgeting
+│   │       ├── engine/                inference + authoritative activation
+│   │       ├── diagnostics/           crash/logging + bounded observability
+│   │       ├── network/               optional network + SaaS transport boundary
+│   │       ├── rag/                   scoped/budget-aware retrieval
+│   │       ├── saas/                  tenant/entitlement/usage/quota domain
+│   │       ├── storage/               SQLite repositories including SaaS state
+│   │       ├── tools/                 tool isolation + remote-feature policy
+│   │       ├── ui_contract.rs
+│   │       └── ui_protocol.rs         Protocol V2 shared types
+│   ├── mukei-bridge/                  CXX-Qt/JNI bridge
+│   │   └── src/
+│   │       ├── async_bridge.rs
+│   │       ├── bootstrap.rs
+│   │       ├── protocol.rs
+│   │       └── provenance.rs
+│   └── mukei-ffi-shim/                manual C ABI fallback
+├── llama-cpp-stub/                    guarded development placeholder
+├── llama-cpp-prebuilt/                one-shot per-ABI native build path
 ├── migrations/
-│   ├── 000_default_config.toml
-│   ├── V001__schema.sql           (conversations, messages, chunks)
-│   ├── V002__recovery_state.sql   (crash-safe stream resume)
-│   ├── V003__tooling_and_saf.sql  (audit log + SAF token table)
-│   └── V004__branching.sql        (branch graph)
+│   ├── V001__schema.sql
+│   ├── ...
+│   └── V013__saas_tenancy_entitlements_usage_ledger.sql
 ├── grammars/
 │   └── tool_calling.gbnf
 └── docs/
-    ├── PRD.md   (v0.7.5)
-    ├── TRD.md   (v0.7.5)
-    ├── BS.md    (v1.2)
-    ├── AF.md    (v1.2)
-    └── UXB.md   (v2.1)
+    ├── PRD.md
+    ├── TRD.md
+    ├── BS.md
+    ├── AF.md
+    ├── UXB.md
+    └── SAAS_FOUNDATION.md
 ```
 
 ## Error taxonomy (excerpt)
