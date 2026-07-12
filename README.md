@@ -100,6 +100,13 @@ The current archive contains **467 Rust test annotations** and **23 QML `tst_*.q
 
 Current dependency-security status is also not green: the checked-in lockfile still contains `crossbeam-epoch 0.9.18` and `cxx 1.0.194`, versions flagged by the latest recorded project audit. See the current status document for release gates.
 
+Release-gate CI is intentionally split by proof target:
+
+- `.github/workflows/ci.yml`: fast `mukei-core` + static QML guards only.
+- `.github/workflows/full-rust-workspace.yml`: broader non-Qt Rust workspace validation, explicit feature checks, and FFI-shim proof.
+- `.github/workflows/dependency-security.yml`: `cargo audit` + `cargo deny`.
+- `.github/workflows/bridge-qt-validation.yml`: Qt/CXX-Qt bridge compile plus QML configure/build/test proof.
+
 ### Post-merge hardening now represented in source
 
 - **Truthful inference activation:** verified artifact state is separate from active-backend readiness; stale activations cannot overwrite newer selections; production failure never silently becomes a mock success.

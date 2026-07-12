@@ -157,16 +157,21 @@ Historical logs in `reports/` remain evidence for the older source state only.
 
 ## Current CI truth
 
-The archive currently contains one workflow: `.github/workflows/ci.yml`.
+The archive now defines four distinct workflow surfaces:
 
-It covers:
+- `.github/workflows/ci.yml` for the fast core gate only;
+- `.github/workflows/full-rust-workspace.yml` for broader non-Qt Rust validation plus explicit feature checks;
+- `.github/workflows/dependency-security.yml` for `cargo audit` and `cargo deny`;
+- `.github/workflows/bridge-qt-validation.yml` for bridge compilation plus Qt/QML configure-build-test proof.
+
+The fast core workflow covers:
 
 - `cargo fmt --check`;
 - narrow `mukei-core` Clippy (`std,tokio`);
 - narrow `mukei-core` unit tests (`std,tokio`);
 - QML architecture, contract, and security analyzers.
 
-It does **not** currently provide a full bridge/Qt build, all-feature Cargo matrix, Android build, `cargo-audit`, or `cargo-deny` workflow.
+The broader workflows are intended release gates, not proof already obtained by this document refresh. Remote green status still requires commit, push, and successful workflow runs on the exact branch being certified.
 
 ## Known dependency-security release gate
 
@@ -181,19 +186,20 @@ Do not force-upgrade `cxx` blindly: it participates in the CXX-Qt dependency gra
 
 ## Release gates
 
+Release-gate proof is not complete on local command success alone. Each stage remains open until the relevant workflow/config change is committed, pushed, and green in remote CI for the branch being certified.
+
 The current source should not be described as release-certified until at least:
 
 1. `cargo fmt --all -- --check`;
-2. `cargo check --workspace`;
-3. required feature-matrix checks;
-4. Clippy with warnings denied for core and bridge;
-5. core and FFI-shim tests;
+2. full Rust workflow success for workspace-level check/test/clippy and the explicit `mukei-core` feature checks;
+3. core and FFI-shim tests;
+4. bridge compile proof on a Qt/CXX-Qt provisioned runner;
+5. Qt 6.5+ configure/build, `qmllint`, QuickTest, and CTest;
 6. `cargo-audit` and `cargo-deny`;
 7. fresh V001–V013 migration application against a clean database;
-8. Qt 6.5+ configure/build, `qmllint`, QuickTest, and CTest;
-9. CXX-Qt/JNI/Gradle Android build;
-10. real per-ABI llama.cpp linkage and model activation;
-11. physical-device validation for SQLCipher bootstrap, lifecycle recovery, SAF, downloads, low-memory behavior, accessibility, and cancellation.
+8. CXX-Qt/JNI/Gradle Android build;
+9. real per-ABI llama.cpp linkage and model activation;
+10. physical-device validation for SQLCipher bootstrap, lifecycle recovery, SAF, downloads, low-memory behavior, accessibility, and cancellation.
 
 ## Verdict
 

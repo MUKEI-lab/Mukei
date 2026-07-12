@@ -31,6 +31,12 @@ cargo test -p mukei-core --all-features
 cargo test -p mukei-ffi-shim
 ```
 
+Remote proof is now intended to stay split by surface:
+
+- `ci.yml` remains the narrow fast gate for `mukei-core` (`std,tokio`) plus static QML guards.
+- `full-rust-workspace.yml` covers non-Qt workspace check/test/clippy, explicit `mukei-core` feature checks, and `mukei-ffi-shim`.
+- `bridge-qt-validation.yml` is the release gate for `mukei-bridge` compilation and Qt/QML configure-build-test proof.
+
 The bridge itself requires the CXX-Qt/Qt toolchain:
 
 ```sh
@@ -39,7 +45,7 @@ cargo clippy -p mukei-bridge --all-targets --features "sqlcipher,network" -- -D 
 ```
 
 The current archive is not documented as passing these commands until they are
-rerun on this exact snapshot.
+rerun on this exact snapshot and the corresponding remote workflow run is green.
 
 ## QML verification
 

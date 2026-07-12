@@ -1,0 +1,95 @@
+name: bridge-qt-validation
+
+on:
+  push:
+    branches: [ main, "agent/**" ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: release-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  RUST_BACKTRACE: 1
+  QT_VERSION: 6.5.3
+
+jobs:
+  bridge-compile:
+    name: bridge compile gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Qt 6.5
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-cargo-bridge-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bridge-
+      - name: cargo build -p mukei-bridge
+        working-directory: rust
+        run: cargo build -p mukei-bridge --features "sqlcipher,network"
+
+  qml-runtime:
+    name: qml configure-build-test gate
+    runs-on: ubuntu-latest
+    env:
+      CMAKE_BUILD_DIR: /tmp/mukei-qml-build
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Qt 6.5
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+      - name: Ensure CMake and Ninja
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-cargo-qml-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-qml-
+      - name: Build bridge library for QML linkage
+        working-directory: rust
+        run: cargo build -p mukei-bridge --features "sqlcipher,network"
+      - name: Configure QML build
+        working-directory: qml
+        run: >-
+          cmake -S . -B "$CMAKE_BUILD_DIR" -G Ninja
+          -DMUKEI_USE_REAL_BRIDGE=ON
+          -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/debug/libmukei_bridge.so"
+      - name: Build generated qmllint targets
+        run: |
+          cmake --build "$CMAKE_BUILD_DIR" --target help > /tmp/mukei-qml-targets.txt
+          if grep -q 'all_qmllint' /tmp/mukei-qml-targets.txt; then
+            cmake --build "$CMAKE_BUILD_DIR" --target all_qmllint
+          else
+            echo "Expected all_qmllint target was not generated." >&2
+            exit 1
+          fi
+      - name: Build QML and test targets
+        run: cmake --build "$CMAKE_BUILD_DIR"
+      - name: Run CTest
+        run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
