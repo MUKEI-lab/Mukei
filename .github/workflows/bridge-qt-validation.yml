@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: release-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -101,3 +104,43 @@ jobs:
         run: cmake --build "$CMAKE_BUILD_DIR"
       - name: Run CTest
         run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
+
+  bridge-diagnostic:
+    name: capture bridge compiler failure
+    if: github.head_ref == 'agent/diagnose-current-ci'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/diagnose-current-ci
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Qt 6.5
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+      - name: Export Qt toolchain paths
+        run: |
+          echo "$QT_ROOT_DIR/bin" >> $GITHUB_PATH
+          echo "QMAKE=$QT_ROOT_DIR/bin/qmake" >> $GITHUB_ENV
+      - name: Capture bridge build output
+        working-directory: rust
+        shell: bash
+        run: |
+          set +e
+          cargo build --quiet -p mukei-bridge --features "sqlcipher,network" > ../bridge-build-current.log 2>&1
+          echo "exit_status=$?" >> ../bridge-build-current.log
+          exit 0
+      - name: Commit bridge diagnostics
+        shell: bash
+        run: |
+          cp bridge-build-current.log /tmp/bridge-build-current.log
+          git fetch origin agent/diagnose-current-ci
+          git reset --hard origin/agent/diagnose-current-ci
+          cp /tmp/bridge-build-current.log .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f bridge-build-current.log
+          git commit -m "chore(ci): capture bridge compiler failure"
+          git push origin HEAD:agent/diagnose-current-ci
