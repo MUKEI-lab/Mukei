@@ -4,18 +4,8 @@ info: component clippy is up to date
 info: component rust-std is up to date
 info: component rustfmt is up to date
 info: downloading component rust-std
-[1m[91merror[0m[1m: variant `Persisted` is never constructed[0m
-  [1m[94m--> [0mcrates/mukei-bridge/src/android_document_access.rs:11:5
-   [1m[94m|[0m
-[1m[94m 8[0m [1m[94m|[0m pub enum PermissionState {
-   [1m[94m|[0m          [1m[94m---------------[0m [1m[94mvariant in this enum[0m
-[1m[94m...[0m
-[1m[94m11[0m [1m[94m|[0m     Persisted,
-   [1m[94m|[0m     [1m[91m^^^^^^^^^[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `PermissionState` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
-   [1m[94m= [0m[1mnote[0m: `-D dead-code` implied by `-D warnings`
-   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
+[1m[33mwarning[0m[1m: the gold linker is deprecated and has known bugs with Rust[0m
+  [1m[94m|[0m
+  [1m[94m= [0m[1mhelp[0m: consider using LLD or ld from GNU binutils instead
 
-[1m[91merror[0m: could not compile `mukei-bridge` (lib) due to 1 previous error
-exit_status=101
+exit_status=0
