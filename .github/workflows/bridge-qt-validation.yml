@@ -101,3 +101,54 @@ jobs:
         run: cmake --build "$CMAKE_BUILD_DIR"
       - name: Run CTest
         run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
+
+  cxxqt-header-layout-diagnostic:
+    name: capture CXX-Qt generated header layout
+    if: github.head_ref == 'agent/ci-green-final'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Qt 6.5
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+      - name: Export Qt toolchain paths
+        run: |
+          echo "$QT_ROOT_DIR/bin" >> $GITHUB_PATH
+          echo "QMAKE=$QT_ROOT_DIR/bin/qmake" >> $GITHUB_ENV
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-cargo-bridge-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bridge-
+      - name: Ensure bridge build exists
+        working-directory: rust
+        run: cargo build -p mukei-bridge --features "sqlcipher,network"
+      - name: Capture generated header layout
+        shell: bash
+        run: |
+          {
+            echo '=== matching generated headers ==='
+            find rust/target -type f \( -name '*.h' -o -name '*.hpp' \) \
+              | grep -E 'cxxqt|cxxbridge|mukei[_-]bridge|lib\.rs' \
+              | sort || true
+            echo
+            echo '=== directories named include/cxxqt/cxxbridge ==='
+            find rust/target -type d \
+              | grep -E '/(include|cxxqt|cxxbridge)(/|$)' \
+              | sort || true
+          } > cxxqt-header-layout.txt
+      - name: Upload CXX-Qt header layout
+        uses: actions/upload-artifact@v4
+        with:
+          name: cxxqt-header-layout
+          path: cxxqt-header-layout.txt
+          if-no-files-found: error
