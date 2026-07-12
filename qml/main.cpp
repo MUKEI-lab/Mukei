@@ -948,9 +948,9 @@ int main(int argc, char *argv[])
     MukeiRuntimeInfo runtimeInfo;
     MukeiTimelineModel timelineModel;
 #ifdef MUKEI_USE_REAL_BRIDGE
-    ffi::MukeiAgent agent;
-    ffi::MukeiBridge bridge;
-    ffi::SafRegistry safRegistry;
+    MukeiAgent agent;
+    MukeiBridge bridge;
+    SafRegistry safRegistry;
 #else
     MukeiAgentStub agent;
     MukeiBridgeStub bridge;
