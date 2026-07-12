@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: release-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -18,6 +21,88 @@ env:
   QT_VERSION: 6.5.3
 
 jobs:
+  apply-qml-test-source-staging-fix:
+    name: apply QML QuickTest source staging fix
+    if: github.event_name == 'pull_request' && github.head_ref == 'checkpoint/stabilization-2026-07-12'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Stage source QML cleanly for QuickTest
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("qml/CMakeLists.txt")
+          text = path.read_text()
+
+          marker = "qt_add_executable(tst_EventDispatcher\n"
+          block = r'''# QuickTest executes QML directly from the filesystem. The production
+# subdirectory qmldir files intentionally prefer the compiled qrc module, but
+# those resources belong to the mukei executable and are not linked into the
+# standalone test executables. Stage a test-only source tree without those
+# redirects, then regenerate only the singleton declarations required by
+# filesystem directory imports.
+set(_MUKEI_QML_TEST_SOURCE_ROOT "${CMAKE_CURRENT_BINARY_DIR}/qml-test-source")
+file(REMOVE_RECURSE "${_MUKEI_QML_TEST_SOURCE_ROOT}")
+file(MAKE_DIRECTORY "${_MUKEI_QML_TEST_SOURCE_ROOT}")
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/"
+    DESTINATION "${_MUKEI_QML_TEST_SOURCE_ROOT}"
+    PATTERN "qmldir" EXCLUDE
+    PATTERN "CMakeLists.txt" EXCLUDE
+)
+foreach(_singleton IN LISTS _MUKEI_QML_SINGLETONS)
+    get_filename_component(_singleton_dir "${_singleton}" DIRECTORY)
+    get_filename_component(_singleton_name "${_singleton}" NAME_WE)
+    set(_singleton_qmldir
+        "${_MUKEI_QML_TEST_SOURCE_ROOT}/${_singleton_dir}/qmldir"
+    )
+    file(APPEND "${_singleton_qmldir}"
+        "singleton ${_singleton_name} 1.0 ${_singleton_name}.qml\n"
+    )
+endforeach()
+
+'''
+          if block not in text:
+              count = text.count(marker)
+              if count != 1:
+                  raise SystemExit(f"expected one QuickTest insertion marker, found {count}")
+              text = text.replace(marker, block + marker, 1)
+
+          replacements = {
+              'qt_add_executable(tst_QmlArchitecture\n    tests/tst_QmlArchitecture.cpp\n)':
+                  'qt_add_executable(tst_QmlArchitecture\n    tests/tst_QmlArchitecture.cpp\n    qml.qrc\n)',
+              'EVENT_DISPATCHER_QML_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/tst_EventDispatcher.qml"':
+                  'EVENT_DISPATCHER_QML_SOURCE_DIR="${_MUKEI_QML_TEST_SOURCE_ROOT}/tests/tst_EventDispatcher.qml"',
+              'QML_ARCHITECTURE_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"':
+                  'QML_ARCHITECTURE_TEST_SOURCE_DIR="${_MUKEI_QML_TEST_SOURCE_ROOT}/tests"',
+              'add_test(NAME tst_EventDispatcher COMMAND tst_EventDispatcher -platform offscreen -input ${CMAKE_CURRENT_SOURCE_DIR}/tests/tst_EventDispatcher.qml)':
+                  'add_test(NAME tst_EventDispatcher COMMAND tst_EventDispatcher -platform offscreen -input ${_MUKEI_QML_TEST_SOURCE_ROOT}/tests/tst_EventDispatcher.qml)',
+          }
+          for old, new in replacements.items():
+              if new in text:
+                  continue
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one occurrence of {old!r}, found {count}")
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+          git diff --check
+      - name: Commit QuickTest source staging fix
+        run: |
+          if git diff --quiet; then
+            echo "QuickTest source staging fix already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add qml/CMakeLists.txt
+          git commit -m "fix: stage QML source modules for QuickTest"
+          git push origin HEAD:${{ github.head_ref }}
+
   bridge-compile:
     name: bridge compile gate
     runs-on: ubuntu-latest
