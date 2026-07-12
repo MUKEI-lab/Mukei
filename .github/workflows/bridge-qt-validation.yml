@@ -7,9 +7,6 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 concurrency:
   group: release-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -21,61 +18,6 @@ env:
   QT_VERSION: 6.5.3
 
 jobs:
-  apply-checkpoint-ci-repair:
-    name: apply checkpoint CI repair
-    if: github.event_name == 'pull_request' && github.head_ref == 'checkpoint/stabilization-2026-07-12'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-      - name: Apply exact bridge compile fixes
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          storage = Path("rust/crates/mukei-bridge/src/storage_bridge.rs")
-          storage_text = storage.read_text()
-          quota_old = "mukei_core::storage::DEFAULT_MAX_MODEL_STORAGE_BYTES"
-          quota_new = "mukei_core::storage::quota::DEFAULT_MAX_MODEL_STORAGE_BYTES"
-          if storage_text.count(quota_old) != 1:
-              raise SystemExit(f"expected one quota constant reference, found {storage_text.count(quota_old)}")
-          storage.write_text(storage_text.replace(quota_old, quota_new, 1))
-
-          bridge = Path("rust/crates/mukei-bridge/src/lib.rs")
-          bridge_text = bridge.read_text()
-
-          load_old = "mukei_core::storage::UiSessionRepository::load("
-          load_new = "mukei_core::storage::UiSessionRepository::load_session("
-          if bridge_text.count(load_old) != 1:
-              raise SystemExit(f"expected one UiSessionRepository::load call, found {bridge_text.count(load_old)}")
-          bridge_text = bridge_text.replace(load_old, load_new, 1)
-
-          capture_old = "                        let final_path_string = destination_token.clone();\n                        let _ = qt_for_ev.queue(move |mut qobject| {"
-          capture_new = "                        let final_path_string = destination_token.clone();\n                        let completed_model_id = model_id.clone();\n                        let _ = qt_for_ev.queue(move |mut qobject| {"
-          if bridge_text.count(capture_old) != 1:
-              raise SystemExit(f"expected one DownloadCompleted capture site, found {bridge_text.count(capture_old)}")
-          bridge_text = bridge_text.replace(capture_old, capture_new, 1)
-
-          field_old = "                                    final_path: final_path_string.clone(),\n                                    model_id: model_id.clone(),"
-          field_new = "                                    final_path: final_path_string.clone(),\n                                    model_id: completed_model_id,"
-          if bridge_text.count(field_old) != 1:
-              raise SystemExit(f"expected one DownloadCompleted model_id field, found {bridge_text.count(field_old)}")
-          bridge.write_text(bridge_text.replace(field_old, field_new, 1))
-          PY
-          git diff --check
-      - name: Commit repair to checkpoint branch
-        run: |
-          if git diff --quiet; then
-            echo "Checkpoint repair already applied."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add rust/crates/mukei-bridge/src/lib.rs rust/crates/mukei-bridge/src/storage_bridge.rs
-          git commit -m "fix: repair bridge compile regressions"
-          git push origin HEAD:${{ github.head_ref }}
-
   bridge-compile:
     name: bridge compile gate
     runs-on: ubuntu-latest
@@ -102,24 +44,9 @@ jobs:
           key: ${{ runner.os }}-cargo-bridge-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-bridge-
-      - name: Capture bridge compiler diagnostics
-        id: bridge-build
-        continue-on-error: true
+      - name: cargo build -p mukei-bridge
         working-directory: rust
-        run: >-
-          cargo build --quiet -p mukei-bridge --features "sqlcipher,network"
-          --message-format=short > /tmp/mukei-bridge-build.log 2>&1
-      - name: Upload bridge compiler diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bridge-build-diagnostics
-          path: /tmp/mukei-bridge-build.log
-          if-no-files-found: error
-          retention-days: 1
-      - name: Enforce bridge build result
-        if: steps.bridge-build.outcome == 'failure'
-        run: exit 1
+        run: cargo build -p mukei-bridge --features "sqlcipher,network"
 
   qml-runtime:
     name: qml configure-build-test gate
