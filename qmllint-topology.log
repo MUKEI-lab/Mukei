@@ -1,39 +1,39 @@
-[1/103] Generating com/mukei/app/MainWindow.qml
-[2/103] Generating com/mukei/app/architecture/AppCoordinator.qml
-[3/103] Generating com/mukei/app/events/EventDispatcher.qml
-[4/103] Generating com/mukei/app/architecture/IntentDispatcher.qml
+[1/103] Generating com/mukei/app/architecture/AppCoordinator.qml
+[2/103] Generating com/mukei/app/events/EventDispatcher.qml
+[3/103] Generating com/mukei/app/architecture/IntentDispatcher.qml
+[4/103] Generating com/mukei/app/MainWindow.qml
 [5/103] Generating com/mukei/app/architecture/AppStateHub.qml
 [6/103] Generating com/mukei/app/architecture/PresentationPolicy.qml
 [7/103] Generating com/mukei/app/architecture/SnapshotController.qml
 [8/103] Generating com/mukei/app/stores/ContractStore.qml
-[9/103] Generating com/mukei/app/stores/CapabilityStore.qml
-[10/103] Generating com/mukei/app/stores/LifecycleStore.qml
-[11/103] Generating com/mukei/app/stores/ConversationStore.qml
-[12/103] Generating com/mukei/app/stores/NavigationStore.qml
-[13/103] Generating com/mukei/app/stores/ChatStore.qml
+[9/103] Generating com/mukei/app/stores/LifecycleStore.qml
+[10/103] Generating com/mukei/app/stores/ConversationStore.qml
+[11/103] Generating com/mukei/app/stores/NavigationStore.qml
+[12/103] Generating com/mukei/app/stores/CapabilityStore.qml
+[13/103] Generating com/mukei/app/stores/UiSessionStore.qml
 [14/103] Generating com/mukei/app/stores/RecoveryStore.qml
-[15/103] Generating com/mukei/app/stores/DocumentStore.qml
-[16/103] Generating com/mukei/app/stores/StorageStore.qml
-[17/103] Generating com/mukei/app/stores/UiSessionStore.qml
-[18/103] Generating com/mukei/app/stores/DownloadStore.qml
-[19/103] Generating com/mukei/app/stores/ModelStore.qml
-[20/103] Generating com/mukei/app/stores/SettingsStore.qml
-[21/103] Generating com/mukei/app/stores/OperationStore.qml
-[22/103] Generating com/mukei/app/stores/ResponsiveStore.qml
+[15/103] Generating com/mukei/app/stores/ChatStore.qml
+[16/103] Generating com/mukei/app/stores/ModelStore.qml
+[17/103] Generating com/mukei/app/stores/DownloadStore.qml
+[18/103] Generating com/mukei/app/stores/DocumentStore.qml
+[19/103] Generating com/mukei/app/stores/SettingsStore.qml
+[20/103] Generating com/mukei/app/stores/StorageStore.qml
+[21/103] Generating com/mukei/app/stores/ResponsiveStore.qml
+[22/103] Generating com/mukei/app/stores/OperationStore.qml
 [23/103] Generating com/mukei/app/stores/ErrorStore.qml
-[24/103] Generating com/mukei/app/shell/AppShell.qml
-[25/103] Generating com/mukei/app/stores/DiagnosticsStore.qml
-[26/103] Generating com/mukei/app/stores/AccessibilityStore.qml
+[24/103] Generating com/mukei/app/stores/DiagnosticsStore.qml
+[25/103] Generating com/mukei/app/stores/AccessibilityStore.qml
+[26/103] Generating com/mukei/app/shell/AppShell.qml
 [27/103] Generating com/mukei/app/shell/AdaptiveNavigation.qml
 [28/103] Generating com/mukei/app/shell/RouterHost.qml
 [29/103] Generating com/mukei/app/shell/BannerHost.qml
-[30/103] Generating com/mukei/app/shell/SnackbarHost.qml
+[30/103] Generating com/mukei/app/shell/OperationOverlayHost.qml
 [31/103] Generating com/mukei/app/shell/SheetHost.qml
-[32/103] Generating com/mukei/app/shell/OperationOverlayHost.qml
-[33/103] Generating com/mukei/app/shell/DialogHost.qml
+[32/103] Generating com/mukei/app/shell/DialogHost.qml
+[33/103] Generating com/mukei/app/shell/SnackbarHost.qml
 [34/103] Generating com/mukei/app/theme/Type.qml
-[35/103] Generating com/mukei/app/theme/Spacing.qml
-[36/103] Generating com/mukei/app/theme/Theme.qml
+[35/103] Generating com/mukei/app/theme/Theme.qml
+[36/103] Generating com/mukei/app/theme/Spacing.qml
 [37/103] Generating com/mukei/app/theme/Motion.qml
 [38/103] Generating com/mukei/app/components/AccessibilityAnnouncer.qml
 [39/103] Generating com/mukei/app/components/AIMessageBubble.qml
@@ -41,18 +41,18 @@
 [41/103] Generating com/mukei/app/components/ChatComposer.qml
 [42/103] Generating com/mukei/app/components/ChatTimelineEvent.qml
 [43/103] Generating com/mukei/app/components/CodeBlockComponent.qml
-[44/103] Generating com/mukei/app/components/ConfirmationDialog.qml
-[45/103] Generating com/mukei/app/components/DestructiveConfirmDialog.qml
-[46/103] Generating com/mukei/app/components/FontLoader.qml
-[47/103] Generating com/mukei/app/components/ConversationList.qml
-[48/103] Generating com/mukei/app/components/CopyButton.qml
-[49/103] Generating com/mukei/app/components/DestructiveButton.qml
+[44/103] Generating com/mukei/app/components/ConversationList.qml
+[45/103] Generating com/mukei/app/components/CopyButton.qml
+[46/103] Generating com/mukei/app/components/ConfirmationDialog.qml
+[47/103] Generating com/mukei/app/components/DestructiveButton.qml
+[48/103] Generating com/mukei/app/components/DestructiveConfirmDialog.qml
+[49/103] Generating com/mukei/app/components/FontLoader.qml
 [50/103] Generating com/mukei/app/components/FullScreenModal.qml
 [51/103] Generating com/mukei/app/components/GhostButton.qml
 [52/103] Generating com/mukei/app/components/HapticFeedback.qml
-[53/103] Generating com/mukei/app/components/LeftDrawer.qml
-[54/103] Generating com/mukei/app/components/IconButton.qml
-[55/103] Generating com/mukei/app/components/MarkdownRenderer.qml
+[53/103] Generating com/mukei/app/components/IconButton.qml
+[54/103] Generating com/mukei/app/components/MarkdownRenderer.qml
+[55/103] Generating com/mukei/app/components/LeftDrawer.qml
 [56/103] Generating com/mukei/app/components/MukeiIcon.qml
 [57/103] Generating com/mukei/app/components/ModalSheet.qml
 [58/103] Generating com/mukei/app/components/NetworkBanner.qml
@@ -63,58 +63,50 @@
 [63/103] Generating com/mukei/app/components/SearchField.qml
 [64/103] Generating com/mukei/app/components/SecondaryButton.qml
 [65/103] Generating com/mukei/app/components/SettingsTextField.qml
-[66/103] Generating com/mukei/app/components/SkeletonLoader.qml
-[67/103] Generating com/mukei/app/components/Spinner.qml
-[68/103] Generating com/mukei/app/components/StoragePressureCard.qml
-[69/103] Generating com/mukei/app/components/StreamingCaret.qml
-[70/103] Generating com/mukei/app/components/ThinkingAccordion.qml
-[71/103] Generating com/mukei/app/components/ToastNotification.qml
-[72/103] Generating com/mukei/app/components/StatusPill.qml
+[66/103] Generating com/mukei/app/components/Spinner.qml
+[67/103] Generating com/mukei/app/components/SkeletonLoader.qml
+[68/103] Generating com/mukei/app/components/StatusPill.qml
+[69/103] Generating com/mukei/app/components/StoragePressureCard.qml
+[70/103] Generating com/mukei/app/components/StreamingCaret.qml
+[71/103] Generating com/mukei/app/components/ThinkingAccordion.qml
+[72/103] Generating com/mukei/app/components/ToastNotification.qml
 [73/103] Generating com/mukei/app/components/ToolResultCard.qml
 [74/103] Generating com/mukei/app/screens/ChatScreen.qml
-[75/103] Generating com/mukei/app/screens/CompatibilityScreen.qml
-[76/103] Generating com/mukei/app/components/UserMessageBubble.qml
-[77/103] Generating com/mukei/app/screens/DownloadsScreen.qml
-[78/103] Generating com/mukei/app/screens/DocumentsScreen.qml
-[79/103] Generating com/mukei/app/screens/EmptyChatScreen.qml
-[80/103] Generating com/mukei/app/screens/DiagnosticsScreen.qml
-[81/103] Generating com/mukei/app/screens/ModelManagerScreen.qml
-[82/103] Generating com/mukei/app/screens/RagRebuildPromptScreen.qml
-[83/103] Generating com/mukei/app/screens/ModelPickerScreen.qml
-[84/103] Generating com/mukei/app/screens/RecoveryScreen.qml
-[85/103] Generating com/mukei/app/screens/SafeModeScreen.qml
-[86/103] Generating com/mukei/app/screens/SettingsScreen.qml
-[87/103] Generating com/mukei/app/screens/StartupScreen.qml
-[88/103] Generating com/mukei/app/screens/ToolResultExpandedScreen.qml
-[89/103] Generating com/mukei/app/screens/WelcomeScreen.qml
-[90/103] Generating com/mukei/app/screens/VerificationScreen.qml
-[91/103] Generating com/mukei/app/events/qmldir
-[92/103] Generating com/mukei/app/architecture/qmldir
-[93/103] Generating com/mukei/app/shell/qmldir
-[94/103] Generating com/mukei/app/stores/qmldir
+[75/103] Generating com/mukei/app/components/UserMessageBubble.qml
+[76/103] Generating com/mukei/app/screens/CompatibilityScreen.qml
+[77/103] Generating com/mukei/app/screens/EmptyChatScreen.qml
+[78/103] Generating com/mukei/app/screens/DiagnosticsScreen.qml
+[79/103] Generating com/mukei/app/screens/ModelManagerScreen.qml
+[80/103] Generating com/mukei/app/screens/ModelPickerScreen.qml
+[81/103] Generating com/mukei/app/screens/DownloadsScreen.qml
+[82/103] Generating com/mukei/app/screens/DocumentsScreen.qml
+[83/103] Generating com/mukei/app/screens/RecoveryScreen.qml
+[84/103] Generating com/mukei/app/screens/RagRebuildPromptScreen.qml
+[85/103] Generating com/mukei/app/screens/SettingsScreen.qml
+[86/103] Generating com/mukei/app/screens/ToolResultExpandedScreen.qml
+[87/103] Generating com/mukei/app/screens/SafeModeScreen.qml
+[88/103] Generating com/mukei/app/screens/StartupScreen.qml
+[89/103] Generating com/mukei/app/screens/VerificationScreen.qml
+[90/103] Generating com/mukei/app/screens/WelcomeScreen.qml
+[91/103] Generating com/mukei/app/architecture/qmldir
+[92/103] Generating com/mukei/app/events/qmldir
+[93/103] Generating com/mukei/app/stores/qmldir
+[94/103] Generating com/mukei/app/shell/qmldir
 [95/103] Generating com/mukei/app/theme/qmldir
-[96/103] Generating com/mukei/app/components/qmldir
-[97/103] Generating com/mukei/app/screens/qmldir
+[96/103] Generating com/mukei/app/screens/qmldir
+[97/103] Generating com/mukei/app/components/qmldir
 [98/103] Generating .rcc/qmlcache/mukei_qmlcache_loader.cpp
 [99/103] Automatic MOC for target mukei
 [100/103] Running AUTOMOC file extraction for target mukei
 [101/103] Running moc --collect-json for target mukei
 [102/103] Automatic QML type registration for target mukei
 [103/103] cd /home/runner/work/Mukei/Mukei/qml && /home/runner/work/Mukei/Qt/6.5.3/gcc_64/bin/qmllint --bare -I /tmp/mukei-qmllint-current -I /home/runner/work/Mukei/Qt/6.5.3/gcc_64/./qml --resource /tmp/mukei-qmllint-current/.rcc/qmake_com_mukei_app.qrc --resource /tmp/mukei-qmllint-current/.rcc/mukei_raw_qml_0.qrc /home/runner/work/Mukei/Mukei/qml/MainWindow.qml /home/runner/work/Mukei/Mukei/qml/events/EventDispatcher.qml /home/runner/work/Mukei/Mukei/qml/architecture/AppCoordinator.qml /home/runner/work/Mukei/Mukei/qml/architecture/AppStateHub.qml /home/runner/work/Mukei/Mukei/qml/architecture/IntentDispatcher.qml /home/runner/work/Mukei/Mukei/qml/architecture/PresentationPolicy.qml /home/runner/work/Mukei/Mukei/qml/architecture/SnapshotController.qml /home/runner/work/Mukei/Mukei/qml/stores/ContractStore.qml /home/runner/work/Mukei/Mukei/qml/stores/LifecycleStore.qml /home/runner/work/Mukei/Mukei/qml/stores/CapabilityStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ConversationStore.qml /home/runner/work/Mukei/Mukei/qml/stores/NavigationStore.qml /home/runner/work/Mukei/Mukei/qml/stores/UiSessionStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ChatStore.qml /home/runner/work/Mukei/Mukei/qml/stores/RecoveryStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ModelStore.qml /home/runner/work/Mukei/Mukei/qml/stores/DownloadStore.qml /home/runner/work/Mukei/Mukei/qml/stores/DocumentStore.qml /home/runner/work/Mukei/Mukei/qml/stores/StorageStore.qml /home/runner/work/Mukei/Mukei/qml/stores/SettingsStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ResponsiveStore.qml /home/runner/work/Mukei/Mukei/qml/stores/OperationStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ErrorStore.qml /home/runner/work/Mukei/Mukei/qml/stores/DiagnosticsStore.qml /home/runner/work/Mukei/Mukei/qml/stores/AccessibilityStore.qml /home/runner/work/Mukei/Mukei/qml/shell/AppShell.qml /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml /home/runner/work/Mukei/Mukei/qml/shell/RouterHost.qml /home/runner/work/Mukei/Mukei/qml/shell/BannerHost.qml /home/runner/work/Mukei/Mukei/qml/shell/SnackbarHost.qml /home/runner/work/Mukei/Mukei/qml/shell/OperationOverlayHost.qml /home/runner/work/Mukei/Mukei/qml/shell/SheetHost.qml /home/runner/work/Mukei/Mukei/qml/shell/DialogHost.qml /home/runner/work/Mukei/Mukei/qml/theme/Theme.qml /home/runner/work/Mukei/Mukei/qml/theme/Type.qml /home/runner/work/Mukei/Mukei/qml/theme/Spacing.qml /home/runner/work/Mukei/Mukei/qml/theme/Motion.qml /home/runner/work/Mukei/Mukei/qml/components/AccessibilityAnnouncer.qml /home/runner/work/Mukei/Mukei/qml/components/AIMessageBubble.qml /home/runner/work/Mukei/Mukei/qml/components/BranchSwitcherSheet.qml /home/runner/work/Mukei/Mukei/qml/components/ChatComposer.qml /home/runner/work/Mukei/Mukei/qml/components/ChatTimelineEvent.qml /home/runner/work/Mukei/Mukei/qml/components/CodeBlockComponent.qml /home/runner/work/Mukei/Mukei/qml/components/ConfirmationDialog.qml /home/runner/work/Mukei/Mukei/qml/components/ConversationList.qml /home/runner/work/Mukei/Mukei/qml/components/CopyButton.qml /home/runner/work/Mukei/Mukei/qml/components/DestructiveButton.qml /home/runner/work/Mukei/Mukei/qml/components/DestructiveConfirmDialog.qml /home/runner/work/Mukei/Mukei/qml/components/FontLoader.qml /home/runner/work/Mukei/Mukei/qml/components/FullScreenModal.qml /home/runner/work/Mukei/Mukei/qml/components/GhostButton.qml /home/runner/work/Mukei/Mukei/qml/components/HapticFeedback.qml /home/runner/work/Mukei/Mukei/qml/components/IconButton.qml /home/runner/work/Mukei/Mukei/qml/components/LeftDrawer.qml /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml /home/runner/work/Mukei/Mukei/qml/components/MukeiIcon.qml /home/runner/work/Mukei/Mukei/qml/components/ModalSheet.qml /home/runner/work/Mukei/Mukei/qml/components/NetworkBanner.qml /home/runner/work/Mukei/Mukei/qml/components/PrimaryButton.qml /home/runner/work/Mukei/Mukei/qml/components/ProgressBar.qml /home/runner/work/Mukei/Mukei/qml/components/PromptCard.qml /home/runner/work/Mukei/Mukei/qml/components/RAGChunkCard.qml /home/runner/work/Mukei/Mukei/qml/components/SearchField.qml /home/runner/work/Mukei/Mukei/qml/components/SecondaryButton.qml /home/runner/work/Mukei/Mukei/qml/components/SettingsTextField.qml /home/runner/work/Mukei/Mukei/qml/components/SkeletonLoader.qml /home/runner/work/Mukei/Mukei/qml/components/Spinner.qml /home/runner/work/Mukei/Mukei/qml/components/StatusPill.qml /home/runner/work/Mukei/Mukei/qml/components/StoragePressureCard.qml /home/runner/work/Mukei/Mukei/qml/components/StreamingCaret.qml /home/runner/work/Mukei/Mukei/qml/components/ThinkingAccordion.qml /home/runner/work/Mukei/Mukei/qml/components/ToastNotification.qml /home/runner/work/Mukei/Mukei/qml/components/ToolResultCard.qml /home/runner/work/Mukei/Mukei/qml/components/UserMessageBubble.qml /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/CompatibilityScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/EmptyChatScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/RagRebuildPromptScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/RecoveryScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/SafeModeScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/StartupScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/ToolResultExpandedScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/VerificationScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/WelcomeScreen.qml
-FAILED: [code=255] CMakeFiles/mukei_qmllint /tmp/mukei-qmllint-current/CMakeFiles/mukei_qmllint 
-cd /home/runner/work/Mukei/Mukei/qml && /home/runner/work/Mukei/Qt/6.5.3/gcc_64/bin/qmllint --bare -I /tmp/mukei-qmllint-current -I /home/runner/work/Mukei/Qt/6.5.3/gcc_64/./qml --resource /tmp/mukei-qmllint-current/.rcc/qmake_com_mukei_app.qrc --resource /tmp/mukei-qmllint-current/.rcc/mukei_raw_qml_0.qrc /home/runner/work/Mukei/Mukei/qml/MainWindow.qml /home/runner/work/Mukei/Mukei/qml/events/EventDispatcher.qml /home/runner/work/Mukei/Mukei/qml/architecture/AppCoordinator.qml /home/runner/work/Mukei/Mukei/qml/architecture/AppStateHub.qml /home/runner/work/Mukei/Mukei/qml/architecture/IntentDispatcher.qml /home/runner/work/Mukei/Mukei/qml/architecture/PresentationPolicy.qml /home/runner/work/Mukei/Mukei/qml/architecture/SnapshotController.qml /home/runner/work/Mukei/Mukei/qml/stores/ContractStore.qml /home/runner/work/Mukei/Mukei/qml/stores/LifecycleStore.qml /home/runner/work/Mukei/Mukei/qml/stores/CapabilityStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ConversationStore.qml /home/runner/work/Mukei/Mukei/qml/stores/NavigationStore.qml /home/runner/work/Mukei/Mukei/qml/stores/UiSessionStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ChatStore.qml /home/runner/work/Mukei/Mukei/qml/stores/RecoveryStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ModelStore.qml /home/runner/work/Mukei/Mukei/qml/stores/DownloadStore.qml /home/runner/work/Mukei/Mukei/qml/stores/DocumentStore.qml /home/runner/work/Mukei/Mukei/qml/stores/StorageStore.qml /home/runner/work/Mukei/Mukei/qml/stores/SettingsStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ResponsiveStore.qml /home/runner/work/Mukei/Mukei/qml/stores/OperationStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ErrorStore.qml /home/runner/work/Mukei/Mukei/qml/stores/DiagnosticsStore.qml /home/runner/work/Mukei/Mukei/qml/stores/AccessibilityStore.qml /home/runner/work/Mukei/Mukei/qml/shell/AppShell.qml /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml /home/runner/work/Mukei/Mukei/qml/shell/RouterHost.qml /home/runner/work/Mukei/Mukei/qml/shell/BannerHost.qml /home/runner/work/Mukei/Mukei/qml/shell/SnackbarHost.qml /home/runner/work/Mukei/Mukei/qml/shell/OperationOverlayHost.qml /home/runner/work/Mukei/Mukei/qml/shell/SheetHost.qml /home/runner/work/Mukei/Mukei/qml/shell/DialogHost.qml /home/runner/work/Mukei/Mukei/qml/theme/Theme.qml /home/runner/work/Mukei/Mukei/qml/theme/Type.qml /home/runner/work/Mukei/Mukei/qml/theme/Spacing.qml /home/runner/work/Mukei/Mukei/qml/theme/Motion.qml /home/runner/work/Mukei/Mukei/qml/components/AccessibilityAnnouncer.qml /home/runner/work/Mukei/Mukei/qml/components/AIMessageBubble.qml /home/runner/work/Mukei/Mukei/qml/components/BranchSwitcherSheet.qml /home/runner/work/Mukei/Mukei/qml/components/ChatComposer.qml /home/runner/work/Mukei/Mukei/qml/components/ChatTimelineEvent.qml /home/runner/work/Mukei/Mukei/qml/components/CodeBlockComponent.qml /home/runner/work/Mukei/Mukei/qml/components/ConfirmationDialog.qml /home/runner/work/Mukei/Mukei/qml/components/ConversationList.qml /home/runner/work/Mukei/Mukei/qml/components/CopyButton.qml /home/runner/work/Mukei/Mukei/qml/components/DestructiveButton.qml /home/runner/work/Mukei/Mukei/qml/components/DestructiveConfirmDialog.qml /home/runner/work/Mukei/Mukei/qml/components/FontLoader.qml /home/runner/work/Mukei/Mukei/qml/components/FullScreenModal.qml /home/runner/work/Mukei/Mukei/qml/components/GhostButton.qml /home/runner/work/Mukei/Mukei/qml/components/HapticFeedback.qml /home/runner/work/Mukei/Mukei/qml/components/IconButton.qml /home/runner/work/Mukei/Mukei/qml/components/LeftDrawer.qml /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml /home/runner/work/Mukei/Mukei/qml/components/MukeiIcon.qml /home/runner/work/Mukei/Mukei/qml/components/ModalSheet.qml /home/runner/work/Mukei/Mukei/qml/components/NetworkBanner.qml /home/runner/work/Mukei/Mukei/qml/components/PrimaryButton.qml /home/runner/work/Mukei/Mukei/qml/components/ProgressBar.qml /home/runner/work/Mukei/Mukei/qml/components/PromptCard.qml /home/runner/work/Mukei/Mukei/qml/components/RAGChunkCard.qml /home/runner/work/Mukei/Mukei/qml/components/SearchField.qml /home/runner/work/Mukei/Mukei/qml/components/SecondaryButton.qml /home/runner/work/Mukei/Mukei/qml/components/SettingsTextField.qml /home/runner/work/Mukei/Mukei/qml/components/SkeletonLoader.qml /home/runner/work/Mukei/Mukei/qml/components/Spinner.qml /home/runner/work/Mukei/Mukei/qml/components/StatusPill.qml /home/runner/work/Mukei/Mukei/qml/components/StoragePressureCard.qml /home/runner/work/Mukei/Mukei/qml/components/StreamingCaret.qml /home/runner/work/Mukei/Mukei/qml/components/ThinkingAccordion.qml /home/runner/work/Mukei/Mukei/qml/components/ToastNotification.qml /home/runner/work/Mukei/Mukei/qml/components/ToolResultCard.qml /home/runner/work/Mukei/Mukei/qml/components/UserMessageBubble.qml /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/CompatibilityScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/EmptyChatScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/RagRebuildPromptScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/RecoveryScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/SafeModeScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/StartupScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/ToolResultExpandedScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/VerificationScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/WelcomeScreen.qml
 Info: /home/runner/work/Mukei/Mukei/qml/MainWindow.qml:3:1: Unused import [unused-imports]
 import QtQuick.Layouts
 ^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/MainWindow.qml:25:45: Member "layoutDirection" not found on type "QQmlApplication" [missing-property]
-    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
-                                            ^^^^^^^^^^^^^^^
 Info: /home/runner/work/Mukei/Mukei/qml/MainWindow.qml:39:34: Unqualified access [unqualified]
         AppCoordinator.configure(mukeiAgent, mukeiBridge, mukeiRuntime)
                                  ^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/MainWindow.qml:54:69: Member "state" not found on type "QQmlApplication" [missing-property]
-            AppCoordinator.onApplicationStateChanged(Qt.application.state)
-                                                                    ^^^^^
 Info: /home/runner/work/Mukei/Mukei/qml/events/EventDispatcher.qml:8:67: Unqualified access [unqualified]
     property var agentSource: typeof mukeiAgent !== "undefined" ? mukeiAgent : null
                                                                   ^^^^^^^^^^
@@ -750,9 +742,6 @@ What now?")
 Info: Use a template literal instead
             text: qsTr(`We've had a few crashes.
 What now?`)
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:99:65: Detected height on an item that is managed by a layout. This is undefined behavior; use implictHeight or Layout.preferredHeight instead. [Quick.layout-positioning]
-                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.p.divider }
-                                                                ^
 Info: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:50:31: Unqualified access [unqualified]
                         text: modelData
                               ^^^^^^^^^
@@ -771,5 +760,4 @@ import QtQuick
 Info: /home/runner/work/Mukei/Mukei/qml/screens/ToolResultExpandedScreen.qml:2:1: Unused import [unused-imports]
 import QtQuick.Controls.Basic
 ^^^^^^
-ninja: build stopped: subcommand failed.
-exit_status=255
+exit_status=0
