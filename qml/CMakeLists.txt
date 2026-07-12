@@ -30,23 +30,35 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS
     Core Gui Quick Qml QuickControls2 QuickDialogs2 QuickLayouts QuickTest Test Widgets Svg
 )
 
-# Cargo bridge artifact selection. Android loads the `cdylib` .so;
-# desktop hosts link the `staticlib` archive so CXX-Qt generated QObject
-# constructors, vtables, and CXX bridge support symbols are part of the
-# final executable instead of relying on hidden cdylib symbol exports.
-
+# Real bridge integration follows the native platform contract:
+# Android consumes the prebuilt `cdylib` .so, while desktop CMake uses
+# CXX-Qt's official Corrosion wrapper. The official import propagates
+# generated headers, native support libraries, Qt link metadata, and
+# initializer objects that cannot be recovered by linking Cargo's raw
+# static archive directly.
 if(ANDROID)
     set(_MUKEI_BRIDGE_DEFAULT
         ${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/aarch64-linux-android/release/libmukei_bridge.so
     )
-else()
-    set(_MUKEI_BRIDGE_DEFAULT
-        ${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/release/libmukei_bridge.a
+    set(MUKEI_BRIDGE_LIB "${_MUKEI_BRIDGE_DEFAULT}"
+        CACHE FILEPATH "Path to the Cargo-built Android mukei-bridge shared library"
+    )
+elseif(MUKEI_USE_REAL_BRIDGE)
+    include(FetchContent)
+    FetchContent_Declare(
+        CxxQt
+        GIT_REPOSITORY https://github.com/KDAB/cxx-qt-cmake.git
+        GIT_TAG fcc1dbfb97712f1253b52a6f565298dc7fd0a6e3
+    )
+    FetchContent_MakeAvailable(CxxQt)
+
+    cxx_qt_import_crate(
+        MANIFEST_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../rust/Cargo.toml
+        CRATES mukei-bridge
+        LOCKED
+        QT_MODULES Qt6::Core
     )
 endif()
-set(MUKEI_BRIDGE_LIB "${_MUKEI_BRIDGE_DEFAULT}"
-    CACHE FILEPATH "Path to the Cargo-built mukei-bridge native library artifact"
-)
 
 add_executable(mukei
     main.cpp
@@ -205,43 +217,49 @@ target_link_libraries(mukei PRIVATE
     Qt6::Svg
 )
 
-if(EXISTS ${MUKEI_BRIDGE_LIB})
-    target_link_libraries(mukei PRIVATE ${MUKEI_BRIDGE_LIB})
-elseif(MUKEI_USE_REAL_BRIDGE)
-    message(FATAL_ERROR "MUKEI_USE_REAL_BRIDGE=ON but MUKEI_BRIDGE_LIB does not exist: ${MUKEI_BRIDGE_LIB}")
-endif()
-
 if(MUKEI_USE_REAL_BRIDGE)
     target_compile_definitions(mukei PRIVATE MUKEI_USE_REAL_BRIDGE=1)
 
-    # CXX-Qt emits the bridge and its support headers below hashed
-    # Cargo build-output directories. Discover every cxxqtbuild/include
-    # root so this works for debug/release, host builds, and target-
-    # triple builds without hard-coding Cargo's hash directories.
-    file(GLOB_RECURSE _MUKEI_CXXQT_GENERATED_HEADERS
-        LIST_DIRECTORIES FALSE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/*.h"
-    )
-    set(_MUKEI_CXXQT_INCLUDE_DIRS "")
-    set(_MUKEI_BRIDGE_GENERATED_HEADER_FOUND FALSE)
-    foreach(_MUKEI_CXXQT_HEADER IN LISTS _MUKEI_CXXQT_GENERATED_HEADERS)
-        if(_MUKEI_CXXQT_HEADER MATCHES "^(.*[/]cxxqtbuild[/]include)/.+[.]h$")
-            list(APPEND _MUKEI_CXXQT_INCLUDE_DIRS "${CMAKE_MATCH_1}")
+    if(ANDROID)
+        if(EXISTS ${MUKEI_BRIDGE_LIB})
+            target_link_libraries(mukei PRIVATE ${MUKEI_BRIDGE_LIB})
+        else()
+            message(FATAL_ERROR
+                "MUKEI_USE_REAL_BRIDGE=ON but the Android bridge library does not exist: ${MUKEI_BRIDGE_LIB}")
         endif()
-        if(_MUKEI_CXXQT_HEADER MATCHES "/mukei-bridge/src/lib[.]cxxqt[.]h$")
-            set(_MUKEI_BRIDGE_GENERATED_HEADER_FOUND TRUE)
-        endif()
-    endforeach()
-    list(REMOVE_DUPLICATES _MUKEI_CXXQT_INCLUDE_DIRS)
 
-    if(NOT _MUKEI_BRIDGE_GENERATED_HEADER_FOUND)
-        message(FATAL_ERROR
-            "MUKEI_USE_REAL_BRIDGE=ON but the generated CXX-Qt header "
-            "mukei-bridge/src/lib.cxxqt.h was not found under rust/target. "
-            "Build mukei-bridge with Cargo before configuring QML.")
+        # Android still consumes a Cargo-built cdylib, so its generated
+        # CXX-Qt headers are discovered from the Cargo target tree.
+        file(GLOB_RECURSE _MUKEI_CXXQT_GENERATED_HEADERS
+            LIST_DIRECTORIES FALSE
+            "${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/*.h"
+        )
+        set(_MUKEI_CXXQT_INCLUDE_DIRS "")
+        set(_MUKEI_BRIDGE_GENERATED_HEADER_FOUND FALSE)
+        foreach(_MUKEI_CXXQT_HEADER IN LISTS _MUKEI_CXXQT_GENERATED_HEADERS)
+            if(_MUKEI_CXXQT_HEADER MATCHES "^(.*[/]cxxqtbuild[/]include)/.+[.]h$")
+                list(APPEND _MUKEI_CXXQT_INCLUDE_DIRS "${CMAKE_MATCH_1}")
+            endif()
+            if(_MUKEI_CXXQT_HEADER MATCHES "/mukei-bridge/src/lib[.]cxxqt[.]h$")
+                set(_MUKEI_BRIDGE_GENERATED_HEADER_FOUND TRUE)
+            endif()
+        endforeach()
+        list(REMOVE_DUPLICATES _MUKEI_CXXQT_INCLUDE_DIRS)
+
+        if(NOT _MUKEI_BRIDGE_GENERATED_HEADER_FOUND)
+            message(FATAL_ERROR
+                "MUKEI_USE_REAL_BRIDGE=ON but the generated CXX-Qt header "
+                "mukei-bridge/src/lib.cxxqt.h was not found under rust/target. "
+                "Build mukei-bridge with Cargo before configuring QML.")
+        endif()
+
+        target_include_directories(mukei PRIVATE ${_MUKEI_CXXQT_INCLUDE_DIRS})
+    else()
+        if(NOT TARGET mukei_bridge)
+            message(FATAL_ERROR "CXX-Qt failed to import the mukei_bridge Cargo target")
+        endif()
+        target_link_libraries(mukei PRIVATE mukei_bridge)
     endif()
-
-    target_include_directories(mukei PRIVATE ${_MUKEI_CXXQT_INCLUDE_DIRS})
 endif()
 
 qt_add_executable(tst_EventDispatcher
