@@ -52,6 +52,18 @@ set(MUKEI_BRIDGE_LIB "${_MUKEI_BRIDGE_DEFAULT}"
     CACHE FILEPATH "Path to the Cargo-built mukei-bridge shared library"
 )
 
+# CXX-Qt generated headers normally live under Cargo's hashed OUT_DIR, which
+# is not a stable include path for an external CMake build. The Rust bridge
+# build exports its generated artifacts into this deterministic directory.
+set(MUKEI_CXX_QT_EXPORT_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/cxxqt-export"
+    CACHE PATH "Directory where Cargo exports CXX-Qt bridge artifacts"
+)
+set(MUKEI_CXX_QT_INCLUDE_DIR
+    "${MUKEI_CXX_QT_EXPORT_DIR}/crates/mukei-bridge/include"
+    CACHE PATH "Include root containing generated mukei_bridge CXX-Qt headers"
+)
+
 add_executable(mukei
     main.cpp
     timeline_model.cpp
@@ -216,6 +228,17 @@ elseif(MUKEI_USE_REAL_BRIDGE)
 endif()
 
 if(MUKEI_USE_REAL_BRIDGE)
+    set(_MUKEI_CXX_QT_HEADER
+        "${MUKEI_CXX_QT_INCLUDE_DIR}/mukei_bridge/src/lib.rs.h"
+    )
+    if(NOT EXISTS "${_MUKEI_CXX_QT_HEADER}")
+        message(FATAL_ERROR
+            "MUKEI_USE_REAL_BRIDGE=ON but the generated CXX-Qt header does not exist: "
+            "${_MUKEI_CXX_QT_HEADER}. Build mukei-bridge with CXX_QT_EXPORT_DIR set to "
+            "${MUKEI_CXX_QT_EXPORT_DIR} and CXX_QT_EXPORT_CRATE_mukei-bridge enabled."
+        )
+    endif()
+    target_include_directories(mukei PRIVATE "${MUKEI_CXX_QT_INCLUDE_DIR}")
     target_compile_definitions(mukei PRIVATE MUKEI_USE_REAL_BRIDGE=1)
 endif()
 
