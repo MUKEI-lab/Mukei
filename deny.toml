@@ -98,10 +98,15 @@ allow-wildcard-paths = true
 highlight = "all"
 
 # Deny list — extend cautiously.
+#
+# Network TLS remains rustls-only. `openssl-sys` is intentionally present
+# only because rusqlite's `bundled-sqlcipher-vendored-openssl` feature uses a
+# vendored OpenSSL crypto provider for SQLCipher's local at-rest encryption.
+# Keep high-level OpenSSL and native-tls wrappers forbidden so application and
+# HTTP/TLS code cannot silently migrate away from rustls.
 deny = [
-    # `openssl-sys` is the classic supply-chain attack surface. We
-    # standardise on rustls everywhere.
-    { crate = "openssl-sys", reason = "TRD §11.5 — Mukei is rustls-only." },
+    { crate = "openssl", reason = "Network/application TLS must remain rustls-only; SQLCipher may use only the lower-level vendored openssl-sys crypto backend." },
+    { crate = "native-tls", reason = "TRD §11.5 — Mukei network TLS is rustls-only." },
 ]
 
 # Skip duplicate-version warnings for these specific crates if a
