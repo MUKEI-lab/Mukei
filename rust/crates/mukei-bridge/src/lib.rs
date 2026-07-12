@@ -2806,11 +2806,12 @@ impl ffi::MukeiAgent {
                         }
                         let status = format!("complete:{destination_token}");
                         let final_path_string = destination_token.clone();
+                        let completed_model_id = model_id.clone();
                         let _ = qt_for_ev.queue(move |mut qobject| {
                             qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
                                 BridgeEventKind::DownloadCompleted {
                                     final_path: final_path_string.clone(),
-                                    model_id: model_id.clone(),
+                                    model_id: completed_model_id,
                                 },
                             )));
                             qobject
@@ -4273,7 +4274,7 @@ impl ffi::MukeiAgent {
                 let pool = runtime_state().database_pool();
                 pool.and_then(|pool| {
                     mukei_core::runtime::get().block_on(async {
-                        mukei_core::storage::UiSessionRepository::load(
+                        mukei_core::storage::UiSessionRepository::load_session(
                             &pool,
                             mukei_core::storage::DEFAULT_UI_PROFILE,
                         )
