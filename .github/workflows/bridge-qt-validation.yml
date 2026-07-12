@@ -54,6 +54,7 @@ jobs:
     env:
       CMAKE_BUILD_DIR: /tmp/mukei-qml-build
       QT_QPA_PLATFORM: offscreen
+      CXX_QT_EXPORT_DIR: ${{ github.workspace }}/rust/target/cxxqt-export
     steps:
       - uses: actions/checkout@v4
       - name: Install stable toolchain
@@ -79,9 +80,13 @@ jobs:
           key: ${{ runner.os }}-cargo-qml-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-qml-
-      - name: Build bridge library for QML linkage
+      - name: Build bridge library and export CXX-Qt headers
         working-directory: rust
-        run: cargo build -p mukei-bridge --features "sqlcipher,network"
+        run: |
+          env \
+            CXX_QT_EXPORT_DIR="$CXX_QT_EXPORT_DIR" \
+            'CXX_QT_EXPORT_CRATE_mukei-bridge=1' \
+            cargo build -p mukei-bridge --features "sqlcipher,network"
       - name: Capture QML configure diagnostics
         id: qml-configure
         continue-on-error: true
@@ -90,6 +95,7 @@ jobs:
           cmake -S . -B "$CMAKE_BUILD_DIR" -G Ninja
           -DMUKEI_USE_REAL_BRIDGE=ON
           -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/debug/libmukei_bridge.so"
+          -DMUKEI_CXX_QT_EXPORT_DIR="$CXX_QT_EXPORT_DIR"
           > /tmp/mukei-qml-configure.log 2>&1
       - name: Upload QML configure diagnostics
         if: always()
