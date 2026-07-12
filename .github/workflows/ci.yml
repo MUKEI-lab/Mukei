@@ -27,9 +27,8 @@ on:
   pull_request:
     branches: [ main ]
 
-permissions:
-  contents: write
-
+# Cancel superseded runs on the same branch/PR — saves runner minutes
+# and keeps the visible status current.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -40,6 +39,9 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # -------------------------------------------------------------------
+  # Job 1 — formatting. Fast fail before we spin up a heavier compile.
+  # -------------------------------------------------------------------
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
@@ -53,6 +55,9 @@ jobs:
         working-directory: rust
         run: cargo fmt --all -- --check
 
+  # -------------------------------------------------------------------
+  # Job 2 — clippy on mukei-core (default features only).
+  # -------------------------------------------------------------------
   clippy:
     name: clippy (mukei-core)
     runs-on: ubuntu-latest
@@ -82,6 +87,9 @@ jobs:
           --lib --tests
           -- -D warnings
 
+  # -------------------------------------------------------------------
+  # Job 3 — unit tests on mukei-core (default features only).
+  # -------------------------------------------------------------------
   test:
     name: test (mukei-core)
     runs-on: ubuntu-latest
@@ -108,6 +116,9 @@ jobs:
           --features std,tokio
           --lib
 
+  # -------------------------------------------------------------------
+  # Job 4 — static QML architecture and security guards.
+  # -------------------------------------------------------------------
   qml-architecture:
     name: qml architecture guards
     runs-on: ubuntu-latest
@@ -119,52 +130,3 @@ jobs:
         run: python3 qml/scripts/qml_contract_guard.py qml
       - name: QML security check
         run: python3 qml/scripts/qml_security_analyzer.py qml
-
-  # Temporary branch-scoped repair job. Removed before merge.
-  apply-clippy-repair:
-    name: apply compiler Clippy repair
-    if: github.head_ref == 'agent/diagnose-current-ci'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/diagnose-current-ci
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy,rustfmt
-      - name: Apply compiler-suggested Clippy fixes
-        working-directory: rust
-        shell: bash
-        run: |
-          set +e
-          cargo clippy --fix \
-            -p mukei-core \
-            --no-default-features \
-            --features std,tokio \
-            --lib --tests \
-            --allow-dirty \
-            --allow-staged \
-            -- -D warnings
-          echo "clippy_fix_exit=$?"
-          exit 0
-      - name: Normalize formatting
-        working-directory: rust
-        run: cargo fmt --all
-      - name: Persist compiler fixes on latest branch head
-        shell: bash
-        run: |
-          if git diff --quiet -- rust; then
-            echo "No new compiler fixes to commit."
-            exit 0
-          fi
-
-          git diff --binary -- rust > /tmp/clippy-fixes.patch
-          git fetch origin agent/diagnose-current-ci
-          git reset --hard origin/agent/diagnose-current-ci
-          git apply --index /tmp/clippy-fixes.patch
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "fix(ci): apply Rust 1.97 Clippy fixes"
-          git push origin HEAD:agent/diagnose-current-ci
