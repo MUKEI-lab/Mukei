@@ -37,7 +37,7 @@ tokio              = ["dep:tokio", "dep:tokio-util"]
 llama_cpp          = ["dep:llama-cpp-rs"]
 usearch_hnsw       = ["dep:usearch"]
 rusqlite           = ["dep:rusqlite", "dep:r2d2", "dep:r2d2_sqlite"]
-sqlcipher          = ["rusqlite", "rusqlite/bundled-sqlcipher"]
+sqlcipher          = ["rusqlite", "rusqlite/bundled-sqlcipher-vendored-openssl"]
 # `scraper` removed in v0.7.5 (see workspace Cargo.toml note): the
 # current search engines use JSON-only APIs and `scraper` pulls in
 # MPL-2.0 transitives that violate the Apache/MIT-only license policy.
