@@ -599,10 +599,8 @@ fn validate_scope_for_command(
         (
             CommandType::AppInitialize | CommandType::DownloadCancel | CommandType::SettingsUpdate,
             _,
-        ) => {
-            if has_conversation_scope || has_model_scope || has_document_scope {
-                return Err(RejectionReason::StaleScope);
-            }
+        ) if (has_conversation_scope || has_model_scope || has_document_scope) => {
+            return Err(RejectionReason::StaleScope);
         }
         _ => {}
     }

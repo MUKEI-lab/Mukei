@@ -384,7 +384,7 @@ impl MetricRegistry {
             .iter()
             .map(|(key, metric)| metric.snapshot(key.clone()))
             .collect::<Vec<_>>();
-        series.sort_by(|left, right| metric_sort_key(&left.key).cmp(&metric_sort_key(&right.key)));
+        series.sort_by_key(|left| metric_sort_key(&left.key));
 
         MetricRegistrySnapshot {
             captured_at: now,
