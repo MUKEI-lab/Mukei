@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: release-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -134,3 +137,51 @@ jobs:
       - name: cargo test -p mukei-ffi-shim
         working-directory: rust
         run: cargo test -p mukei-ffi-shim
+
+  # Temporary branch-scoped repair helper. Removed before merge.
+  workspace-clippy-repair:
+    name: apply workspace Clippy fixes
+    if: github.head_ref == 'agent/diagnose-current-ci'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/diagnose-current-ci
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - name: Apply machine-applicable workspace Clippy fixes
+        working-directory: rust
+        shell: bash
+        run: |
+          set +e
+          cargo clippy --fix \
+            --workspace \
+            --all-targets \
+            --exclude mukei-bridge \
+            --allow-dirty \
+            --allow-staged \
+            -- -D warnings
+          echo "clippy_fix_exit=$?"
+          exit 0
+      - name: Normalize formatting
+        working-directory: rust
+        run: cargo fmt --all
+      - name: Persist fixes on latest branch head
+        shell: bash
+        run: |
+          if git diff --quiet -- rust; then
+            echo "No machine-applicable fixes produced."
+            exit 0
+          fi
+
+          git diff --binary -- rust > /tmp/workspace-clippy-fixes.patch
+          git fetch origin agent/diagnose-current-ci
+          git reset --hard origin/agent/diagnose-current-ci
+          git apply --index /tmp/workspace-clippy-fixes.patch
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(ci): apply workspace Clippy fixes"
+          git push origin HEAD:agent/diagnose-current-ci
