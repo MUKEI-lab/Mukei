@@ -96,7 +96,7 @@ Page {
                         Text { text: Math.round(SettingsStore.fontScalePercent) + "%"; color: Theme.p.inkSecondary; Component.onCompleted: Type.apply(this, Type.caption) }
                     }
 
-                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.p.divider }
+                    Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.p.divider }
                     Text { text: qsTr("Inference defaults"); color: Theme.p.inkPrimary; Component.onCompleted: Type.apply(this, Type.h2) }
                     Text {
                         Layout.fillWidth: true
