@@ -103,7 +103,7 @@ jobs:
         run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
 
   static-link-diagnostic:
-    name: capture desktop static bridge link failure
+    name: map CXX-Qt native support archives
     if: github.head_ref == 'agent/ci-green-final'
     runs-on: ubuntu-latest
     env:
@@ -122,8 +122,8 @@ jobs:
         run: |
           echo "$QT_ROOT_DIR/bin" >> $GITHUB_PATH
           echo "QMAKE=$QT_ROOT_DIR/bin/qmake" >> $GITHUB_ENV
-      - name: Ensure CMake and Ninja
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Ensure build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build binutils
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -137,23 +137,31 @@ jobs:
       - name: Build bridge static library
         working-directory: rust
         run: cargo build -p mukei-bridge --features "sqlcipher,network"
-      - name: Configure QML build
-        working-directory: qml
-        run: >-
-          cmake -S . -B "$CMAKE_BUILD_DIR" -G Ninja
-          -DMUKEI_USE_REAL_BRIDGE=ON
-          -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/debug/libmukei_bridge.a"
-      - name: Capture static-link build output
+      - name: Map generated native archives and defining symbols
         shell: bash
         run: |
-          set +e
-          cmake --build "$CMAKE_BUILD_DIR" > static-bridge-link.log 2>&1
-          status=$?
-          echo "exit_status=$status" >> static-bridge-link.log
-          exit 0
-      - name: Upload static-link diagnostics
+          set -euo pipefail
+          {
+            echo '=== all build-script native archives ==='
+            find rust/target/debug/build -type f -name '*.a' -print | sort
+            echo
+            echo '=== CXX-Qt-related archives ==='
+            find rust/target/debug/build -type f -name '*.a' -print \
+              | grep -Ei 'cxx|qt|mukei' | sort || true
+            echo
+            echo '=== symbol ownership ==='
+            while IFS= read -r archive; do
+              matches="$(nm -A --defined-only "$archive" 2>/dev/null \
+                | grep -E 'qmetaobjectconnection_drop|qset_default_QTime|qvector_default_u8|MukeiAgentCxxQt|MukeiAgentCxxQt::MukeiAgentCxxQt' || true)"
+              if [ -n "$matches" ]; then
+                echo "--- $archive ---"
+                printf '%s\n' "$matches"
+              fi
+            done < <(find rust/target/debug/build -type f -name '*.a' -print | sort)
+          } > cxxqt-native-archives.txt
+      - name: Upload native archive map
         uses: actions/upload-artifact@v4
         with:
-          name: static-bridge-link-log
-          path: static-bridge-link.log
+          name: cxxqt-native-archives
+          path: cxxqt-native-archives.txt
           if-no-files-found: error
