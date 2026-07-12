@@ -1,0 +1,67 @@
+name: diagnostic-ci-tail
+
+on:
+  push:
+    branches: [ agent/diagnose-current-ci ]
+
+jobs:
+  core-clippy-diagnostics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Capture core Clippy diagnostics
+        working-directory: rust
+        shell: bash
+        run: |
+          set +e
+          cargo clippy --quiet -p mukei-core --no-default-features --features std,tokio --lib --tests -- -D warnings > ../core-clippy.log 2>&1
+          status=$?
+          echo "exit_status=$status" >> ../core-clippy.log
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: core-clippy-current
+          path: core-clippy.log
+
+  workspace-clippy-diagnostics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Capture workspace Clippy diagnostics
+        working-directory: rust
+        shell: bash
+        run: |
+          set +e
+          cargo clippy --quiet --workspace --all-targets --exclude mukei-bridge -- -D warnings > ../workspace-clippy.log 2>&1
+          status=$?
+          echo "exit_status=$status" >> ../workspace-clippy.log
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workspace-clippy-current
+          path: workspace-clippy.log
+
+  workspace-test-diagnostics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Capture workspace test diagnostics
+        working-directory: rust
+        shell: bash
+        run: |
+          set +e
+          cargo test --quiet --workspace --exclude mukei-bridge > ../workspace-test.log 2>&1
+          status=$?
+          echo "exit_status=$status" >> ../workspace-test.log
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workspace-test-current
+          path: workspace-test.log
