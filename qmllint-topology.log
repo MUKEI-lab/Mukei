@@ -1,75 +1,75 @@
 [1/103] Generating com/mukei/app/MainWindow.qml
-[2/103] Generating com/mukei/app/architecture/AppCoordinator.qml
-[3/103] Generating com/mukei/app/events/EventDispatcher.qml
+[2/103] Generating com/mukei/app/events/EventDispatcher.qml
+[3/103] Generating com/mukei/app/architecture/AppCoordinator.qml
 [4/103] Generating com/mukei/app/architecture/AppStateHub.qml
 [5/103] Generating com/mukei/app/architecture/IntentDispatcher.qml
 [6/103] Generating com/mukei/app/architecture/PresentationPolicy.qml
 [7/103] Generating com/mukei/app/architecture/SnapshotController.qml
-[8/103] Generating com/mukei/app/stores/ContractStore.qml
+[8/103] Generating com/mukei/app/stores/LifecycleStore.qml
 [9/103] Generating com/mukei/app/stores/CapabilityStore.qml
-[10/103] Generating com/mukei/app/stores/NavigationStore.qml
-[11/103] Generating com/mukei/app/stores/LifecycleStore.qml
+[10/103] Generating com/mukei/app/stores/ConversationStore.qml
+[11/103] Generating com/mukei/app/stores/NavigationStore.qml
 [12/103] Generating com/mukei/app/stores/UiSessionStore.qml
-[13/103] Generating com/mukei/app/stores/ChatStore.qml
-[14/103] Generating com/mukei/app/stores/ConversationStore.qml
+[13/103] Generating com/mukei/app/stores/ContractStore.qml
+[14/103] Generating com/mukei/app/stores/ChatStore.qml
 [15/103] Generating com/mukei/app/stores/RecoveryStore.qml
 [16/103] Generating com/mukei/app/stores/ModelStore.qml
 [17/103] Generating com/mukei/app/stores/DownloadStore.qml
 [18/103] Generating com/mukei/app/stores/DocumentStore.qml
-[19/103] Generating com/mukei/app/stores/StorageStore.qml
-[20/103] Generating com/mukei/app/stores/SettingsStore.qml
-[21/103] Generating com/mukei/app/stores/DiagnosticsStore.qml
-[22/103] Generating com/mukei/app/stores/AccessibilityStore.qml
-[23/103] Generating com/mukei/app/stores/ResponsiveStore.qml
-[24/103] Generating com/mukei/app/stores/OperationStore.qml
-[25/103] Generating com/mukei/app/stores/ErrorStore.qml
+[19/103] Generating com/mukei/app/stores/SettingsStore.qml
+[20/103] Generating com/mukei/app/stores/StorageStore.qml
+[21/103] Generating com/mukei/app/stores/ResponsiveStore.qml
+[22/103] Generating com/mukei/app/stores/OperationStore.qml
+[23/103] Generating com/mukei/app/stores/ErrorStore.qml
+[24/103] Generating com/mukei/app/stores/DiagnosticsStore.qml
+[25/103] Generating com/mukei/app/stores/AccessibilityStore.qml
 [26/103] Generating com/mukei/app/shell/AppShell.qml
-[27/103] Generating com/mukei/app/shell/RouterHost.qml
-[28/103] Generating com/mukei/app/shell/BannerHost.qml
-[29/103] Generating com/mukei/app/shell/AdaptiveNavigation.qml
-[30/103] Generating com/mukei/app/shell/SnackbarHost.qml
-[31/103] Generating com/mukei/app/shell/OperationOverlayHost.qml
-[32/103] Generating com/mukei/app/shell/SheetHost.qml
+[27/103] Generating com/mukei/app/shell/AdaptiveNavigation.qml
+[28/103] Generating com/mukei/app/shell/RouterHost.qml
+[29/103] Generating com/mukei/app/shell/BannerHost.qml
+[30/103] Generating com/mukei/app/shell/OperationOverlayHost.qml
+[31/103] Generating com/mukei/app/shell/SheetHost.qml
+[32/103] Generating com/mukei/app/shell/SnackbarHost.qml
 [33/103] Generating com/mukei/app/shell/DialogHost.qml
-[34/103] Generating com/mukei/app/theme/Theme.qml
-[35/103] Generating com/mukei/app/theme/Type.qml
-[36/103] Generating com/mukei/app/theme/Spacing.qml
-[37/103] Generating com/mukei/app/theme/Motion.qml
-[38/103] Generating com/mukei/app/components/AccessibilityAnnouncer.qml
-[39/103] Generating com/mukei/app/components/AIMessageBubble.qml
-[40/103] Generating com/mukei/app/components/BranchSwitcherSheet.qml
-[41/103] Generating com/mukei/app/components/ChatComposer.qml
-[42/103] Generating com/mukei/app/components/ChatTimelineEvent.qml
+[34/103] Generating com/mukei/app/theme/Spacing.qml
+[35/103] Generating com/mukei/app/theme/Motion.qml
+[36/103] Generating com/mukei/app/theme/Theme.qml
+[37/103] Generating com/mukei/app/components/AccessibilityAnnouncer.qml
+[38/103] Generating com/mukei/app/components/AIMessageBubble.qml
+[39/103] Generating com/mukei/app/components/BranchSwitcherSheet.qml
+[40/103] Generating com/mukei/app/components/ChatComposer.qml
+[41/103] Generating com/mukei/app/components/ChatTimelineEvent.qml
+[42/103] Generating com/mukei/app/theme/Type.qml
 [43/103] Generating com/mukei/app/components/CodeBlockComponent.qml
-[44/103] Generating com/mukei/app/components/ConversationList.qml
-[45/103] Generating com/mukei/app/components/ConfirmationDialog.qml
+[44/103] Generating com/mukei/app/components/ConfirmationDialog.qml
+[45/103] Generating com/mukei/app/components/ConversationList.qml
 [46/103] Generating com/mukei/app/components/CopyButton.qml
 [47/103] Generating com/mukei/app/components/DestructiveButton.qml
-[48/103] Generating com/mukei/app/components/DestructiveConfirmDialog.qml
-[49/103] Generating com/mukei/app/components/FontLoader.qml
+[48/103] Generating com/mukei/app/components/FontLoader.qml
+[49/103] Generating com/mukei/app/components/DestructiveConfirmDialog.qml
 [50/103] Generating com/mukei/app/components/FullScreenModal.qml
 [51/103] Generating com/mukei/app/components/GhostButton.qml
-[52/103] Generating com/mukei/app/components/IconButton.qml
-[53/103] Generating com/mukei/app/components/HapticFeedback.qml
-[54/103] Generating com/mukei/app/components/MarkdownRenderer.qml
-[55/103] Generating com/mukei/app/components/LeftDrawer.qml
+[52/103] Generating com/mukei/app/components/HapticFeedback.qml
+[53/103] Generating com/mukei/app/components/IconButton.qml
+[54/103] Generating com/mukei/app/components/LeftDrawer.qml
+[55/103] Generating com/mukei/app/components/MarkdownRenderer.qml
 [56/103] Generating com/mukei/app/components/MukeiIcon.qml
 [57/103] Generating com/mukei/app/components/ModalSheet.qml
-[58/103] Generating com/mukei/app/components/NetworkBanner.qml
+[58/103] Generating com/mukei/app/components/PrimaryButton.qml
 [59/103] Generating com/mukei/app/components/ProgressBar.qml
-[60/103] Generating com/mukei/app/components/PrimaryButton.qml
-[61/103] Generating com/mukei/app/components/RAGChunkCard.qml
-[62/103] Generating com/mukei/app/components/SearchField.qml
-[63/103] Generating com/mukei/app/components/SecondaryButton.qml
-[64/103] Generating com/mukei/app/components/PromptCard.qml
-[65/103] Generating com/mukei/app/components/SkeletonLoader.qml
-[66/103] Generating com/mukei/app/components/StatusPill.qml
-[67/103] Generating com/mukei/app/components/SettingsTextField.qml
-[68/103] Generating com/mukei/app/components/Spinner.qml
+[60/103] Generating com/mukei/app/components/PromptCard.qml
+[61/103] Generating com/mukei/app/components/SearchField.qml
+[62/103] Generating com/mukei/app/components/NetworkBanner.qml
+[63/103] Generating com/mukei/app/components/RAGChunkCard.qml
+[64/103] Generating com/mukei/app/components/SecondaryButton.qml
+[65/103] Generating com/mukei/app/components/SettingsTextField.qml
+[66/103] Generating com/mukei/app/components/SkeletonLoader.qml
+[67/103] Generating com/mukei/app/components/Spinner.qml
+[68/103] Generating com/mukei/app/components/StatusPill.qml
 [69/103] Generating com/mukei/app/components/StoragePressureCard.qml
-[70/103] Generating com/mukei/app/components/ThinkingAccordion.qml
+[70/103] Generating com/mukei/app/components/StreamingCaret.qml
 [71/103] Generating com/mukei/app/components/ToastNotification.qml
-[72/103] Generating com/mukei/app/components/StreamingCaret.qml
+[72/103] Generating com/mukei/app/components/ThinkingAccordion.qml
 [73/103] Generating com/mukei/app/components/ToolResultCard.qml
 [74/103] Generating com/mukei/app/components/UserMessageBubble.qml
 [75/103] Generating com/mukei/app/screens/ChatScreen.qml
@@ -84,13 +84,13 @@
 [84/103] Generating com/mukei/app/screens/RecoveryScreen.qml
 [85/103] Generating com/mukei/app/screens/SafeModeScreen.qml
 [86/103] Generating com/mukei/app/screens/SettingsScreen.qml
-[87/103] Generating com/mukei/app/screens/StartupScreen.qml
+[87/103] Generating com/mukei/app/screens/VerificationScreen.qml
 [88/103] Generating com/mukei/app/screens/ToolResultExpandedScreen.qml
-[89/103] Generating com/mukei/app/screens/VerificationScreen.qml
-[90/103] Generating com/mukei/app/screens/WelcomeScreen.qml
-[91/103] Generating com/mukei/app/stores/qmldir
-[92/103] Generating com/mukei/app/events/qmldir
-[93/103] Generating com/mukei/app/architecture/qmldir
+[89/103] Generating com/mukei/app/events/qmldir
+[90/103] Generating com/mukei/app/screens/StartupScreen.qml
+[91/103] Generating com/mukei/app/screens/WelcomeScreen.qml
+[92/103] Generating com/mukei/app/architecture/qmldir
+[93/103] Generating com/mukei/app/stores/qmldir
 [94/103] Generating com/mukei/app/shell/qmldir
 [95/103] Generating com/mukei/app/theme/qmldir
 [96/103] Generating com/mukei/app/components/qmldir
@@ -364,87 +364,6 @@ import QtQuick.Controls.Basic
 Info: /home/runner/work/Mukei/Mukei/qml/components/UserMessageBubble.qml:2:1: Unused import [unused-imports]
 import QtQuick.Controls.Basic
 ^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:158:27: DelegateChooser was not found. Did you add all import paths? [import]
-                delegate: DelegateChooser {
-                          ^^^^^^^^^^^^^^^
-Info: Did you mean "DelegateModel"?
-                delegate: DelegateModel {
-                          ^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:160:21: DelegateChoice was not found. Did you add all import paths? [import]
-                    DelegateChoice {
-                    ^^^^^^^^^^^^^^
-Info: Did you mean "DelegateModel"?
-                    DelegateModel {
-                    ^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:168:21: DelegateChoice was not found. Did you add all import paths? [import]
-                    DelegateChoice {
-                    ^^^^^^^^^^^^^^
-Info: Did you mean "DelegateModel"?
-                    DelegateModel {
-                    ^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:176:21: DelegateChoice was not found. Did you add all import paths? [import]
-                    DelegateChoice {
-                    ^^^^^^^^^^^^^^
-Info: Did you mean "DelegateModel"?
-                    DelegateModel {
-                    ^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:158:27: DelegateChooser was not found. Did you add all import paths? [import]
-                delegate: DelegateChooser {
-                          ^^^^^^^^^^^^^^^
-Info: Did you mean "DelegateModel"?
-                delegate: DelegateModel {
-                          ^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:158:27: 'DelegateChooser' is used but it is not resolved [unresolved-type]
-                delegate: DelegateChooser {
-                          ^^^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:160:21: 'DelegateChoice' is used but it is not resolved [unresolved-type]
-                    DelegateChoice {
-                    ^^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:160:21: 'DelegateChoice' is used but it is not resolved [unresolved-type]
-                    DelegateChoice {
-                    ^^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:168:21: 'DelegateChoice' is used but it is not resolved [unresolved-type]
-                    DelegateChoice {
-                    ^^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:168:21: 'DelegateChoice' is used but it is not resolved [unresolved-type]
-                    DelegateChoice {
-                    ^^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:176:21: 'DelegateChoice' is used but it is not resolved [unresolved-type]
-                    DelegateChoice {
-                    ^^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:176:21: 'DelegateChoice' is used but it is not resolved [unresolved-type]
-                    DelegateChoice {
-                    ^^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:160:21: Cannot assign to non-existent default property [missing-property]
-                    DelegateChoice {
-                    ^^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:177:25: Binding assigned to "roleValue", but no property "roleValue" exists in the current element. [missing-property]
-                        roleValue: "timeline_event"
-                        ^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:161:25: Binding assigned to "roleValue", but no property "roleValue" exists in the current element. [missing-property]
-                        roleValue: "user_message"
-                        ^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:169:25: Binding assigned to "roleValue", but no property "roleValue" exists in the current element. [missing-property]
-                        roleValue: "assistant_message"
-                        ^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:159:21: Binding assigned to "role", but no property "role" exists in the current element. [missing-property]
-                    role: "type"
-                    ^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:160:21: Type DelegateChoice is used but it is not resolved [unresolved-type]
-                    DelegateChoice {
-                    ^^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:168:21: Type DelegateChoice is used but it is not resolved [unresolved-type]
-                    DelegateChoice {
-                    ^^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:176:21: Type DelegateChoice is used but it is not resolved [unresolved-type]
-                    DelegateChoice {
-                    ^^^^^^^^^^^^^^
-Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:158:27: Type DelegateChooser is used but it is not resolved [unresolved-type]
-                delegate: DelegateChooser {
-                          ^^^^^^^^^^^^^^^
-Info: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:4:1: Unused import [unused-imports]
-import QtQml.Models
-^^^^^^
 Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:131:28: Unqualified access [unqualified]
                     width: timelineView.width
                            ^^^^^^^^^^^^
@@ -457,70 +376,72 @@ Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:140:29: Unqual
 Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
 pragma ComponentBehavior: Bound
 import QtQuick
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:163:36: Unqualified access [unqualified]
+                            width: timelineView.width
+                                   ^^^^^^^^^^^^
+Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
+pragma ComponentBehavior: Bound
+import QtQuick
 Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:164:35: Unqualified access [unqualified]
                             text: model.text
                                   ^^^^^
-Info: model is a member of a parent element.
-      You can qualify the access with its id to avoid this warning:
-
-                            text: timelineView.model.text
-                                  ^^^^^^^^^^^^^
+Info: model is implicitly injected into this delegate. Add a required property instead.
+                        delegate: UserMessageBubble {
+                                  
 Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:165:40: Unqualified access [unqualified]
                             timestamp: model.timestamp
                                        ^^^^^
-Info: model is a member of a parent element.
-      You can qualify the access with its id to avoid this warning:
-
-                            timestamp: timelineView.model.timestamp
-                                       ^^^^^^^^^^^^^
+Info: model is implicitly injected into this delegate. Add a required property instead.
+                        delegate: UserMessageBubble {
+                                  
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:171:36: Unqualified access [unqualified]
+                            width: timelineView.width
+                                   ^^^^^^^^^^^^
+Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
+pragma ComponentBehavior: Bound
+import QtQuick
 Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:172:35: Unqualified access [unqualified]
                             text: model.text
                                   ^^^^^
-Info: model is a member of a parent element.
-      You can qualify the access with its id to avoid this warning:
-
-                            text: timelineView.model.text
-                                  ^^^^^^^^^^^^^
+Info: model is implicitly injected into this delegate. Add a required property instead.
+                        delegate: AIMessageBubble {
+                                  
 Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:173:40: Unqualified access [unqualified]
                             timestamp: model.timestamp
                                        ^^^^^
-Info: model is a member of a parent element.
-      You can qualify the access with its id to avoid this warning:
-
-                            timestamp: timelineView.model.timestamp
-                                       ^^^^^^^^^^^^^
+Info: model is implicitly injected into this delegate. Add a required property instead.
+                        delegate: AIMessageBubble {
+                                  
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:179:36: Unqualified access [unqualified]
+                            width: timelineView.width
+                                   ^^^^^^^^^^^^
+Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
+pragma ComponentBehavior: Bound
+import QtQuick
 Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:180:36: Unqualified access [unqualified]
                             label: model.text
                                    ^^^^^
-Info: model is a member of a parent element.
-      You can qualify the access with its id to avoid this warning:
-
-                            label: timelineView.model.text
-                                   ^^^^^^^^^^^^^
+Info: model is implicitly injected into this delegate. Add a required property instead.
+                        delegate: ChatTimelineEvent {
+                                  
 Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:181:36: Unqualified access [unqualified]
                             phase: model.phase
                                    ^^^^^
-Info: model is a member of a parent element.
-      You can qualify the access with its id to avoid this warning:
-
-                            phase: timelineView.model.phase
-                                   ^^^^^^^^^^^^^
+Info: model is implicitly injected into this delegate. Add a required property instead.
+                        delegate: ChatTimelineEvent {
+                                  
 Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:182:35: Unqualified access [unqualified]
                             kind: model.kind
                                   ^^^^^
-Info: model is a member of a parent element.
-      You can qualify the access with its id to avoid this warning:
-
-                            kind: timelineView.model.kind
-                                  ^^^^^^^^^^^^^
+Info: model is implicitly injected into this delegate. Add a required property instead.
+                        delegate: ChatTimelineEvent {
+                                  
 Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:183:41: Unqualified access [unqualified]
                             iconSource: model.kind === "tool" ? "qrc:/icons/search.svg" : ""
                                         ^^^^^
-Info: model is a member of a parent element.
-      You can qualify the access with its id to avoid this warning:
-
-                            iconSource: timelineView.model.kind === "tool" ? "qrc:/icons/search.svg" : ""
-                                        ^^^^^^^^^^^^^
+Info: model is implicitly injected into this delegate. Add a required property instead.
+                        delegate: ChatTimelineEvent {
+                                  
 Warning: /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml:75:35: Unqualified access [unqualified]
                             text: modelId || qsTr("Model download")
                                   ^^^^^^^
