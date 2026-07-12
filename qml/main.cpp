@@ -27,10 +27,10 @@
 #include <QGuiApplication>
 
 #ifdef MUKEI_USE_REAL_BRIDGE
-#  if __has_include("mukei_bridge/src/lib.rs.h")
-#    include "mukei_bridge/src/lib.rs.h"
+#  if __has_include("mukei-bridge/src/lib.cxxqt.h")
+#    include "mukei-bridge/src/lib.cxxqt.h"
 #  else
-#    error "MUKEI_USE_REAL_BRIDGE requires the CXX-Qt generated mukei_bridge/src/lib.rs.h header in the include path"
+#    error "MUKEI_USE_REAL_BRIDGE requires the CXX-Qt generated mukei-bridge/src/lib.cxxqt.h header in the include path"
 #  endif
 #endif
 
@@ -948,9 +948,9 @@ int main(int argc, char *argv[])
     MukeiRuntimeInfo runtimeInfo;
     MukeiTimelineModel timelineModel;
 #ifdef MUKEI_USE_REAL_BRIDGE
-    ffi::MukeiAgent agent;
-    ffi::MukeiBridge bridge;
-    ffi::SafRegistry safRegistry;
+    MukeiAgent agent;
+    MukeiBridge bridge;
+    SafRegistry safRegistry;
 #else
     MukeiAgentStub agent;
     MukeiBridgeStub bridge;
