@@ -19,7 +19,11 @@ QtObject {
 
     signal hydrationCompleted
 
-    Timer { id: refreshTimer; interval: 350; repeat: false; onTriggered: root.hydrate() }
+    property var refreshTimer: Timer {
+        interval: 350
+        repeat: false
+        onTriggered: root.hydrate()
+    }
 
     function configure(agent) { agentSource = agent }
     function scheduleRefresh() { refreshTimer.restart() }
@@ -76,7 +80,7 @@ QtObject {
         return (value / 1024).toFixed(0) + " KB"
     }
 
-    Connections {
+    property var agentConnections: Connections {
         target: root.agentSource
         ignoreUnknownSignals: true
         function onAsync_result(resultJson) {
