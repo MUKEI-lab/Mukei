@@ -123,7 +123,20 @@ jobs:
       - name: Enforce generated qmllint result
         if: steps.qmllint.outcome == 'failure'
         run: exit 1
-      - name: Build QML and test targets
-        run: cmake --build "$CMAKE_BUILD_DIR"
+      - name: Capture QML build diagnostics
+        id: qml-build
+        continue-on-error: true
+        run: cmake --build "$CMAKE_BUILD_DIR" > /tmp/mukei-qml-build.log 2>&1
+      - name: Upload QML build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qml-build-diagnostics
+          path: /tmp/mukei-qml-build.log
+          if-no-files-found: error
+          retention-days: 1
+      - name: Enforce QML build result
+        if: steps.qml-build.outcome == 'failure'
+        run: exit 1
       - name: Run CTest
         run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
