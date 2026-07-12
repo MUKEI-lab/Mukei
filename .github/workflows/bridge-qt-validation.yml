@@ -7,9 +7,6 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 concurrency:
   group: release-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -104,63 +101,3 @@ jobs:
         run: cmake --build "$CMAKE_BUILD_DIR"
       - name: Run CTest
         run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
-
-  bridge-repair:
-    name: apply bridge compile repairs
-    if: github.head_ref == 'agent/diagnose-current-ci' && github.actor != 'github-actions[bot]'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/diagnose-current-ci
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - name: Apply exact bridge API and ownership repairs
-        shell: python
-        run: |
-          from pathlib import Path
-
-          storage_path = Path("rust/crates/mukei-bridge/src/storage_bridge.rs")
-          storage = storage_path.read_text()
-          old_constant = "mukei_core::storage::DEFAULT_MAX_MODEL_STORAGE_BYTES"
-          new_constant = "mukei_core::storage::quota::DEFAULT_MAX_MODEL_STORAGE_BYTES"
-          assert storage.count(old_constant) == 1, storage.count(old_constant)
-          storage_path.write_text(storage.replace(old_constant, new_constant))
-
-          lib_path = Path("rust/crates/mukei-bridge/src/lib.rs")
-          lib = lib_path.read_text()
-
-          old_load = "mukei_core::storage::UiSessionRepository::load("
-          new_load = "mukei_core::storage::UiSessionRepository::load_session("
-          assert lib.count(old_load) == 1, lib.count(old_load)
-          lib = lib.replace(old_load, new_load)
-
-          marker = "let final_path_string = destination_token.clone();"
-          assert lib.count(marker) == 1, lib.count(marker)
-          lib = lib.replace(
-              marker,
-              marker + "\n                        let completed_model_id = model_id.clone();",
-              1,
-          )
-
-          complete_start = lib.index("BridgeEventKind::DownloadCompleted {")
-          error_start = lib.index("mukei_core::storage::DownloadEvent::Error", complete_start)
-          complete_block = lib[complete_start:error_start]
-          old_model = "model_id: model_id.clone(),"
-          assert complete_block.count(old_model) == 1, complete_block.count(old_model)
-          complete_block = complete_block.replace(old_model, "model_id: completed_model_id,", 1)
-          lib = lib[:complete_start] + complete_block + lib[error_start:]
-
-          lib_path.write_text(lib)
-      - name: Normalize formatting
-        working-directory: rust
-        run: cargo fmt --all
-      - name: Commit repairs
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add rust/crates/mukei-bridge/src/lib.rs rust/crates/mukei-bridge/src/storage_bridge.rs
-          git commit -m "fix(ci): repair bridge API drift and download ownership"
-          git push origin HEAD:agent/diagnose-current-ci
