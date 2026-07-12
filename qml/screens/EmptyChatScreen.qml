@@ -7,6 +7,9 @@ import "../components"
 Page {
     id: root
     signal promptFilled(string prompt)
+    Accessible.role: Accessible.Pane
+    Accessible.name: qsTr("Empty chat screen")
+    Accessible.description: qsTr("Start a private on-device conversation")
     background: Rectangle {
         color: Theme.p.background
     }
