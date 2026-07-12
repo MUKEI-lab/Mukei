@@ -36,43 +36,32 @@ jobs:
 
           storage = Path("rust/crates/mukei-bridge/src/storage_bridge.rs")
           storage_text = storage.read_text()
-          old = "mukei_core::storage::DEFAULT_MAX_MODEL_STORAGE_BYTES"
-          new = "mukei_core::storage::quota::DEFAULT_MAX_MODEL_STORAGE_BYTES"
-          if storage_text.count(old) != 1:
-              raise SystemExit(f"expected exactly one quota constant reference, found {storage_text.count(old)}")
-          storage.write_text(storage_text.replace(old, new, 1))
+          quota_old = "mukei_core::storage::DEFAULT_MAX_MODEL_STORAGE_BYTES"
+          quota_new = "mukei_core::storage::quota::DEFAULT_MAX_MODEL_STORAGE_BYTES"
+          if storage_text.count(quota_old) != 1:
+              raise SystemExit(f"expected one quota constant reference, found {storage_text.count(quota_old)}")
+          storage.write_text(storage_text.replace(quota_old, quota_new, 1))
 
           bridge = Path("rust/crates/mukei-bridge/src/lib.rs")
           bridge_text = bridge.read_text()
 
-          old_load = "mukei_core::storage::UiSessionRepository::load("
-          new_load = "mukei_core::storage::UiSessionRepository::load_session("
-          if bridge_text.count(old_load) != 1:
-              raise SystemExit(f"expected exactly one UiSessionRepository::load call, found {bridge_text.count(old_load)}")
-          bridge_text = bridge_text.replace(old_load, new_load, 1)
+          load_old = "mukei_core::storage::UiSessionRepository::load("
+          load_new = "mukei_core::storage::UiSessionRepository::load_session("
+          if bridge_text.count(load_old) != 1:
+              raise SystemExit(f"expected one UiSessionRepository::load call, found {bridge_text.count(load_old)}")
+          bridge_text = bridge_text.replace(load_old, load_new, 1)
 
-          old_complete = '''                        let status = format!("complete:{destination_token}");
-                        let final_path_string = destination_token.clone();
-                        let _ = qt_for_ev.queue(move |mut qobject| {
-                            qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
-                                BridgeEventKind::DownloadCompleted {
-                                    final_path: final_path_string.clone(),
-                                    model_id: model_id.clone(),
-                                },
-                            )));'''
-          new_complete = '''                        let status = format!("complete:{destination_token}");
-                        let final_path_string = destination_token.clone();
-                        let completed_model_id = model_id.clone();
-                        let _ = qt_for_ev.queue(move |mut qobject| {
-                            qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
-                                BridgeEventKind::DownloadCompleted {
-                                    final_path: final_path_string.clone(),
-                                    model_id: completed_model_id,
-                                },
-                            )));'''
-          if bridge_text.count(old_complete) != 1:
-              raise SystemExit(f"expected exactly one DownloadCompleted ownership block, found {bridge_text.count(old_complete)}")
-          bridge.write_text(bridge_text.replace(old_complete, new_complete, 1))
+          capture_old = "                        let final_path_string = destination_token.clone();\n                        let _ = qt_for_ev.queue(move |mut qobject| {"
+          capture_new = "                        let final_path_string = destination_token.clone();\n                        let completed_model_id = model_id.clone();\n                        let _ = qt_for_ev.queue(move |mut qobject| {"
+          if bridge_text.count(capture_old) != 1:
+              raise SystemExit(f"expected one DownloadCompleted capture site, found {bridge_text.count(capture_old)}")
+          bridge_text = bridge_text.replace(capture_old, capture_new, 1)
+
+          field_old = "                                    final_path: final_path_string.clone(),\n                                    model_id: model_id.clone(),"
+          field_new = "                                    final_path: final_path_string.clone(),\n                                    model_id: completed_model_id,"
+          if bridge_text.count(field_old) != 1:
+              raise SystemExit(f"expected one DownloadCompleted model_id field, found {bridge_text.count(field_old)}")
+          bridge.write_text(bridge_text.replace(field_old, field_new, 1))
           PY
           git diff --check
       - name: Commit repair to checkpoint branch
