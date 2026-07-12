@@ -27,6 +27,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: write
+
 # Cancel superseded runs on the same branch/PR — saves runner minutes
 # and keeps the visible status current.
 concurrency:
@@ -131,28 +134,37 @@ jobs:
       - name: QML security check
         run: python3 qml/scripts/qml_security_analyzer.py qml
 
-  # Temporary diagnostic job on the CI repair branch only. Removed before merge.
-  clippy-diagnostic-artifact:
-    name: clippy diagnostic artifact
-    if: github.head_ref == 'agent/diagnose-current-ci' || github.ref == 'refs/heads/agent/diagnose-current-ci'
+  # Temporary branch-scoped repair job. Removed before merge.
+  apply-clippy-repair:
+    name: apply reviewed Clippy repair
+    if: github.head_ref == 'agent/diagnose-current-ci'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: agent/diagnose-current-ci
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
-      - name: Capture core Clippy output
+          components: clippy,rustfmt
+      - name: Apply exact reviewed patch
+        run: git apply --check ci-clippy-fix.patch && git apply ci-clippy-fix.patch
+      - name: Normalize formatting
         working-directory: rust
-        shell: bash
+        run: cargo fmt --all
+      - name: Verify core Clippy
+        working-directory: rust
+        run: >-
+          cargo clippy
+          -p mukei-core
+          --no-default-features
+          --features std,tokio
+          --lib --tests
+          -- -D warnings
+      - name: Commit verified repair
         run: |
-          set +e
-          cargo clippy -p mukei-core --no-default-features --features std,tokio --lib --tests -- -D warnings > ../clippy-diagnostics.txt 2>&1
-          echo "exit_status=$?" >> ../clippy-diagnostics.txt
-          exit 0
-      - name: Upload Clippy diagnostics
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-clippy-diagnostics
-          path: clippy-diagnostics.txt
-          if-no-files-found: error
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust
+          git commit -m "fix(ci): resolve Rust 1.97 Clippy failures"
+          git push origin HEAD:agent/diagnose-current-ci
