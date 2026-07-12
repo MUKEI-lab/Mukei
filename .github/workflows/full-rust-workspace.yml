@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: release-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -134,3 +137,34 @@ jobs:
       - name: cargo test -p mukei-ffi-shim
         working-directory: rust
         run: cargo test -p mukei-ffi-shim
+
+  workspace-test-diagnostic:
+    name: capture workspace test failure
+    if: github.head_ref == 'agent/diagnose-current-ci'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/diagnose-current-ci
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Capture workspace test output
+        working-directory: rust
+        shell: bash
+        run: |
+          set +e
+          cargo test --quiet --workspace --exclude mukei-bridge > ../workspace-test-next.log 2>&1
+          echo "exit_status=$?" >> ../workspace-test-next.log
+          exit 0
+      - name: Commit diagnostic output
+        shell: bash
+        run: |
+          cp workspace-test-next.log /tmp/workspace-test-next.log
+          git fetch origin agent/diagnose-current-ci
+          git reset --hard origin/agent/diagnose-current-ci
+          cp /tmp/workspace-test-next.log .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f workspace-test-next.log
+          git commit -m "chore(ci): capture workspace test failure"
+          git push origin HEAD:agent/diagnose-current-ci
