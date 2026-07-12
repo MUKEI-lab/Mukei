@@ -83,6 +83,7 @@ jobs:
       - name: Build bridge library and export CXX-Qt headers
         working-directory: rust
         run: |
+          cargo clean -p mukei-bridge
           env \
             CXX_QT_EXPORT_DIR="$CXX_QT_EXPORT_DIR" \
             'CXX_QT_EXPORT_CRATE_mukei-bridge=1' \
