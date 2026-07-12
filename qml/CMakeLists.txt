@@ -242,12 +242,37 @@ if(MUKEI_USE_REAL_BRIDGE)
     target_compile_definitions(mukei PRIVATE MUKEI_USE_REAL_BRIDGE=1)
 endif()
 
+# QuickTest executes QML directly from the filesystem. The production
+# subdirectory qmldir files intentionally prefer the compiled qrc module, but
+# those resources belong to the mukei executable and are not linked into the
+# standalone test executables. Stage a test-only source tree without those
+# redirects, then regenerate only the singleton declarations required by
+# filesystem directory imports.
+set(_MUKEI_QML_TEST_SOURCE_ROOT "${CMAKE_CURRENT_BINARY_DIR}/qml-test-source")
+file(REMOVE_RECURSE "${_MUKEI_QML_TEST_SOURCE_ROOT}")
+file(MAKE_DIRECTORY "${_MUKEI_QML_TEST_SOURCE_ROOT}")
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/"
+    DESTINATION "${_MUKEI_QML_TEST_SOURCE_ROOT}"
+    PATTERN "qmldir" EXCLUDE
+    PATTERN "CMakeLists.txt" EXCLUDE
+)
+foreach(_singleton IN LISTS _MUKEI_QML_SINGLETONS)
+    get_filename_component(_singleton_dir "${_singleton}" DIRECTORY)
+    get_filename_component(_singleton_name "${_singleton}" NAME_WE)
+    set(_singleton_qmldir
+        "${_MUKEI_QML_TEST_SOURCE_ROOT}/${_singleton_dir}/qmldir"
+    )
+    file(APPEND "${_singleton_qmldir}"
+        "singleton ${_singleton_name} 1.0 ${_singleton_name}.qml\n"
+    )
+endforeach()
+
 qt_add_executable(tst_EventDispatcher
     tests/tst_EventDispatcher.cpp
 )
 
 target_compile_definitions(tst_EventDispatcher PRIVATE
-    EVENT_DISPATCHER_QML_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/tst_EventDispatcher.qml"
+    EVENT_DISPATCHER_QML_SOURCE_DIR="${_MUKEI_QML_TEST_SOURCE_ROOT}/tests"
 )
 
 target_link_libraries(tst_EventDispatcher PRIVATE
@@ -276,10 +301,11 @@ target_link_libraries(tst_Security PRIVATE
 
 qt_add_executable(tst_QmlArchitecture
     tests/tst_QmlArchitecture.cpp
+    qml.qrc
 )
 
 target_compile_definitions(tst_QmlArchitecture PRIVATE
-    QML_ARCHITECTURE_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    QML_ARCHITECTURE_TEST_SOURCE_DIR="${_MUKEI_QML_TEST_SOURCE_ROOT}/tests"
 )
 
 target_link_libraries(tst_QmlArchitecture PRIVATE
@@ -309,7 +335,7 @@ set_tests_properties(tst_QmlArchitecture PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM
 
 add_test(NAME tst_TimelineModel COMMAND tst_TimelineModel)
 
-add_test(NAME tst_EventDispatcher COMMAND tst_EventDispatcher -platform offscreen -input ${CMAKE_CURRENT_SOURCE_DIR}/tests/tst_EventDispatcher.qml)
+add_test(NAME tst_EventDispatcher COMMAND tst_EventDispatcher -platform offscreen -input ${_MUKEI_QML_TEST_SOURCE_ROOT}/tests/tst_EventDispatcher.qml)
 set_tests_properties(tst_EventDispatcher PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
