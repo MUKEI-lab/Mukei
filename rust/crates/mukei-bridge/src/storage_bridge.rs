@@ -7,7 +7,7 @@ pub(crate) fn storage_snapshot(
     model_root: &std::path::Path,
 ) -> Result<serde_json::Value, mukei_core::error::MukeiError> {
     let usage = mukei_core::storage::StorageQuotaManager::new(model_root).usage()?;
-    let max_bytes = mukei_core::storage::DEFAULT_MAX_MODEL_STORAGE_BYTES;
+    let max_bytes = mukei_core::storage::quota::DEFAULT_MAX_MODEL_STORAGE_BYTES;
     let accounted = usage.accounted_model_bytes();
     let ratio = if max_bytes == 0 {
         0.0
