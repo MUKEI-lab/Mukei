@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: release-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -18,6 +21,52 @@ env:
   QT_VERSION: 6.5.3
 
 jobs:
+  apply-cxxqt-header-contract-fix:
+    name: apply CXX-Qt header contract fix
+    if: github.event_name == 'pull_request' && github.head_ref == 'checkpoint/stabilization-2026-07-12'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Align generated header contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          main = Path("qml/main.cpp")
+          text = main.read_text()
+          old = "mukei_bridge/src/lib.rs.h"
+          new = "mukei_bridge/src/lib.rs.cxxqt.h"
+          count = text.count(old)
+          if count not in (0, 3):
+              raise SystemExit(f"expected 0 or 3 legacy CXX-Qt header references in main.cpp, found {count}")
+          if count == 3:
+              main.write_text(text.replace(old, new))
+
+          cmake = Path("qml/CMakeLists.txt")
+          text = cmake.read_text()
+          old = "${MUKEI_CXX_QT_INCLUDE_DIR}/mukei_bridge/src/lib.rs.h"
+          new = "${MUKEI_CXX_QT_INCLUDE_DIR}/mukei_bridge/src/lib.rs.cxxqt.h"
+          count = text.count(old)
+          if count not in (0, 1):
+              raise SystemExit(f"expected 0 or 1 legacy CXX-Qt preflight header reference, found {count}")
+          if count == 1:
+              cmake.write_text(text.replace(old, new, 1))
+          PY
+          git diff --check
+      - name: Commit header contract fix
+        run: |
+          if git diff --quiet; then
+            echo "CXX-Qt header contract fix already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add qml/main.cpp qml/CMakeLists.txt
+          git commit -m "fix: use CXX-Qt generated QObject header"
+          git push origin HEAD:${{ github.head_ref }}
+
   bridge-compile:
     name: bridge compile gate
     runs-on: ubuntu-latest
