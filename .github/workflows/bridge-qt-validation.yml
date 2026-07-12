@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: release-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -18,6 +21,72 @@ env:
   QT_VERSION: 6.5.3
 
 jobs:
+  apply-checkpoint-ci-repair:
+    name: apply checkpoint CI repair
+    if: github.event_name == 'pull_request' && github.head_ref == 'checkpoint/stabilization-2026-07-12'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Apply exact bridge compile fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          storage = Path("rust/crates/mukei-bridge/src/storage_bridge.rs")
+          storage_text = storage.read_text()
+          old = "mukei_core::storage::DEFAULT_MAX_MODEL_STORAGE_BYTES"
+          new = "mukei_core::storage::quota::DEFAULT_MAX_MODEL_STORAGE_BYTES"
+          if storage_text.count(old) != 1:
+              raise SystemExit(f"expected exactly one quota constant reference, found {storage_text.count(old)}")
+          storage.write_text(storage_text.replace(old, new, 1))
+
+          bridge = Path("rust/crates/mukei-bridge/src/lib.rs")
+          bridge_text = bridge.read_text()
+
+          old_load = "mukei_core::storage::UiSessionRepository::load("
+          new_load = "mukei_core::storage::UiSessionRepository::load_session("
+          if bridge_text.count(old_load) != 1:
+              raise SystemExit(f"expected exactly one UiSessionRepository::load call, found {bridge_text.count(old_load)}")
+          bridge_text = bridge_text.replace(old_load, new_load, 1)
+
+          old_complete = '''                        let status = format!("complete:{destination_token}");
+                        let final_path_string = destination_token.clone();
+                        let _ = qt_for_ev.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                                BridgeEventKind::DownloadCompleted {
+                                    final_path: final_path_string.clone(),
+                                    model_id: model_id.clone(),
+                                },
+                            )));'''
+          new_complete = '''                        let status = format!("complete:{destination_token}");
+                        let final_path_string = destination_token.clone();
+                        let completed_model_id = model_id.clone();
+                        let _ = qt_for_ev.queue(move |mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                                BridgeEventKind::DownloadCompleted {
+                                    final_path: final_path_string.clone(),
+                                    model_id: completed_model_id,
+                                },
+                            )));'''
+          if bridge_text.count(old_complete) != 1:
+              raise SystemExit(f"expected exactly one DownloadCompleted ownership block, found {bridge_text.count(old_complete)}")
+          bridge.write_text(bridge_text.replace(old_complete, new_complete, 1))
+          PY
+          git diff --check
+      - name: Commit repair to checkpoint branch
+        run: |
+          if git diff --quiet; then
+            echo "Checkpoint repair already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust/crates/mukei-bridge/src/lib.rs rust/crates/mukei-bridge/src/storage_bridge.rs
+          git commit -m "fix: repair bridge compile regressions"
+          git push origin HEAD:${{ github.head_ref }}
+
   bridge-compile:
     name: bridge compile gate
     runs-on: ubuntu-latest
