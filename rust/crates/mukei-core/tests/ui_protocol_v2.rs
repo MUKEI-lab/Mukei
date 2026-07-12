@@ -1,9 +1,6 @@
-#[path = "../src/ui_protocol.rs"]
-mod ui_protocol;
-
 use chrono::Utc;
+use mukei_core::ui_protocol::*;
 use serde_json::json;
-use ui_protocol::*;
 
 fn scope() -> CommandScope {
     CommandScope {
