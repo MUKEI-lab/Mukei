@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQml.Models
+import Qt.labs.qmlmodels
 import "../theme"
 import "../components"
 
