@@ -105,42 +105,47 @@ jobs:
       - name: Run CTest
         run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
 
-  bridge-diagnostic:
-    name: capture next bridge compiler failure
+  qml-configure-diagnostic:
+    name: capture QML configure failure
     if: github.head_ref == 'agent/diagnose-current-ci' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/diagnose-current-ci
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
       - name: Install Qt 6.5
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           cache: true
       - name: Export Qt toolchain paths
+        run: echo "$QT_ROOT_DIR/bin" >> $GITHUB_PATH
+      - name: Ensure CMake and Ninja
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Satisfy bridge-path existence contract
         run: |
-          echo "$QT_ROOT_DIR/bin" >> $GITHUB_PATH
-          echo "QMAKE=$QT_ROOT_DIR/bin/qmake" >> $GITHUB_ENV
-      - name: Capture compact bridge output
-        working-directory: rust
+          mkdir -p rust/target/debug
+          touch rust/target/debug/libmukei_bridge.so
+      - name: Capture compact QML configure output
+        working-directory: qml
         shell: bash
         run: |
           set +e
-          cargo build --quiet -p mukei-bridge --features "sqlcipher,network" > ../bridge-build-next.log 2>&1
-          echo "exit_status=$?" >> ../bridge-build-next.log
+          cmake -S . -B /tmp/mukei-qml-diagnostic -G Ninja \
+            -DMUKEI_USE_REAL_BRIDGE=ON \
+            -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/debug/libmukei_bridge.so" \
+            > ../qml-configure-current.log 2>&1
+          echo "exit_status=$?" >> ../qml-configure-current.log
           exit 0
-      - name: Commit bridge diagnostics
+      - name: Commit QML configure diagnostics
         shell: bash
         run: |
-          cp bridge-build-next.log /tmp/bridge-build-next.log
+          cp qml-configure-current.log /tmp/qml-configure-current.log
           git fetch origin agent/diagnose-current-ci
           git reset --hard origin/agent/diagnose-current-ci
-          cp /tmp/bridge-build-next.log .
+          cp /tmp/qml-configure-current.log .
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f bridge-build-next.log
-          git commit -m "chore(ci): capture next bridge compiler failure"
+          git add -f qml-configure-current.log
+          git commit -m "chore(ci): capture QML configure failure"
           git push origin HEAD:agent/diagnose-current-ci
