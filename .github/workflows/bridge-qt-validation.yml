@@ -101,3 +101,59 @@ jobs:
         run: cmake --build "$CMAKE_BUILD_DIR"
       - name: Run CTest
         run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
+
+  static-link-diagnostic:
+    name: capture desktop static bridge link failure
+    if: github.head_ref == 'agent/ci-green-final'
+    runs-on: ubuntu-latest
+    env:
+      CMAKE_BUILD_DIR: /tmp/mukei-qml-static-link-diag
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Qt 6.5
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+      - name: Export Qt toolchain paths
+        run: |
+          echo "$QT_ROOT_DIR/bin" >> $GITHUB_PATH
+          echo "QMAKE=$QT_ROOT_DIR/bin/qmake" >> $GITHUB_ENV
+      - name: Ensure CMake and Ninja
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-cargo-qml-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-qml-
+      - name: Build bridge static library
+        working-directory: rust
+        run: cargo build -p mukei-bridge --features "sqlcipher,network"
+      - name: Configure QML build
+        working-directory: qml
+        run: >-
+          cmake -S . -B "$CMAKE_BUILD_DIR" -G Ninja
+          -DMUKEI_USE_REAL_BRIDGE=ON
+          -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/debug/libmukei_bridge.a"
+      - name: Capture static-link build output
+        shell: bash
+        run: |
+          set +e
+          cmake --build "$CMAKE_BUILD_DIR" > static-bridge-link.log 2>&1
+          status=$?
+          echo "exit_status=$status" >> static-bridge-link.log
+          exit 0
+      - name: Upload static-link diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-bridge-link-log
+          path: static-bridge-link.log
+          if-no-files-found: error
