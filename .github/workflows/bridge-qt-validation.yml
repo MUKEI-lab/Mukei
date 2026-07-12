@@ -105,47 +105,36 @@ jobs:
       - name: Run CTest
         run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
 
-  qml-configure-diagnostic:
-    name: capture QML configure failure
+  qml-cmake-repair:
+    name: repair QML CMake module linkage
     if: github.head_ref == 'agent/diagnose-current-ci' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/diagnose-current-ci
-      - name: Install Qt 6.5
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: ${{ env.QT_VERSION }}
-          cache: true
-      - name: Export Qt toolchain paths
-        run: echo "$QT_ROOT_DIR/bin" >> $GITHUB_PATH
-      - name: Ensure CMake and Ninja
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
-      - name: Satisfy bridge-path existence contract
+      - name: Remove invalid QuickEffects CMake dependency
+        shell: python
         run: |
-          mkdir -p rust/target/debug
-          touch rust/target/debug/libmukei_bridge.so
-      - name: Capture compact QML configure output
-        working-directory: qml
-        shell: bash
+          from pathlib import Path
+
+          path = Path("qml/CMakeLists.txt")
+          text = path.read_text()
+
+          component_fragment = "QuickControls2 QuickDialogs2 QuickEffects QuickLayouts"
+          replacement_fragment = "QuickControls2 QuickDialogs2 QuickLayouts"
+          assert text.count(component_fragment) == 1, text.count(component_fragment)
+          text = text.replace(component_fragment, replacement_fragment, 1)
+
+          target_line = "    Qt6::QuickEffects\n"
+          assert text.count(target_line) == 2, text.count(target_line)
+          text = text.replace(target_line, "")
+
+          path.write_text(text)
+      - name: Commit CMake repair
         run: |
-          set +e
-          cmake -S . -B /tmp/mukei-qml-diagnostic -G Ninja \
-            -DMUKEI_USE_REAL_BRIDGE=ON \
-            -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/debug/libmukei_bridge.so" \
-            > ../qml-configure-current.log 2>&1
-          echo "exit_status=$?" >> ../qml-configure-current.log
-          exit 0
-      - name: Commit QML configure diagnostics
-        shell: bash
-        run: |
-          cp qml-configure-current.log /tmp/qml-configure-current.log
-          git fetch origin agent/diagnose-current-ci
-          git reset --hard origin/agent/diagnose-current-ci
-          cp /tmp/qml-configure-current.log .
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f qml-configure-current.log
-          git commit -m "chore(ci): capture QML configure failure"
+          git add qml/CMakeLists.txt
+          git commit -m "fix(ci): treat QtQuick.Effects as a QML module"
           git push origin HEAD:agent/diagnose-current-ci
