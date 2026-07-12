@@ -85,6 +85,10 @@ set(_MUKEI_QML_SINGLETONS
     stores/ErrorStore.qml
     stores/DiagnosticsStore.qml
     stores/AccessibilityStore.qml
+    theme/Theme.qml
+    theme/Type.qml
+    theme/Spacing.qml
+    theme/Motion.qml
 )
 set_source_files_properties(${_MUKEI_QML_SINGLETONS} PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
@@ -183,6 +187,14 @@ qt_add_qml_module(mukei
         screens/ToolResultExpandedScreen.qml
         screens/VerificationScreen.qml
         screens/WelcomeScreen.qml
+    RESOURCES
+        events/qmldir
+        architecture/qmldir
+        stores/qmldir
+        shell/qmldir
+        theme/qmldir
+        components/qmldir
+        screens/qmldir
 )
 
 target_link_libraries(mukei PRIVATE
