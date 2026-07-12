@@ -1,9 +1,10 @@
 //! End-to-end integration tests for the agent loop's graceful-degrade
 //! behaviour (PRD REQ-AGT-04 + TRD §2.3).
 //!
-//! These tests drive `AgentLoop::run` with mock backends — they do NOT
-//! load llama.cpp — so they verify the loop's structural contract
-//! independent of any model.
+//! These tests drive `AgentLoop::run` with mock context/tool backends and
+//! without loading llama.cpp. The no-tool entry path must fail closed until
+//! model activation succeeds; the remaining tests verify cancellation and
+//! graceful tool-failure handling independently of a live model.
 //!
 //! Contract under test:
 //!   * When a tool fails [`MAX_FAILURES_PER_TOOL` + 1] times with the
@@ -74,7 +75,7 @@ impl TokenCount for FixedTokenizer {
 // ---------------------------------------------------------------------
 
 #[tokio::test]
-async fn run_completes_without_tool_calls() {
+async fn run_fails_closed_when_inference_backend_is_unavailable() {
     let backend: Arc<dyn ContextBackend> = Arc::new(StaticBackend);
     let tokenizer: Arc<dyn TokenCount> = Arc::new(FixedTokenizer);
     let context = ContextBudgetManager::new(backend, tokenizer, 100_000);
@@ -93,10 +94,6 @@ async fn run_completes_without_tool_calls() {
     let (tx, mut rx) = mpsc::channel::<String>(256);
     let cancel = CancellationToken::new();
 
-    // The stub `run_inference` echoes the context back. Since the echoed
-    // text does NOT look like a JSON array of tool calls, the loop must
-    // treat it as a final answer and return Ok(()) on the first
-    // iteration.
     let result = agent
         .run(AgentRunRequest::new(
             "hello world",
@@ -109,16 +106,17 @@ async fn run_completes_without_tool_calls() {
         .await;
 
     assert!(
-        result.is_ok(),
-        "run() must complete successfully on a no-tool turn: {result:?}"
+        matches!(
+            &result,
+            Err(MukeiError::ModelLoadFailed(message))
+                if message == "inference backend is unavailable until model activation succeeds"
+        ),
+        "run() must fail closed before model activation, got {result:?}"
     );
-
-    // Stream produced at least one chunk.
-    let mut received_any = false;
-    while rx.try_recv().is_ok() {
-        received_any = true;
-    }
-    assert!(received_any, "the stub inference engine emitted no chunks");
+    assert!(
+        rx.try_recv().is_err(),
+        "failed model activation must not emit response chunks"
+    );
 }
 
 #[tokio::test]
