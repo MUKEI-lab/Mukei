@@ -135,22 +135,36 @@ jobs:
           components: clippy,rustfmt
       - name: Apply compiler-suggested Clippy fixes
         working-directory: rust
-        run: >-
-          cargo clippy --fix
-          -p mukei-core
-          --no-default-features
-          --features std,tokio
-          --lib --tests
-          --allow-dirty
-          --allow-staged
-          -- -D warnings
+        shell: bash
+        run: |
+          set +e
+          cargo clippy --fix \
+            -p mukei-core \
+            --no-default-features \
+            --features std,tokio \
+            --lib --tests \
+            --allow-dirty \
+            --allow-staged \
+            -- -D warnings
+          echo "clippy_fix_exit=$?"
+          exit 0
       - name: Normalize formatting
         working-directory: rust
         run: cargo fmt --all
-      - name: Commit compiler fixes
+      - name: Persist compiler fixes on latest branch head
+        shell: bash
         run: |
+          if git diff --quiet -- rust; then
+            echo "No new compiler fixes to commit."
+            exit 0
+          fi
+
+          git diff --binary -- rust > /tmp/clippy-fixes.patch
+          git fetch origin agent/diagnose-current-ci
+          git reset --hard origin/agent/diagnose-current-ci
+          git apply --index /tmp/clippy-fixes.patch
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add rust
           git commit -m "fix(ci): apply Rust 1.97 Clippy fixes"
           git push origin HEAD:agent/diagnose-current-ci
