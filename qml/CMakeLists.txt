@@ -27,7 +27,7 @@ option(MUKEI_USE_REAL_BRIDGE "Instantiate CXX-Qt bridge objects instead of local
 # Keep the declared build floor aligned with the QML imports instead of
 # allowing configure to succeed against an SDK that cannot load the module.
 find_package(Qt6 6.5 REQUIRED COMPONENTS
-    Core Gui Quick Qml QuickControls2 QuickDialogs2 QuickEffects QuickLayouts QuickTest Test Widgets Svg
+    Core Gui Quick Qml QuickControls2 QuickDialogs2 QuickLayouts QuickTest Test Widgets Svg
 )
 
 # Cargo build directory selection. Android builds still cross-compile to
@@ -192,7 +192,6 @@ target_link_libraries(mukei PRIVATE
     Qt6::Qml
     Qt6::QuickControls2
     Qt6::QuickDialogs2
-    Qt6::QuickEffects
     Qt6::QuickLayouts
     Qt6::Widgets
     Qt6::Svg
@@ -255,7 +254,6 @@ target_link_libraries(tst_QmlArchitecture PRIVATE
     Qt6::Qml
     Qt6::QuickControls2
     Qt6::QuickDialogs2
-    Qt6::QuickEffects
     Qt6::QuickLayouts
     Qt6::QuickTest
 )
