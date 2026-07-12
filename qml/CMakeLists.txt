@@ -229,7 +229,7 @@ endif()
 
 if(MUKEI_USE_REAL_BRIDGE)
     set(_MUKEI_CXX_QT_HEADER
-        "${MUKEI_CXX_QT_INCLUDE_DIR}/mukei_bridge/src/lib.rs.h"
+        "${MUKEI_CXX_QT_INCLUDE_DIR}/mukei_bridge/src/lib.rs.cxxqt.h"
     )
     if(NOT EXISTS "${_MUKEI_CXX_QT_HEADER}")
         message(FATAL_ERROR

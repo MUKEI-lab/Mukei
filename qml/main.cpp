@@ -27,10 +27,10 @@
 #include <QGuiApplication>
 
 #ifdef MUKEI_USE_REAL_BRIDGE
-#  if __has_include("mukei_bridge/src/lib.rs.h")
-#    include "mukei_bridge/src/lib.rs.h"
+#  if __has_include("mukei_bridge/src/lib.rs.cxxqt.h")
+#    include "mukei_bridge/src/lib.rs.cxxqt.h"
 #  else
-#    error "MUKEI_USE_REAL_BRIDGE requires the CXX-Qt generated mukei_bridge/src/lib.rs.h header in the include path"
+#    error "MUKEI_USE_REAL_BRIDGE requires the CXX-Qt generated mukei_bridge/src/lib.rs.cxxqt.h header in the include path"
 #  endif
 #endif
 
