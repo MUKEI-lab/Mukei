@@ -46,7 +46,7 @@ jobs:
             ${{ runner.os }}-cargo-bridge-
       - name: cargo build -p mukei-bridge
         working-directory: rust
-        run: cargo build -p mukei-bridge --features "sqlcipher,network"
+        run: cargo build --quiet -p mukei-bridge --features "sqlcipher,network" --message-format=short
 
   qml-runtime:
     name: qml configure-build-test gate
