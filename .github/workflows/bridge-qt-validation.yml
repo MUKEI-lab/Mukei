@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: release-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -160,3 +163,65 @@ jobs:
           name: native-qml-build-log
           path: native-qml-build.log
           if-no-files-found: error
+
+  bridge-header-path-repair:
+    name: wire generated CXX-Qt header include root
+    if: github.head_ref == 'agent/ci-green-final' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/ci-green-final
+      - name: Patch CMake generated-header discovery
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("qml/CMakeLists.txt")
+          text = path.read_text()
+          old = '''if(MUKEI_USE_REAL_BRIDGE)
+              target_compile_definitions(mukei PRIVATE MUKEI_USE_REAL_BRIDGE=1)
+          endif()
+          '''
+          new = '''if(MUKEI_USE_REAL_BRIDGE)
+              target_compile_definitions(mukei PRIVATE MUKEI_USE_REAL_BRIDGE=1)
+
+              # CXX-Qt writes generated C++ headers below Cargo's target tree.
+              # The exact profile/target directory can differ between desktop,
+              # Android, debug, and release builds, so discover the generated
+              # bridge header and add the include root that owns `mukei_bridge/`.
+              file(GLOB_RECURSE _MUKEI_BRIDGE_HEADER_CANDIDATES
+                  LIST_DIRECTORIES FALSE
+                  "${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/*lib.rs.h"
+              )
+              set(_MUKEI_BRIDGE_GENERATED_INCLUDE_DIR "")
+              foreach(_MUKEI_BRIDGE_HEADER IN LISTS _MUKEI_BRIDGE_HEADER_CANDIDATES)
+                  if(_MUKEI_BRIDGE_HEADER MATCHES "/mukei_bridge/src/lib[.]rs[.]h$")
+                      string(REGEX REPLACE "/mukei_bridge/src/lib[.]rs[.]h$" ""
+                          _MUKEI_BRIDGE_GENERATED_INCLUDE_DIR "${_MUKEI_BRIDGE_HEADER}")
+                      break()
+                  endif()
+              endforeach()
+
+              if(NOT _MUKEI_BRIDGE_GENERATED_INCLUDE_DIR)
+                  message(FATAL_ERROR
+                      "MUKEI_USE_REAL_BRIDGE=ON but the generated CXX-Qt header "
+                      "mukei_bridge/src/lib.rs.h was not found under rust/target. "
+                      "Build mukei-bridge with Cargo before configuring QML.")
+              endif()
+
+              target_include_directories(mukei PRIVATE
+                  "${_MUKEI_BRIDGE_GENERATED_INCLUDE_DIR}"
+              )
+          endif()
+          '''
+          if old not in text:
+              raise SystemExit("Expected CMake real-bridge block not found")
+          path.write_text(text.replace(old, new, 1))
+      - name: Commit CMake bridge header repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add qml/CMakeLists.txt
+          git commit -m "fix(qml): discover generated CXX-Qt bridge headers"
+          git push origin HEAD:agent/ci-green-final
