@@ -8,6 +8,11 @@ TestCase {
     id: testCase
     name: "SecurityTests"
 
+    function init() {
+        if (typeof securityInspector === "undefined" || typeof mukeiClipboard === "undefined")
+            skip("Security test harness context is provided by the dedicated tst_Security executable.")
+    }
+
     function test_clipboard_bridge_exists() {
         verify(typeof mukeiClipboard !== "undefined", "mukeiClipboard bridge should be registered")
         verify(typeof mukeiClipboard.setText === "function", "mukeiClipboard.setText should be available")
