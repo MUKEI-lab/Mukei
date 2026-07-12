@@ -37,6 +37,7 @@ Rectangle {
                 { route: "settings", label: qsTr("Settings"), icon: "qrc:/icons/settings.svg" }
             ]
             delegate: Button {
+                id: navButton
                 Layout.fillWidth: true
                 implicitHeight: 52
                 text: ResponsiveStore.expanded ? modelData.label : ""
@@ -51,15 +52,16 @@ Rectangle {
                 onClicked: IntentDispatcher.dispatch({ type: "navigation.open", route: modelData.route })
                 background: Rectangle {
                     radius: Theme.radiusLg
-                    color: parent.checked || parent.hovered ? Theme.p.surfaceFaint : "transparent"
-                    border.width: parent.visualFocus ? 1 : 0
+                    color: navButton.checked || navButton.hovered ? Theme.p.surfaceFaint : "transparent"
+                    border.width: navButton.visualFocus ? 1 : 0
                     border.color: Theme.p.accent
                 }
                 contentItem: RowLayout {
                     spacing: Spacing.sm
                     Image {
                         source: modelData.icon
-                        sourceSize: Qt.size(22, 22)
+                        sourceSize.width: 22
+                        sourceSize.height: 22
                         Layout.alignment: Qt.AlignHCenter
                     }
                     Text {
