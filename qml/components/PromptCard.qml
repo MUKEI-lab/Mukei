@@ -3,31 +3,30 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import "../theme"
 
-Button {
+MouseArea {
     id: root
     property string prompt: ""
     property bool promptCardAutoSend: false
     signal fillRequested(string prompt)
     signal sendRequested(string prompt)
 
-    padding: 0
     hoverEnabled: true
+    cursorShape: Qt.PointingHandCursor
     Accessible.role: Accessible.Button
     Accessible.name: qsTr("Fill prompt")
     Accessible.description: prompt
     implicitHeight: promptText.implicitHeight + Spacing.lg
 
-    background: Rectangle {
+    Rectangle {
+        anchors.fill: parent
         radius: Theme.radiusLg
         color: Theme.p.surface
     }
 
-    contentItem: Text {
+    Text {
         id: promptText
-        leftPadding: Spacing.md
-        rightPadding: Spacing.md
-        topPadding: Spacing.md
-        bottomPadding: Spacing.md
+        anchors.fill: parent
+        anchors.margins: Spacing.md
         text: root.prompt
         color: Theme.p.inkPrimary
         wrapMode: Text.Wrap
