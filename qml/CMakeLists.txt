@@ -30,26 +30,22 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS
     Core Gui Quick Qml QuickControls2 QuickDialogs2 QuickLayouts QuickTest Test Widgets Svg
 )
 
-# Cargo build directory selection. Android builds still cross-compile to
-# `aarch64-linux-android/release`; every other host (Linux/macOS desktop
-# smoke-runs) uses the plain `release` directory. Both the .so and .dylib
-# suffixes are probed so a macOS build picks up libmukei_bridge.dylib.
+# Cargo bridge artifact selection. Android loads the `cdylib` .so;
+# desktop hosts link the `staticlib` archive so CXX-Qt generated QObject
+# constructors, vtables, and CXX bridge support symbols are part of the
+# final executable instead of relying on hidden cdylib symbol exports.
 
 if(ANDROID)
     set(_MUKEI_BRIDGE_DEFAULT
         ${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/aarch64-linux-android/release/libmukei_bridge.so
     )
-elseif(APPLE)
-    set(_MUKEI_BRIDGE_DEFAULT
-        ${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/release/libmukei_bridge.dylib
-    )
 else()
     set(_MUKEI_BRIDGE_DEFAULT
-        ${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/release/libmukei_bridge.so
+        ${CMAKE_CURRENT_SOURCE_DIR}/../rust/target/release/libmukei_bridge.a
     )
 endif()
 set(MUKEI_BRIDGE_LIB "${_MUKEI_BRIDGE_DEFAULT}"
-    CACHE FILEPATH "Path to the Cargo-built mukei-bridge shared library"
+    CACHE FILEPATH "Path to the Cargo-built mukei-bridge native library artifact"
 )
 
 add_executable(mukei
