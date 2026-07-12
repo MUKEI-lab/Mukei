@@ -1,0 +1,1454 @@
+[1/103] Generating com/mukei/app/MainWindow.qml
+[2/103] Generating com/mukei/app/events/EventDispatcher.qml
+[3/103] Generating com/mukei/app/architecture/IntentDispatcher.qml
+[4/103] Generating com/mukei/app/architecture/AppStateHub.qml
+[5/103] Generating com/mukei/app/architecture/AppCoordinator.qml
+[6/103] Generating com/mukei/app/stores/LifecycleStore.qml
+[7/103] Generating com/mukei/app/stores/ContractStore.qml
+[8/103] Generating com/mukei/app/architecture/PresentationPolicy.qml
+[9/103] Generating com/mukei/app/architecture/SnapshotController.qml
+[10/103] Generating com/mukei/app/stores/CapabilityStore.qml
+[11/103] Generating com/mukei/app/stores/ConversationStore.qml
+[12/103] Generating com/mukei/app/stores/NavigationStore.qml
+[13/103] Generating com/mukei/app/stores/UiSessionStore.qml
+[14/103] Generating com/mukei/app/stores/ChatStore.qml
+[15/103] Generating com/mukei/app/stores/RecoveryStore.qml
+[16/103] Generating com/mukei/app/stores/ModelStore.qml
+[17/103] Generating com/mukei/app/stores/DownloadStore.qml
+[18/103] Generating com/mukei/app/stores/DocumentStore.qml
+[19/103] Generating com/mukei/app/stores/StorageStore.qml
+[20/103] Generating com/mukei/app/stores/SettingsStore.qml
+[21/103] Generating com/mukei/app/stores/ResponsiveStore.qml
+[22/103] Generating com/mukei/app/stores/DiagnosticsStore.qml
+[23/103] Generating com/mukei/app/stores/AccessibilityStore.qml
+[24/103] Generating com/mukei/app/stores/OperationStore.qml
+[25/103] Generating com/mukei/app/stores/ErrorStore.qml
+[26/103] Generating com/mukei/app/shell/AppShell.qml
+[27/103] Generating com/mukei/app/shell/AdaptiveNavigation.qml
+[28/103] Generating com/mukei/app/shell/RouterHost.qml
+[29/103] Generating com/mukei/app/shell/BannerHost.qml
+[30/103] Generating com/mukei/app/shell/SnackbarHost.qml
+[31/103] Generating com/mukei/app/shell/OperationOverlayHost.qml
+[32/103] Generating com/mukei/app/shell/SheetHost.qml
+[33/103] Generating com/mukei/app/shell/DialogHost.qml
+[34/103] Generating com/mukei/app/theme/Theme.qml
+[35/103] Generating com/mukei/app/theme/Type.qml
+[36/103] Generating com/mukei/app/theme/Spacing.qml
+[37/103] Generating com/mukei/app/components/AccessibilityAnnouncer.qml
+[38/103] Generating com/mukei/app/theme/Motion.qml
+[39/103] Generating com/mukei/app/components/ChatComposer.qml
+[40/103] Generating com/mukei/app/components/AIMessageBubble.qml
+[41/103] Generating com/mukei/app/components/BranchSwitcherSheet.qml
+[42/103] Generating com/mukei/app/components/ChatTimelineEvent.qml
+[43/103] Generating com/mukei/app/components/CodeBlockComponent.qml
+[44/103] Generating com/mukei/app/components/ConfirmationDialog.qml
+[45/103] Generating com/mukei/app/components/ConversationList.qml
+[46/103] Generating com/mukei/app/components/CopyButton.qml
+[47/103] Generating com/mukei/app/components/DestructiveButton.qml
+[48/103] Generating com/mukei/app/components/DestructiveConfirmDialog.qml
+[49/103] Generating com/mukei/app/components/FontLoader.qml
+[50/103] Generating com/mukei/app/components/FullScreenModal.qml
+[51/103] Generating com/mukei/app/components/GhostButton.qml
+[52/103] Generating com/mukei/app/components/HapticFeedback.qml
+[53/103] Generating com/mukei/app/components/IconButton.qml
+[54/103] Generating com/mukei/app/components/LeftDrawer.qml
+[55/103] Generating com/mukei/app/components/MarkdownRenderer.qml
+[56/103] Generating com/mukei/app/components/MukeiIcon.qml
+[57/103] Generating com/mukei/app/components/ModalSheet.qml
+[58/103] Generating com/mukei/app/components/NetworkBanner.qml
+[59/103] Generating com/mukei/app/components/PrimaryButton.qml
+[60/103] Generating com/mukei/app/components/ProgressBar.qml
+[61/103] Generating com/mukei/app/components/PromptCard.qml
+[62/103] Generating com/mukei/app/components/RAGChunkCard.qml
+[63/103] Generating com/mukei/app/components/SearchField.qml
+[64/103] Generating com/mukei/app/components/SecondaryButton.qml
+[65/103] Generating com/mukei/app/components/SettingsTextField.qml
+[66/103] Generating com/mukei/app/components/SkeletonLoader.qml
+[67/103] Generating com/mukei/app/components/Spinner.qml
+[68/103] Generating com/mukei/app/components/StatusPill.qml
+[69/103] Generating com/mukei/app/components/StoragePressureCard.qml
+[70/103] Generating com/mukei/app/components/ThinkingAccordion.qml
+[71/103] Generating com/mukei/app/components/StreamingCaret.qml
+[72/103] Generating com/mukei/app/components/UserMessageBubble.qml
+[73/103] Generating com/mukei/app/components/ToolResultCard.qml
+[74/103] Generating com/mukei/app/components/ToastNotification.qml
+[75/103] Generating com/mukei/app/screens/CompatibilityScreen.qml
+[76/103] Generating com/mukei/app/screens/ChatScreen.qml
+[77/103] Generating com/mukei/app/screens/DocumentsScreen.qml
+[78/103] Generating com/mukei/app/screens/DiagnosticsScreen.qml
+[79/103] Generating com/mukei/app/screens/EmptyChatScreen.qml
+[80/103] Generating com/mukei/app/screens/DownloadsScreen.qml
+[81/103] Generating com/mukei/app/screens/ModelManagerScreen.qml
+[82/103] Generating com/mukei/app/screens/ModelPickerScreen.qml
+[83/103] Generating com/mukei/app/screens/RagRebuildPromptScreen.qml
+[84/103] Generating com/mukei/app/screens/RecoveryScreen.qml
+[85/103] Generating com/mukei/app/screens/SafeModeScreen.qml
+[86/103] Generating com/mukei/app/screens/SettingsScreen.qml
+[87/103] Generating com/mukei/app/screens/StartupScreen.qml
+[88/103] Generating com/mukei/app/screens/ToolResultExpandedScreen.qml
+[89/103] Generating com/mukei/app/architecture/qmldir
+[90/103] Generating com/mukei/app/events/qmldir
+[91/103] Generating com/mukei/app/screens/VerificationScreen.qml
+[92/103] Generating com/mukei/app/shell/qmldir
+[93/103] Generating com/mukei/app/theme/qmldir
+[94/103] Generating com/mukei/app/components/qmldir
+[95/103] Generating com/mukei/app/screens/WelcomeScreen.qml
+[96/103] Generating com/mukei/app/stores/qmldir
+[97/103] Generating com/mukei/app/screens/qmldir
+[98/103] Generating .rcc/qmlcache/mukei_qmlcache_loader.cpp
+[99/103] Automatic MOC for target mukei
+[100/103] Running AUTOMOC file extraction for target mukei
+[101/103] Running moc --collect-json for target mukei
+[102/103] Automatic QML type registration for target mukei
+[103/103] cd /home/runner/work/Mukei/Mukei/qml && /home/runner/work/Mukei/Qt/6.5.3/gcc_64/bin/qmllint --bare -I /tmp/mukei-qmllint-current -I /home/runner/work/Mukei/Qt/6.5.3/gcc_64/./qml --resource /tmp/mukei-qmllint-current/.rcc/qmake_com_mukei_app.qrc --resource /tmp/mukei-qmllint-current/.rcc/mukei_raw_qml_0.qrc /home/runner/work/Mukei/Mukei/qml/MainWindow.qml /home/runner/work/Mukei/Mukei/qml/events/EventDispatcher.qml /home/runner/work/Mukei/Mukei/qml/architecture/AppCoordinator.qml /home/runner/work/Mukei/Mukei/qml/architecture/AppStateHub.qml /home/runner/work/Mukei/Mukei/qml/architecture/IntentDispatcher.qml /home/runner/work/Mukei/Mukei/qml/architecture/PresentationPolicy.qml /home/runner/work/Mukei/Mukei/qml/architecture/SnapshotController.qml /home/runner/work/Mukei/Mukei/qml/stores/ContractStore.qml /home/runner/work/Mukei/Mukei/qml/stores/LifecycleStore.qml /home/runner/work/Mukei/Mukei/qml/stores/CapabilityStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ConversationStore.qml /home/runner/work/Mukei/Mukei/qml/stores/NavigationStore.qml /home/runner/work/Mukei/Mukei/qml/stores/UiSessionStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ChatStore.qml /home/runner/work/Mukei/Mukei/qml/stores/RecoveryStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ModelStore.qml /home/runner/work/Mukei/Mukei/qml/stores/DownloadStore.qml /home/runner/work/Mukei/Mukei/qml/stores/DocumentStore.qml /home/runner/work/Mukei/Mukei/qml/stores/StorageStore.qml /home/runner/work/Mukei/Mukei/qml/stores/SettingsStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ResponsiveStore.qml /home/runner/work/Mukei/Mukei/qml/stores/OperationStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ErrorStore.qml /home/runner/work/Mukei/Mukei/qml/stores/DiagnosticsStore.qml /home/runner/work/Mukei/Mukei/qml/stores/AccessibilityStore.qml /home/runner/work/Mukei/Mukei/qml/shell/AppShell.qml /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml /home/runner/work/Mukei/Mukei/qml/shell/RouterHost.qml /home/runner/work/Mukei/Mukei/qml/shell/BannerHost.qml /home/runner/work/Mukei/Mukei/qml/shell/SnackbarHost.qml /home/runner/work/Mukei/Mukei/qml/shell/OperationOverlayHost.qml /home/runner/work/Mukei/Mukei/qml/shell/SheetHost.qml /home/runner/work/Mukei/Mukei/qml/shell/DialogHost.qml /home/runner/work/Mukei/Mukei/qml/theme/Theme.qml /home/runner/work/Mukei/Mukei/qml/theme/Type.qml /home/runner/work/Mukei/Mukei/qml/theme/Spacing.qml /home/runner/work/Mukei/Mukei/qml/theme/Motion.qml /home/runner/work/Mukei/Mukei/qml/components/AccessibilityAnnouncer.qml /home/runner/work/Mukei/Mukei/qml/components/AIMessageBubble.qml /home/runner/work/Mukei/Mukei/qml/components/BranchSwitcherSheet.qml /home/runner/work/Mukei/Mukei/qml/components/ChatComposer.qml /home/runner/work/Mukei/Mukei/qml/components/ChatTimelineEvent.qml /home/runner/work/Mukei/Mukei/qml/components/CodeBlockComponent.qml /home/runner/work/Mukei/Mukei/qml/components/ConfirmationDialog.qml /home/runner/work/Mukei/Mukei/qml/components/ConversationList.qml /home/runner/work/Mukei/Mukei/qml/components/CopyButton.qml /home/runner/work/Mukei/Mukei/qml/components/DestructiveButton.qml /home/runner/work/Mukei/Mukei/qml/components/DestructiveConfirmDialog.qml /home/runner/work/Mukei/Mukei/qml/components/FontLoader.qml /home/runner/work/Mukei/Mukei/qml/components/FullScreenModal.qml /home/runner/work/Mukei/Mukei/qml/components/GhostButton.qml /home/runner/work/Mukei/Mukei/qml/components/HapticFeedback.qml /home/runner/work/Mukei/Mukei/qml/components/IconButton.qml /home/runner/work/Mukei/Mukei/qml/components/LeftDrawer.qml /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml /home/runner/work/Mukei/Mukei/qml/components/MukeiIcon.qml /home/runner/work/Mukei/Mukei/qml/components/ModalSheet.qml /home/runner/work/Mukei/Mukei/qml/components/NetworkBanner.qml /home/runner/work/Mukei/Mukei/qml/components/PrimaryButton.qml /home/runner/work/Mukei/Mukei/qml/components/ProgressBar.qml /home/runner/work/Mukei/Mukei/qml/components/PromptCard.qml /home/runner/work/Mukei/Mukei/qml/components/RAGChunkCard.qml /home/runner/work/Mukei/Mukei/qml/components/SearchField.qml /home/runner/work/Mukei/Mukei/qml/components/SecondaryButton.qml /home/runner/work/Mukei/Mukei/qml/components/SettingsTextField.qml /home/runner/work/Mukei/Mukei/qml/components/SkeletonLoader.qml /home/runner/work/Mukei/Mukei/qml/components/Spinner.qml /home/runner/work/Mukei/Mukei/qml/components/StatusPill.qml /home/runner/work/Mukei/Mukei/qml/components/StoragePressureCard.qml /home/runner/work/Mukei/Mukei/qml/components/StreamingCaret.qml /home/runner/work/Mukei/Mukei/qml/components/ThinkingAccordion.qml /home/runner/work/Mukei/Mukei/qml/components/ToastNotification.qml /home/runner/work/Mukei/Mukei/qml/components/ToolResultCard.qml /home/runner/work/Mukei/Mukei/qml/components/UserMessageBubble.qml /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/CompatibilityScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/EmptyChatScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/RagRebuildPromptScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/RecoveryScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/SafeModeScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/StartupScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/ToolResultExpandedScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/VerificationScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/WelcomeScreen.qml
+FAILED: [code=255] CMakeFiles/mukei_qmllint /tmp/mukei-qmllint-current/CMakeFiles/mukei_qmllint 
+cd /home/runner/work/Mukei/Mukei/qml && /home/runner/work/Mukei/Qt/6.5.3/gcc_64/bin/qmllint --bare -I /tmp/mukei-qmllint-current -I /home/runner/work/Mukei/Qt/6.5.3/gcc_64/./qml --resource /tmp/mukei-qmllint-current/.rcc/qmake_com_mukei_app.qrc --resource /tmp/mukei-qmllint-current/.rcc/mukei_raw_qml_0.qrc /home/runner/work/Mukei/Mukei/qml/MainWindow.qml /home/runner/work/Mukei/Mukei/qml/events/EventDispatcher.qml /home/runner/work/Mukei/Mukei/qml/architecture/AppCoordinator.qml /home/runner/work/Mukei/Mukei/qml/architecture/AppStateHub.qml /home/runner/work/Mukei/Mukei/qml/architecture/IntentDispatcher.qml /home/runner/work/Mukei/Mukei/qml/architecture/PresentationPolicy.qml /home/runner/work/Mukei/Mukei/qml/architecture/SnapshotController.qml /home/runner/work/Mukei/Mukei/qml/stores/ContractStore.qml /home/runner/work/Mukei/Mukei/qml/stores/LifecycleStore.qml /home/runner/work/Mukei/Mukei/qml/stores/CapabilityStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ConversationStore.qml /home/runner/work/Mukei/Mukei/qml/stores/NavigationStore.qml /home/runner/work/Mukei/Mukei/qml/stores/UiSessionStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ChatStore.qml /home/runner/work/Mukei/Mukei/qml/stores/RecoveryStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ModelStore.qml /home/runner/work/Mukei/Mukei/qml/stores/DownloadStore.qml /home/runner/work/Mukei/Mukei/qml/stores/DocumentStore.qml /home/runner/work/Mukei/Mukei/qml/stores/StorageStore.qml /home/runner/work/Mukei/Mukei/qml/stores/SettingsStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ResponsiveStore.qml /home/runner/work/Mukei/Mukei/qml/stores/OperationStore.qml /home/runner/work/Mukei/Mukei/qml/stores/ErrorStore.qml /home/runner/work/Mukei/Mukei/qml/stores/DiagnosticsStore.qml /home/runner/work/Mukei/Mukei/qml/stores/AccessibilityStore.qml /home/runner/work/Mukei/Mukei/qml/shell/AppShell.qml /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml /home/runner/work/Mukei/Mukei/qml/shell/RouterHost.qml /home/runner/work/Mukei/Mukei/qml/shell/BannerHost.qml /home/runner/work/Mukei/Mukei/qml/shell/SnackbarHost.qml /home/runner/work/Mukei/Mukei/qml/shell/OperationOverlayHost.qml /home/runner/work/Mukei/Mukei/qml/shell/SheetHost.qml /home/runner/work/Mukei/Mukei/qml/shell/DialogHost.qml /home/runner/work/Mukei/Mukei/qml/theme/Theme.qml /home/runner/work/Mukei/Mukei/qml/theme/Type.qml /home/runner/work/Mukei/Mukei/qml/theme/Spacing.qml /home/runner/work/Mukei/Mukei/qml/theme/Motion.qml /home/runner/work/Mukei/Mukei/qml/components/AccessibilityAnnouncer.qml /home/runner/work/Mukei/Mukei/qml/components/AIMessageBubble.qml /home/runner/work/Mukei/Mukei/qml/components/BranchSwitcherSheet.qml /home/runner/work/Mukei/Mukei/qml/components/ChatComposer.qml /home/runner/work/Mukei/Mukei/qml/components/ChatTimelineEvent.qml /home/runner/work/Mukei/Mukei/qml/components/CodeBlockComponent.qml /home/runner/work/Mukei/Mukei/qml/components/ConfirmationDialog.qml /home/runner/work/Mukei/Mukei/qml/components/ConversationList.qml /home/runner/work/Mukei/Mukei/qml/components/CopyButton.qml /home/runner/work/Mukei/Mukei/qml/components/DestructiveButton.qml /home/runner/work/Mukei/Mukei/qml/components/DestructiveConfirmDialog.qml /home/runner/work/Mukei/Mukei/qml/components/FontLoader.qml /home/runner/work/Mukei/Mukei/qml/components/FullScreenModal.qml /home/runner/work/Mukei/Mukei/qml/components/GhostButton.qml /home/runner/work/Mukei/Mukei/qml/components/HapticFeedback.qml /home/runner/work/Mukei/Mukei/qml/components/IconButton.qml /home/runner/work/Mukei/Mukei/qml/components/LeftDrawer.qml /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml /home/runner/work/Mukei/Mukei/qml/components/MukeiIcon.qml /home/runner/work/Mukei/Mukei/qml/components/ModalSheet.qml /home/runner/work/Mukei/Mukei/qml/components/NetworkBanner.qml /home/runner/work/Mukei/Mukei/qml/components/PrimaryButton.qml /home/runner/work/Mukei/Mukei/qml/components/ProgressBar.qml /home/runner/work/Mukei/Mukei/qml/components/PromptCard.qml /home/runner/work/Mukei/Mukei/qml/components/RAGChunkCard.qml /home/runner/work/Mukei/Mukei/qml/components/SearchField.qml /home/runner/work/Mukei/Mukei/qml/components/SecondaryButton.qml /home/runner/work/Mukei/Mukei/qml/components/SettingsTextField.qml /home/runner/work/Mukei/Mukei/qml/components/SkeletonLoader.qml /home/runner/work/Mukei/Mukei/qml/components/Spinner.qml /home/runner/work/Mukei/Mukei/qml/components/StatusPill.qml /home/runner/work/Mukei/Mukei/qml/components/StoragePressureCard.qml /home/runner/work/Mukei/Mukei/qml/components/StreamingCaret.qml /home/runner/work/Mukei/Mukei/qml/components/ThinkingAccordion.qml /home/runner/work/Mukei/Mukei/qml/components/ToastNotification.qml /home/runner/work/Mukei/Mukei/qml/components/ToolResultCard.qml /home/runner/work/Mukei/Mukei/qml/components/UserMessageBubble.qml /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/CompatibilityScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/EmptyChatScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/RagRebuildPromptScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/RecoveryScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/SafeModeScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/StartupScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/ToolResultExpandedScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/VerificationScreen.qml /home/runner/work/Mukei/Mukei/qml/screens/WelcomeScreen.qml
+Info: /home/runner/work/Mukei/Mukei/qml/MainWindow.qml:3:1: Unused import [unused-imports]
+import QtQuick.Layouts
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/MainWindow.qml:17:20: Member "background" not found on type "QObject" [missing-property]
+    color: Theme.p.background
+                   ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/MainWindow.qml:25:45: Member "layoutDirection" not found on type "QQmlApplication" [missing-property]
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+                                            ^^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/MainWindow.qml:39:34: Unqualified access [unqualified]
+        AppCoordinator.configure(mukeiAgent, mukeiBridge, mukeiRuntime)
+                                 ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/MainWindow.qml:54:69: Member "state" not found on type "QQmlApplication" [missing-property]
+            AppCoordinator.onApplicationStateChanged(Qt.application.state)
+                                                                    ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/events/EventDispatcher.qml:8:67: Unqualified access [unqualified]
+    property var agentSource: typeof mukeiAgent !== "undefined" ? mukeiAgent : null
+                                                                  ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/events/EventDispatcher.qml:9:69: Unqualified access [unqualified]
+    property var bridgeSource: typeof mukeiBridge !== "undefined" ? mukeiBridge : null
+                                                                    ^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/stores/ChatStore.qml:13:30: Unqualified access [unqualified]
+                           ? mukeiTimelineModel : fallbackTimelineModel
+                             ^^^^^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/stores/RecoveryStore.qml:91:5: Cannot assign to non-existent default property [missing-property]
+    Connections {
+    ^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/stores/DownloadStore.qml:122:5: Cannot assign to non-existent default property [missing-property]
+    Connections {
+    ^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/stores/DocumentStore.qml:177:5: Cannot assign to non-existent default property [missing-property]
+    Connections {
+    ^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/stores/StorageStore.qml:22:5: Cannot assign to non-existent default property [missing-property]
+    Timer { id: refreshTimer; interval: 350; repeat: false; onTriggered: root.hydrate() }
+    ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/stores/SettingsStore.qml:111:5: Cannot assign to non-existent default property [missing-property]
+    Connections {
+    ^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/stores/AccessibilityStore.qml:19:24: Unqualified access [unqualified]
+                    && mukeiAccessibility !== null
+                       ^^^^^^^^^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:5:1: Unused import [unused-imports]
+import "../components"
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:13:20: Member "surface" not found on type "QObject" [missing-property]
+    color: Theme.p.surface
+                   ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:15:27: Member "divider" not found on type "QObject" [missing-property]
+    border.color: Theme.p.divider
+                          ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:26:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:42:50: Unqualified access [unqualified]
+                text: ResponsiveStore.expanded ? modelData.label : ""
+                                                 ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:48:59: Unqualified access [unqualified]
+                checked: NavigationStore.currentRoute === modelData.route
+                                                          ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:51:88: Unqualified access [unqualified]
+                onClicked: IntentDispatcher.dispatch({ type: "navigation.open", route: modelData.route })
+                                                                                       ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:43:30: Unqualified access [unqualified]
+                icon.source: modelData.icon
+                             ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:47:34: Unqualified access [unqualified]
+                Accessible.name: modelData.label
+                                 ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:54:35: Member "checked" not found on type "QQuickItem" [missing-property]
+                    color: parent.checked || parent.hovered ? Theme.p.surfaceFaint : "transparent"
+                                  ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:55:42: Member "visualFocus" not found on type "QQuickItem" [missing-property]
+                    border.width: parent.visualFocus ? 1 : 0
+                                         ^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:56:43: Member "accent" not found on type "QObject" [missing-property]
+                    border.color: Theme.p.accent
+                                          ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:61:33: Unqualified access [unqualified]
+                        source: modelData.icon
+                                ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:62:37: Cannot assign binding of type QSizeF to QSize [incompatible-type]
+                        sourceSize: Qt.size(22, 22)
+                                    ^^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:68:31: Unqualified access [unqualified]
+                        text: modelData.label
+                              ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/AdaptiveNavigation.qml:69:40: Member "inkPrimary" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkPrimary
+                                       ^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/shell/RouterHost.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/shell/BannerHost.qml:2:1: Unused import [unused-imports]
+import QtQuick.Layouts
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/SnackbarHost.qml:19:24: Member "surface" not found on type "QObject" [missing-property]
+        color: Theme.p.surface
+                       ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/SnackbarHost.qml:21:31: Member "divider" not found on type "QObject" [missing-property]
+        border.color: Theme.p.divider
+                              ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/SnackbarHost.qml:33:32: Member "inkPrimary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkPrimary
+                               ^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/shell/OperationOverlayHost.qml:2:1: Unused import [unused-imports]
+import QtQuick.Layouts
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/OperationOverlayHost.qml:14:20: Member "surface" not found on type "QObject" [missing-property]
+    color: Theme.p.surface
+                   ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/OperationOverlayHost.qml:16:27: Member "divider" not found on type "QObject" [missing-property]
+    border.color: Theme.p.divider
+                          ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/shell/OperationOverlayHost.qml:24:24: Member "inkSecondary" not found on type "QObject" [missing-property]
+        color: Theme.p.inkSecondary
+                       ^^^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/theme/Theme.qml:4:1: Unused import [unused-imports]
+import "../components"
+^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/AIMessageBubble.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/AIMessageBubble.qml:28:46: Member "surfaceFaint" not found on type "QObject" [missing-property]
+            color: root.readerWash ? Theme.p.surfaceFaint : "transparent"
+                                             ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/AIMessageBubble.qml:51:32: Member "inkFaint" not found on type "QObject" [missing-property]
+                color: Theme.p.inkFaint
+                               ^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/BranchSwitcherSheet.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/BranchSwitcherSheet.qml:14:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/BranchSwitcherSheet.qml:23:30: Unqualified access [unqualified]
+                    visible: modelData.active === true
+                             ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/BranchSwitcherSheet.qml:28:27: Unqualified access [unqualified]
+                    text: modelData.title || qsTr("Branch")
+                          ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/BranchSwitcherSheet.qml:29:32: Unqualified access [unqualified]
+                    onClicked: root.branchSelected(modelData.id || "")
+                               ^^^^
+Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
+pragma ComponentBehavior: Bound
+import QtQuick
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ChatComposer.qml:25:24: Member "surface" not found on type "QObject" [missing-property]
+        color: Theme.p.surface
+                       ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ChatComposer.qml:27:54: Member "accent" not found on type "QObject" [missing-property]
+        border.color: textArea.activeFocus ? Theme.p.accent : "transparent"
+                                                     ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ChatComposer.qml:48:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ChatComposer.qml:50:43: Member "inkFaint" not found on type "QObject" [missing-property]
+            placeholderTextColor: Theme.p.inkFaint
+                                          ^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/ChatTimelineEvent.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/CodeBlockComponent.qml:3:1: Unused import [unused-imports]
+import QtQuick.Layouts
+^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/CodeBlockComponent.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/CodeBlockComponent.qml:20:24: Member "surfaceVariant" not found on type "QObject" [missing-property]
+        color: Theme.p.surfaceVariant
+                       ^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/CodeBlockComponent.qml:28:24: Member "inkPrimary" not found on type "QObject" [missing-property]
+        color: Theme.p.inkPrimary
+                       ^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/ConfirmationDialog.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ConfirmationDialog.qml:15:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ConfirmationDialog.qml:20:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ConversationList.qml:23:20: Unqualified access [unqualified]
+        onClicked: root.conversationSelected(model.conversationId || "", model.branchId || "")
+                   ^^^^
+Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
+pragma ComponentBehavior: Bound
+import QtQuick
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ConversationList.qml:31:23: Unqualified access [unqualified]
+                text: model.title || qsTr("Untitled conversation")
+                      ^^^^^
+Info: model is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                text: <id>.model.title || qsTr("Untitled conversation")
+                      ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ConversationList.qml:32:32: Member "inkPrimary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkPrimary
+                               ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ConversationList.qml:39:23: Unqualified access [unqualified]
+                text: model.preview || qsTr("Private conversation")
+                      ^^^^^
+Info: model is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                text: <id>.model.preview || qsTr("Private conversation")
+                      ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ConversationList.qml:40:32: Member "inkFaint" not found on type "QObject" [missing-property]
+                color: Theme.p.inkFaint
+                               ^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ConversationList.qml:51:24: Member "inkFaint" not found on type "QObject" [missing-property]
+        color: Theme.p.inkFaint
+                       ^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/CopyButton.qml:3:1: Unused import [unused-imports]
+import QtQuick.Layouts
+^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/CopyButton.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/CopyButton.qml:19:9: Unqualified access [unqualified]
+        mukeiClipboard.setText(root.textToCopy);
+        ^^^^^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/DestructiveConfirmDialog.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/DestructiveConfirmDialog.qml:14:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/DestructiveConfirmDialog.qml:19:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/FontLoader.qml:3:1: Unused import [unused-imports]
+import QtQuick.Layouts
+^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/FontLoader.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/FontLoader.qml:4:1: Unused import [unused-imports]
+import "../theme"
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/FullScreenModal.qml:11:24: Member "background" not found on type "QObject" [missing-property]
+        color: Theme.p.background
+                       ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/FullScreenModal.qml:28:32: Member "inkPrimary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkPrimary
+                               ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/GhostButton.qml:15:67: Member "surfaceFaint" not found on type "QObject" [missing-property]
+        color: root.down || root.hovered || root.active ? Theme.p.surfaceFaint : "transparent"
+                                                                  ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/GhostButton.qml:17:31: Member "accent" not found on type "QObject" [missing-property]
+        border.color: Theme.p.accent
+                              ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/GhostButton.qml:22:39: Member "accent" not found on type "QObject" [missing-property]
+        color: root.enabled ? Theme.p.accent : Theme.p.inkFaint
+                                      ^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/HapticFeedback.qml:3:1: Unused import [unused-imports]
+import QtQuick.Layouts
+^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/HapticFeedback.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/HapticFeedback.qml:4:1: Unused import [unused-imports]
+import "../theme"
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/HapticFeedback.qml:26:52: Unqualified access [unqualified]
+        if (typeof mukeiHaptics !== "undefined" && mukeiHaptics && typeof mukeiHaptics.pulse === "function") {
+                                                   ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/IconButton.qml:19:67: Member "surfaceFaint" not found on type "QObject" [missing-property]
+        color: root.down || root.hovered || root.active ? Theme.p.surfaceFaint : "transparent"
+                                                                  ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/IconButton.qml:21:45: Member "accent" not found on type "QObject" [missing-property]
+        border.color: root.active ? Theme.p.accent : Theme.p.divider
+                                            ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/IconButton.qml:33:25: Cannot assign binding of type QSizeF to QSize [incompatible-type]
+            sourceSize: Qt.size(Spacing.lg, Spacing.lg)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/IconButton.qml:41:54: Member "accent" not found on type "QObject" [missing-property]
+            colorizationColor: root.active ? Theme.p.accent : Theme.p.inkPrimary
+                                                     ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/LeftDrawer.qml:13:24: Member "surface" not found on type "QObject" [missing-property]
+        color: Theme.p.surface
+                       ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/LeftDrawer.qml:15:31: Member "divider" not found on type "QObject" [missing-property]
+        border.color: Theme.p.divider
+                              ^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml:3:1: Unused import [unused-imports]
+import QtQuick.Layouts
+^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml:17:20: Unqualified access [unqualified]
+            width: root.width
+                   ^^^^
+Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
+pragma ComponentBehavior: Bound
+import QtQuick
+Warning: /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml:18:30: Unqualified access [unqualified]
+            sourceComponent: modelData.type === "CodeBlock" ? codeBlockComponent : modelData.type === "HorizontalRule" ? ruleComponent : textComponent
+                             ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml:19:32: Unqualified access [unqualified]
+            property var node: modelData
+                               ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml:25:20: Unqualified access [unqualified]
+            width: root.width
+                   ^^^^
+Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
+pragma ComponentBehavior: Bound
+import QtQuick
+Warning: /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml:26:19: Unqualified access [unqualified]
+            text: node.text || ""
+                  ^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml:29:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml:36:20: Unqualified access [unqualified]
+            width: root.width
+                   ^^^^
+Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
+pragma ComponentBehavior: Bound
+import QtQuick
+Warning: /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml:37:19: Unqualified access [unqualified]
+            code: node.text || ""
+                  ^^^^
+Info: Did you mean "code"?
+            code: code.text || ""
+                  ^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml:38:23: Unqualified access [unqualified]
+            language: node.lang || ""
+                      ^^^^
+Info: Did you mean "code"?
+            language: code.lang || ""
+                      ^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml:44:20: Unqualified access [unqualified]
+            width: root.width
+                   ^^^^
+Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
+pragma ComponentBehavior: Bound
+import QtQuick
+Warning: /home/runner/work/Mukei/Mukei/qml/components/MarkdownRenderer.qml:46:28: Member "divider" not found on type "QObject" [missing-property]
+            color: Theme.p.divider
+                           ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/MukeiIcon.qml:9:34: Member "inkPrimary" not found on type "QObject" [missing-property]
+    property color tone: Theme.p.inkPrimary
+                                 ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ModalSheet.qml:15:24: Member "surface" not found on type "QObject" [missing-property]
+        color: Theme.p.surface
+                       ^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/NetworkBanner.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/PrimaryButton.qml:16:39: Member "accent" not found on type "QObject" [missing-property]
+        color: root.enabled ? Theme.p.accent : Theme.p.surfaceVariant
+                                      ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/PrimaryButton.qml:18:50: Member "inkPrimary" not found on type "QObject" [missing-property]
+        border.color: root.visualFocus ? Theme.p.inkPrimary : Theme.p.divider
+                                                 ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/PrimaryButton.qml:26:39: Member "background" not found on type "QObject" [missing-property]
+        color: root.enabled ? Theme.p.background : Theme.p.inkFaint
+                                      ^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/ProgressBar.qml:3:1: Unused import [unused-imports]
+import QtQuick.Layouts
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ProgressBar.qml:14:24: Member "surfaceVariant" not found on type "QObject" [missing-property]
+        color: Theme.p.surfaceVariant
+                       ^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ProgressBar.qml:21:24: Member "accent" not found on type "QObject" [missing-property]
+        color: Theme.p.accent
+                       ^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/PromptCard.qml:3:1: Unused import [unused-imports]
+import QtQuick.Layouts
+^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/PromptCard.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/PromptCard.qml:16:20: Member "surface" not found on type "QObject" [missing-property]
+    color: Theme.p.surface
+                   ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/PromptCard.qml:23:24: Member "inkPrimary" not found on type "QObject" [missing-property]
+        color: Theme.p.inkPrimary
+                       ^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/RAGChunkCard.qml:3:1: Unused import [unused-imports]
+import QtQuick.Layouts
+^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/RAGChunkCard.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/RAGChunkCard.qml:14:24: Member "accent" not found on type "QObject" [missing-property]
+        color: Theme.p.accent
+                       ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/SearchField.qml:26:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/SearchField.qml:37:24: Member "surface" not found on type "QObject" [missing-property]
+        color: Theme.p.surface
+                       ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/SearchField.qml:40:31: Member "divider" not found on type "QObject" [missing-property]
+        border.color: Theme.p.divider
+                              ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/SecondaryButton.qml:14:36: Member "surfaceFaint" not found on type "QObject" [missing-property]
+        color: root.down ? Theme.p.surfaceFaint : "transparent"
+                                   ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/SecondaryButton.qml:16:31: Member "accent" not found on type "QObject" [missing-property]
+        border.color: Theme.p.accent
+                              ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/SecondaryButton.qml:22:39: Member "accent" not found on type "QObject" [missing-property]
+        color: root.enabled ? Theme.p.accent : Theme.p.inkFaint
+                                      ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/SettingsTextField.qml:23:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/SettingsTextField.qml:31:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/SettingsTextField.qml:32:43: Member "inkFaint" not found on type "QObject" [missing-property]
+            placeholderTextColor: Theme.p.inkFaint
+                                          ^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/SettingsTextField.qml:35:32: Member "surface" not found on type "QObject" [missing-property]
+                color: Theme.p.surface
+                               ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/SettingsTextField.qml:37:81: Member "divider" not found on type "QObject" [missing-property]
+                border.color: root.errorText.length > 0 ? Theme.error : Theme.p.divider
+                                                                                ^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/SkeletonLoader.qml:3:1: Unused import [unused-imports]
+import QtQuick.Layouts
+^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/SkeletonLoader.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/SkeletonLoader.qml:16:20: Member "surfaceVariant" not found on type "QObject" [missing-property]
+    color: Theme.p.surfaceVariant
+                   ^^^^^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/Spinner.qml:3:1: Unused import [unused-imports]
+import QtQuick.Layouts
+^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/Spinner.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/Spinner.qml:18:31: Member "accent" not found on type "QObject" [missing-property]
+        border.color: Theme.p.accent
+                              ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/Spinner.qml:22:18: Unqualified access [unqualified]
+        running: visible && !Theme.reduceMotion
+                 ^^^^^^^
+Info: visible is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+        running: root.visible && !Theme.reduceMotion
+                 ^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/StatusPill.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/StatusPill.qml:15:131: Member "surface" not found on type "QObject" [missing-property]
+    color: subtype === "Failure" ? Theme.error : subtype === "Success" || subtype === "Network-Offline" ? Theme.success : Theme.p.surface
+                                                                                                                                  ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/StatusPill.qml:17:27: Member "accent" not found on type "QObject" [missing-property]
+    border.color: Theme.p.accent
+                          ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/StatusPill.qml:36:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/StoragePressureCard.qml:11:45: Member "surface" not found on type "QObject" [missing-property]
+                                  : Theme.p.surface
+                                            ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/StoragePressureCard.qml:13:106: Member "divider" not found on type "QObject" [missing-property]
+    border.color: StorageStore.warning ? (StorageStore.critical ? Theme.error : Theme.warning) : Theme.p.divider
+                                                                                                         ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/StoragePressureCard.qml:27:32: Member "inkPrimary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkPrimary
+                               ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/StoragePressureCard.qml:33:32: Member "inkSecondary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkSecondary
+                               ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/StoragePressureCard.qml:47:66: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: StorageStore.critical ? Theme.error : Theme.p.inkSecondary
+                                                                 ^^^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/StreamingCaret.qml:3:1: Unused import [unused-imports]
+import QtQuick.Layouts
+^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/StreamingCaret.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/StreamingCaret.qml:10:20: Member "accent" not found on type "QObject" [missing-property]
+    color: Theme.p.accent
+                   ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ThinkingAccordion.qml:15:24: Member "surfaceFaint" not found on type "QObject" [missing-property]
+        color: Theme.p.surfaceFaint
+                       ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ThinkingAccordion.qml:18:31: Member "divider" not found on type "QObject" [missing-property]
+        border.color: Theme.p.divider
+                              ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ThinkingAccordion.qml:31:32: Member "inkSecondary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkSecondary
+                               ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ThinkingAccordion.qml:38:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/ToastNotification.qml:3:1: Unused import [unused-imports]
+import QtQuick.Layouts
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ToastNotification.qml:19:24: Member "surface" not found on type "QObject" [missing-property]
+        color: Theme.p.surface
+                       ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ToastNotification.qml:22:31: Member "divider" not found on type "QObject" [missing-property]
+        border.color: Theme.p.divider
+                              ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ToastNotification.qml:26:24: Member "inkPrimary" not found on type "QObject" [missing-property]
+        color: Theme.p.inkPrimary
+                       ^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/ToolResultCard.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ToolResultCard.qml:14:20: Member "surface" not found on type "QObject" [missing-property]
+    color: Theme.p.surface
+                   ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ToolResultCard.qml:16:27: Member "divider" not found on type "QObject" [missing-property]
+    border.color: Theme.p.divider
+                          ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ToolResultCard.qml:32:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/ToolResultCard.qml:37:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/components/UserMessageBubble.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/UserMessageBubble.qml:26:28: Member "surfaceVariant" not found on type "QObject" [missing-property]
+            color: Theme.p.surfaceVariant
+                           ^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/UserMessageBubble.qml:48:32: Member "inkPrimary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkPrimary
+                               ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/components/UserMessageBubble.qml:54:28: Member "inkFaint" not found on type "QObject" [missing-property]
+            color: Theme.p.inkFaint
+                           ^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:158:27: DelegateChooser was not found. Did you add all import paths? [import]
+                delegate: DelegateChooser {
+                          ^^^^^^^^^^^^^^^
+Info: Did you mean "DelegateModel"?
+                delegate: DelegateModel {
+                          ^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:160:21: DelegateChoice was not found. Did you add all import paths? [import]
+                    DelegateChoice {
+                    ^^^^^^^^^^^^^^
+Info: Did you mean "DelegateModel"?
+                    DelegateModel {
+                    ^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:168:21: DelegateChoice was not found. Did you add all import paths? [import]
+                    DelegateChoice {
+                    ^^^^^^^^^^^^^^
+Info: Did you mean "DelegateModel"?
+                    DelegateModel {
+                    ^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:176:21: DelegateChoice was not found. Did you add all import paths? [import]
+                    DelegateChoice {
+                    ^^^^^^^^^^^^^^
+Info: Did you mean "DelegateModel"?
+                    DelegateModel {
+                    ^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:158:27: DelegateChooser was not found. Did you add all import paths? [import]
+                delegate: DelegateChooser {
+                          ^^^^^^^^^^^^^^^
+Info: Did you mean "DelegateModel"?
+                delegate: DelegateModel {
+                          ^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:158:27: 'DelegateChooser' is used but it is not resolved [unresolved-type]
+                delegate: DelegateChooser {
+                          ^^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:160:21: 'DelegateChoice' is used but it is not resolved [unresolved-type]
+                    DelegateChoice {
+                    ^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:160:21: 'DelegateChoice' is used but it is not resolved [unresolved-type]
+                    DelegateChoice {
+                    ^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:168:21: 'DelegateChoice' is used but it is not resolved [unresolved-type]
+                    DelegateChoice {
+                    ^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:168:21: 'DelegateChoice' is used but it is not resolved [unresolved-type]
+                    DelegateChoice {
+                    ^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:176:21: 'DelegateChoice' is used but it is not resolved [unresolved-type]
+                    DelegateChoice {
+                    ^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:176:21: 'DelegateChoice' is used but it is not resolved [unresolved-type]
+                    DelegateChoice {
+                    ^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:160:21: Cannot assign to non-existent default property [missing-property]
+                    DelegateChoice {
+                    ^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:159:21: Binding assigned to "role", but no property "role" exists in the current element. [missing-property]
+                    role: "type"
+                    ^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:177:25: Binding assigned to "roleValue", but no property "roleValue" exists in the current element. [missing-property]
+                        roleValue: "timeline_event"
+                        ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:169:25: Binding assigned to "roleValue", but no property "roleValue" exists in the current element. [missing-property]
+                        roleValue: "assistant_message"
+                        ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:161:25: Binding assigned to "roleValue", but no property "roleValue" exists in the current element. [missing-property]
+                        roleValue: "user_message"
+                        ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:160:21: Type DelegateChoice is used but it is not resolved [unresolved-type]
+                    DelegateChoice {
+                    ^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:168:21: Type DelegateChoice is used but it is not resolved [unresolved-type]
+                    DelegateChoice {
+                    ^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:176:21: Type DelegateChoice is used but it is not resolved [unresolved-type]
+                    DelegateChoice {
+                    ^^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:158:27: Type DelegateChooser is used but it is not resolved [unresolved-type]
+                delegate: DelegateChooser {
+                          ^^^^^^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:4:1: Unused import [unused-imports]
+import QtQml.Models
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:17:44: Member "background" not found on type "QObject" [missing-property]
+    background: Rectangle { color: Theme.p.background }
+                                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:36:28: Member "surface" not found on type "QObject" [missing-property]
+            color: Theme.p.surface
+                           ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:38:35: Member "divider" not found on type "QObject" [missing-property]
+            border.color: Theme.p.divider
+                                  ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:50:40: Member "inkPrimary" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkPrimary
+                                       ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:98:40: Member "inkPrimary" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkPrimary
+                                       ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:105:40: Member "inkFaint" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkFaint
+                                       ^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:131:28: Unqualified access [unqualified]
+                    width: timelineView.width
+                           ^^^^^^^^^^^^
+Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
+pragma ComponentBehavior: Bound
+import QtQuick
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:140:29: Unqualified access [unqualified]
+                            root.contentHeightBeforePrepend = timelineView.contentHeight
+                            ^^^^
+Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
+pragma ComponentBehavior: Bound
+import QtQuick
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:164:35: Unqualified access [unqualified]
+                            text: model.text
+                                  ^^^^^
+Info: model is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            text: timelineView.model.text
+                                  ^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:165:40: Unqualified access [unqualified]
+                            timestamp: model.timestamp
+                                       ^^^^^
+Info: model is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            timestamp: timelineView.model.timestamp
+                                       ^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:172:35: Unqualified access [unqualified]
+                            text: model.text
+                                  ^^^^^
+Info: model is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            text: timelineView.model.text
+                                  ^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:173:40: Unqualified access [unqualified]
+                            timestamp: model.timestamp
+                                       ^^^^^
+Info: model is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            timestamp: timelineView.model.timestamp
+                                       ^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:180:36: Unqualified access [unqualified]
+                            label: model.text
+                                   ^^^^^
+Info: model is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            label: timelineView.model.text
+                                   ^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:181:36: Unqualified access [unqualified]
+                            phase: model.phase
+                                   ^^^^^
+Info: model is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            phase: timelineView.model.phase
+                                   ^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:182:35: Unqualified access [unqualified]
+                            kind: model.kind
+                                  ^^^^^
+Info: model is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            kind: timelineView.model.kind
+                                  ^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:183:41: Unqualified access [unqualified]
+                            iconSource: model.kind === "tool" ? "qrc:/icons/search.svg" : ""
+                                        ^^^^^
+Info: model is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            iconSource: timelineView.model.kind === "tool" ? "qrc:/icons/search.svg" : ""
+                                        ^^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ChatScreen.qml:192:36: Member "inkFaint" not found on type "QObject" [missing-property]
+                    color: Theme.p.inkFaint
+                                   ^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/CompatibilityScreen.qml:11:44: Member "background" not found on type "QObject" [missing-property]
+    background: Rectangle { color: Theme.p.background }
+                                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/CompatibilityScreen.qml:29:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/CompatibilityScreen.qml:37:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/CompatibilityScreen.qml:46:28: Member "surface" not found on type "QObject" [missing-property]
+            color: Theme.p.surface
+                           ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/CompatibilityScreen.qml:48:35: Member "divider" not found on type "QObject" [missing-property]
+            border.color: Theme.p.divider
+                                  ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/CompatibilityScreen.qml:58:32: Member "inkSecondary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkSecondary
+                               ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml:11:44: Member "background" not found on type "QObject" [missing-property]
+    background: Rectangle { color: Theme.p.background }
+                                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml:31:32: Member "inkPrimary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkPrimary
+                               ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml:62:32: Member "surface" not found on type "QObject" [missing-property]
+                color: Theme.p.surface
+                               ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml:64:74: Member "divider" not found on type "QObject" [missing-property]
+                border.color: state === "failed" ? Theme.error : Theme.p.divider
+                                                                         ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml:75:35: Unqualified access [unqualified]
+                            text: modelId || qsTr("Model download")
+                                  ^^^^^^^
+Info: modelId is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            text: <id>.modelId || qsTr("Model download")
+                                  ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml:76:44: Member "inkPrimary" not found on type "QObject" [missing-property]
+                            color: Theme.p.inkPrimary
+                                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml:88:32: Unqualified access [unqualified]
+                        value: progress
+                               ^^^^^^^^
+Info: progress is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        value: <id>.progress
+                               ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml:91:31: Unqualified access [unqualified]
+                        text: expectedBytes > 0
+                              ^^^^^^^^^^^^^
+Info: expectedBytes is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        text: <id>.expectedBytes > 0
+                              ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml:94:40: Member "inkSecondary" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkSecondary
+                                       ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml:98:34: Unqualified access [unqualified]
+                        visible: lastErrorCode.length > 0
+                                 ^^^^^^^^^^^^^
+Info: lastErrorCode is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        visible: <id>.lastErrorCode.length > 0
+                                 ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml:99:31: Unqualified access [unqualified]
+                        text: lastErrorCode
+                              ^^^^^^^^^^^^^
+Info: lastErrorCode is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        text: <id>.lastErrorCode
+                              ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml:107:96: Unqualified access [unqualified]
+                        onClicked: IntentDispatcher.dispatch({ type: "download.cancel", jobId: jobId })
+                                                                                               ^^^^^
+Info: jobId is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        onClicked: IntentDispatcher.dispatch({ type: "download.cancel", jobId: <id>.jobId })
+                                                                                               ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DownloadsScreen.qml:119:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:14:44: Member "background" not found on type "QObject" [missing-property]
+    background: Rectangle { color: Theme.p.background }
+                                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:76:36: Member "inkPrimary" not found on type "QObject" [missing-property]
+                    color: Theme.p.inkPrimary
+                                   ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:82:36: Member "inkSecondary" not found on type "QObject" [missing-property]
+                    color: Theme.p.inkSecondary
+                                   ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:110:32: Member "inkPrimary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkPrimary
+                               ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:141:32: Member "surface" not found on type "QObject" [missing-property]
+                color: Theme.p.surface
+                               ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:143:72: Member "divider" not found on type "QObject" [missing-property]
+                border.color: cleanupPending ? Theme.warning : Theme.p.divider
+                                                                       ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:149:63: Unqualified access [unqualified]
+                    MukeiIcon { name: "file"; size: 24; tone: revoked ? Theme.p.inkFaint : Theme.p.inkPrimary }
+                                                              ^^^^^^^
+Info: revoked is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                    MukeiIcon { name: "file"; size: 24; tone: <id>.revoked ? Theme.p.inkFaint : Theme.p.inkPrimary }
+                                                              ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:154:35: Unqualified access [unqualified]
+                            text: label
+                                  ^^^^^
+Info: label is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            text: <id>.label
+                                  ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:155:44: Member "inkPrimary" not found on type "QObject" [missing-property]
+                            color: Theme.p.inkPrimary
+                                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:161:35: Unqualified access [unqualified]
+                            text: chunkCount > 0
+                                  ^^^^^^^^^^
+Info: chunkCount is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            text: <id>.chunkCount > 0
+                                  ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:174:44: Member "inkSecondary" not found on type "QObject" [missing-property]
+                            color: Theme.p.inkSecondary
+                                           ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:180:97: Unqualified access [unqualified]
+                            visible: ["reading", "chunking", "embedding", "committing"].indexOf(ingestionState) >= 0
+                                                                                                ^^^^^^^^^^^^^^
+Info: ingestionState is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            visible: ["reading", "chunking", "embedding", "committing"].indexOf(<id>.ingestionState) >= 0
+                                                                                                ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:181:60: Unqualified access [unqualified]
+                            value: Math.max(0, Math.min(1, ingestionProgress / 100))
+                                                           ^^^^^^^^^^^^^^^^^
+Info: ingestionProgress is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            value: Math.max(0, Math.min(1, <id>.ingestionProgress / 100))
+                                                           ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:185:31: Unqualified access [unqualified]
+                        text: cleanupPending ? qsTr("Cleanup pending")
+                              ^^^^^^^^^^^^^^
+Info: cleanupPending is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        text: <id>.cleanupPending ? qsTr("Cleanup pending")
+                              ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:191:34: Unqualified access [unqualified]
+                        subtype: cleanupPending || ingestionState === "failed" ? "Warning"
+                                 ^^^^^^^^^^^^^^
+Info: cleanupPending is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        subtype: <id>.cleanupPending || ingestionState === "failed" ? "Warning"
+                                 ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:195:35: Unqualified access [unqualified]
+                        visible: !revoked && ingestionState === "failed" && ingestionRetryable
+                                  ^^^^^^^
+Info: revoked is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        visible: !<id>.revoked && ingestionState === "failed" && ingestionRetryable
+                                  ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:199:41: Unqualified access [unqualified]
+                            documentId: documentId
+                                        ^^^^^^^^^^
+Info: documentId is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            documentId: <id>.documentId
+                                        ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:203:35: Unqualified access [unqualified]
+                        visible: !revoked
+                                  ^^^^^^^
+Info: revoked is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        visible: !<id>.revoked
+                                  ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:204:35: Unqualified access [unqualified]
+                        enabled: !cleanupPending
+                                  ^^^^^^^^^^^^^^
+Info: cleanupPending is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        enabled: !<id>.cleanupPending
+                                  ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:207:29: Unqualified access [unqualified]
+                            root.pendingRevokeDocumentId = documentId
+                            ^^^^
+Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
+pragma ComponentBehavior: Bound
+import QtQuick
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DocumentsScreen.qml:220:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml:11:44: Member "background" not found on type "QObject" [missing-property]
+    background: Rectangle { color: Theme.p.background }
+                                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml:51:40: Member "inkPrimary" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkPrimary
+                                       ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml:57:40: Member "inkSecondary" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkSecondary
+                                       ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml:66:32: Member "inkSecondary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkSecondary
+                               ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml:77:36: Member "surface" not found on type "QObject" [missing-property]
+                    color: Theme.p.surface
+                                   ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml:79:43: Member "divider" not found on type "QObject" [missing-property]
+                    border.color: Theme.p.divider
+                                          ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml:86:35: Unqualified access [unqualified]
+                            text: modelData.label
+                                  ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml:87:44: Member "inkSecondary" not found on type "QObject" [missing-property]
+                            color: Theme.p.inkSecondary
+                                           ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml:92:35: Unqualified access [unqualified]
+                            text: modelData.value
+                                  ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml:93:44: Member "inkPrimary" not found on type "QObject" [missing-property]
+                            color: Theme.p.inkPrimary
+                                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml:105:32: Member "surfaceFaint" not found on type "QObject" [missing-property]
+                color: Theme.p.surfaceFaint
+                               ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml:107:39: Member "divider" not found on type "QObject" [missing-property]
+                border.color: Theme.p.divider
+                                      ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml:113:36: Member "inkSecondary" not found on type "QObject" [missing-property]
+                    color: Theme.p.inkSecondary
+                                   ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/DiagnosticsScreen.qml:147:32: Member "inkFaint" not found on type "QObject" [missing-property]
+                color: Theme.p.inkFaint
+                               ^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/EmptyChatScreen.qml:12:24: Member "background" not found on type "QObject" [missing-property]
+        color: Theme.p.background
+                       ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/EmptyChatScreen.qml:28:32: Member "inkPrimary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkPrimary
+                               ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/EmptyChatScreen.qml:41:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/EmptyChatScreen.qml:46:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/EmptyChatScreen.qml:56:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:13:44: Member "background" not found on type "QObject" [missing-property]
+    background: Rectangle { color: Theme.p.background }
+                                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:47:36: Member "inkPrimary" not found on type "QObject" [missing-property]
+                    color: Theme.p.inkPrimary
+                                   ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:55:36: Member "inkSecondary" not found on type "QObject" [missing-property]
+                    color: Theme.p.inkSecondary
+                                   ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:73:36: Member "accent" not found on type "QObject" [missing-property]
+            color: Qt.rgba(Theme.p.accent.r, Theme.p.accent.g, Theme.p.accent.b, 0.10)
+                                   ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:75:35: Member "accent" not found on type "QObject" [missing-property]
+            border.color: Theme.p.accent
+                                  ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:83:32: Member "inkPrimary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkPrimary
+                               ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:112:71: Member "surfaceFaint" not found on type "QObject" [missing-property]
+                color: ModelStore.activeModelId === modelId ? Theme.p.surfaceFaint : Theme.p.surface
+                                                                      ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:114:78: Member "accent" not found on type "QObject" [missing-property]
+                border.color: ModelStore.activeModelId === modelId ? Theme.p.accent : Theme.p.divider
+                                                                             ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:123:75: Member "accent" not found on type "QObject" [missing-property]
+                        MukeiIcon { name: "chip"; size: 24; tone: Theme.p.accent }
+                                                                          ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:129:39: Unqualified access [unqualified]
+                                text: displayName
+                                      ^^^^^^^^^^^
+Info: displayName is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                                text: <id>.displayName
+                                      ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:130:48: Member "inkPrimary" not found on type "QObject" [missing-property]
+                                color: Theme.p.inkPrimary
+                                               ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:137:44: Unqualified access [unqualified]
+                                      .arg(sizeLabel).arg(Math.ceil(minRamMiB / 1024)).arg(contextTokens)
+                                           ^^^^^^^^^
+Info: sizeLabel is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                                      .arg(<id>.sizeLabel).arg(Math.ceil(minRamMiB / 1024)).arg(contextTokens)
+                                           ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:138:48: Member "inkSecondary" not found on type "QObject" [missing-property]
+                                color: Theme.p.inkSecondary
+                                               ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:144:64: Unqualified access [unqualified]
+                            text: ModelStore.activeModelId === modelId ? qsTr("Selected")
+                                                               ^^^^^^^
+Info: modelId is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            text: ModelStore.activeModelId === <id>.modelId ? qsTr("Selected")
+                                                               ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:148:67: Unqualified access [unqualified]
+                            subtype: ModelStore.activeModelId === modelId || installed ? "Success"
+                                                                  ^^^^^^^
+Info: modelId is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            subtype: ModelStore.activeModelId === <id>.modelId || installed ? "Success"
+                                                                  ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:154:31: Unqualified access [unqualified]
+                        text: description
+                              ^^^^^^^^^^^
+Info: description is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        text: <id>.description
+                              ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:155:40: Member "inkSecondary" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkSecondary
+                                       ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:161:94: Unqualified access [unqualified]
+                        visible: ["queued", "starting", "downloading", "cancelling"].indexOf(downloadState) >= 0
+                                                                                             ^^^^^^^^^^^^^
+Info: downloadState is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        visible: ["queued", "starting", "downloading", "cancelling"].indexOf(<id>.downloadState) >= 0
+                                                                                             ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:162:32: Unqualified access [unqualified]
+                        value: progress
+                               ^^^^^^^^
+Info: progress is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        value: <id>.progress
+                               ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:167:38: Unqualified access [unqualified]
+                            visible: installed && ModelStore.activeModelId !== modelId
+                                     ^^^^^^^^^
+Info: installed is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            visible: <id>.installed && ModelStore.activeModelId !== modelId
+                                     ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:171:99: Unqualified access [unqualified]
+                            onClicked: IntentDispatcher.dispatch({ type: "model.select", modelId: modelId })
+                                                                                                  ^^^^^^^
+Info: modelId is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            onClicked: IntentDispatcher.dispatch({ type: "model.select", modelId: <id>.modelId })
+                                                                                                  ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:174:39: Unqualified access [unqualified]
+                            visible: !installed && ["queued", "starting", "downloading", "cancelling"].indexOf(downloadState) < 0
+                                      ^^^^^^^^^
+Info: installed is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            visible: !<id>.installed && ["queued", "starting", "downloading", "cancelling"].indexOf(downloadState) < 0
+                                      ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:177:101: Unqualified access [unqualified]
+                            onClicked: IntentDispatcher.dispatch({ type: "model.download", modelId: modelId })
+                                                                                                    ^^^^^^^
+Info: modelId is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            onClicked: IntentDispatcher.dispatch({ type: "model.download", modelId: <id>.modelId })
+                                                                                                    ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:180:84: Unqualified access [unqualified]
+                            visible: ["queued", "starting", "downloading"].indexOf(downloadState) >= 0
+                                                                                   ^^^^^^^^^^^^^
+Info: downloadState is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            visible: ["queued", "starting", "downloading"].indexOf(<id>.downloadState) >= 0
+                                                                                   ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:183:102: Unqualified access [unqualified]
+                            onClicked: IntentDispatcher.dispatch({ type: "download.cancel", modelId: modelId })
+                                                                                                     ^^^^^^^
+Info: modelId is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            onClicked: IntentDispatcher.dispatch({ type: "download.cancel", modelId: <id>.modelId })
+                                                                                                     ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:186:38: Unqualified access [unqualified]
+                            visible: installed
+                                     ^^^^^^^^^
+Info: installed is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                            visible: <id>.installed
+                                     ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelManagerScreen.qml:190:33: Unqualified access [unqualified]
+                                root.pendingDeleteModelId = modelId
+                                ^^^^
+Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
+pragma ComponentBehavior: Bound
+import QtQuick
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml:12:44: Member "background" not found on type "QObject" [missing-property]
+    background: Rectangle { color: Theme.p.background }
+                                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml:30:32: Member "inkPrimary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkPrimary
+                               ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml:49:32: Member "surface" not found on type "QObject" [missing-property]
+                color: Theme.p.surface
+                               ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml:51:39: Member "divider" not found on type "QObject" [missing-property]
+                border.color: Theme.p.divider
+                                      ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml:58:31: Unqualified access [unqualified]
+                        text: displayName
+                              ^^^^^^^^^^^
+Info: displayName is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        text: <id>.displayName
+                              ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml:59:40: Member "inkPrimary" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkPrimary
+                                       ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml:64:31: Unqualified access [unqualified]
+                        text: sizeLabel
+                              ^^^^^^^^^
+Info: sizeLabel is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        text: <id>.sizeLabel
+                              ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml:65:40: Member "inkSecondary" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkSecondary
+                                       ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml:70:31: Unqualified access [unqualified]
+                        text: description
+                              ^^^^^^^^^^^
+Info: description is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        text: <id>.description
+                              ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml:71:40: Member "inkSecondary" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkSecondary
+                                       ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml:76:31: Unqualified access [unqualified]
+                        text: installed ? qsTr("Installed") : qsTr("Download")
+                              ^^^^^^^^^
+Info: installed is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        text: <id>.installed ? qsTr("Installed") : qsTr("Download")
+                              ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml:77:35: Unqualified access [unqualified]
+                        enabled: !installed && CapabilityStore.canDownloadModel && !StorageStore.critical
+                                  ^^^^^^^^^
+Info: installed is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        enabled: !<id>.installed && CapabilityStore.canDownloadModel && !StorageStore.critical
+                                  ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ModelPickerScreen.qml:78:97: Unqualified access [unqualified]
+                        onClicked: IntentDispatcher.dispatch({ type: "model.download", modelId: modelId })
+                                                                                                ^^^^^^^
+Info: modelId is a member of a parent element.
+      You can qualify the access with its id to avoid this warning:
+
+                        onClicked: IntentDispatcher.dispatch({ type: "model.download", modelId: <id>.modelId })
+                                                                                                ^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/RagRebuildPromptScreen.qml:11:24: Member "background" not found on type "QObject" [missing-property]
+        color: Theme.p.background
+                       ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/RagRebuildPromptScreen.qml:27:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/RagRebuildPromptScreen.qml:34:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/RecoveryScreen.qml:12:44: Member "background" not found on type "QObject" [missing-property]
+    background: Rectangle { color: Theme.p.background }
+                                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/RecoveryScreen.qml:25:27: Member "accent" not found on type "QObject" [missing-property]
+            tone: Theme.p.accent
+                          ^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/RecoveryScreen.qml:31:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/RecoveryScreen.qml:40:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/RecoveryScreen.qml:51:28: Member "surface" not found on type "QObject" [missing-property]
+            color: Theme.p.surface
+                           ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/RecoveryScreen.qml:53:35: Member "divider" not found on type "QObject" [missing-property]
+            border.color: Theme.p.divider
+                                  ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/RecoveryScreen.qml:60:32: Member "inkPrimary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkPrimary
+                               ^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/screens/SafeModeScreen.qml:27:24: String contains unescaped line terminator which is deprecated. [multiline-strings]
+            text: qsTr("We've had a few crashes.
+What now?")
+Info: Use a template literal instead
+            text: qsTr(`We've had a few crashes.
+What now?`)
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SafeModeScreen.qml:11:24: Member "background" not found on type "QObject" [missing-property]
+        color: Theme.p.background
+                       ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SafeModeScreen.qml:29:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SafeModeScreen.qml:36:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:99:65: Detected height on an item that is managed by a layout. This is undefined behavior; use implictHeight or Layout.preferredHeight instead. [Quick.layout-positioning]
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.p.divider }
+                                                                ^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:13:44: Member "background" not found on type "QObject" [missing-property]
+    background: Rectangle { color: Theme.p.background }
+                                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:33:32: Member "inkPrimary" not found on type "QObject" [missing-property]
+                color: Theme.p.inkPrimary
+                               ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:50:31: Unqualified access [unqualified]
+                        text: modelData
+                              ^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:51:33: Unqualified access [unqualified]
+                        active: root.selectedTab === index
+                                ^^^^
+Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
+pragma ComponentBehavior: Bound
+import QtQuick
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:52:36: Unqualified access [unqualified]
+                        onClicked: root.selectedTab = index
+                                   ^^^^
+Info: Set "pragma ComponentBehavior: Bound" in order to use IDs from outer components in nested components.
+pragma ComponentBehavior: Bound
+import QtQuick
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:68:69: Member "inkPrimary" not found on type "QObject" [missing-property]
+                    Text { text: qsTr("Appearance"); color: Theme.p.inkPrimary; Component.onCompleted: Type.apply(this, Type.h2) }
+                                                                    ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:87:72: Member "inkSecondary" not found on type "QObject" [missing-property]
+                        Text { text: qsTr("Text size"); color: Theme.p.inkSecondary; Component.onCompleted: Type.apply(this, Type.bodyUI) }
+                                                                       ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:96:103: Member "inkSecondary" not found on type "QObject" [missing-property]
+                        Text { text: Math.round(SettingsStore.fontScalePercent) + "%"; color: Theme.p.inkSecondary; Component.onCompleted: Type.apply(this, Type.caption) }
+                                                                                                      ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:99:83: Member "divider" not found on type "QObject" [missing-property]
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.p.divider }
+                                                                                  ^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:100:77: Member "inkPrimary" not found on type "QObject" [missing-property]
+                    Text { text: qsTr("Inference defaults"); color: Theme.p.inkPrimary; Component.onCompleted: Type.apply(this, Type.h2) }
+                                                                            ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:104:40: Member "inkSecondary" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkSecondary
+                                       ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:146:71: Member "inkPrimary" not found on type "QObject" [missing-property]
+                    Text { text: qsTr("Privacy mode"); color: Theme.p.inkPrimary; Component.onCompleted: Type.apply(this, Type.h2) }
+                                                                      ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:150:40: Member "inkSecondary" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkSecondary
+                                       ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:184:40: Member "inkSecondary" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkSecondary
+                                       ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:189:40: Member "inkSecondary" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkSecondary
+                                       ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:206:64: Member "inkPrimary" not found on type "QObject" [missing-property]
+                    Text { text: qsTr("Mukei"); color: Theme.p.inkPrimary; Component.onCompleted: Type.apply(this, Type.h2) }
+                                                               ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:207:99: Member "inkSecondary" not found on type "QObject" [missing-property]
+                    Text { text: qsTr("Version 0.7.5 · Local-first AI assistant"); color: Theme.p.inkSecondary; Component.onCompleted: Type.apply(this, Type.bodyUI) }
+                                                                                                  ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/SettingsScreen.qml:211:40: Member "inkSecondary" not found on type "QObject" [missing-property]
+                        color: Theme.p.inkSecondary
+                                       ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/StartupScreen.qml:13:44: Member "background" not found on type "QObject" [missing-property]
+    background: Rectangle { color: Theme.p.background }
+                                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/StartupScreen.qml:30:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/StartupScreen.qml:38:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Info: /home/runner/work/Mukei/Mukei/qml/screens/ToolResultExpandedScreen.qml:2:1: Unused import [unused-imports]
+import QtQuick.Controls.Basic
+^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/ToolResultExpandedScreen.qml:32:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/VerificationScreen.qml:12:24: Member "background" not found on type "QObject" [missing-property]
+        color: Theme.p.background
+                       ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/VerificationScreen.qml:27:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/VerificationScreen.qml:35:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/WelcomeScreen.qml:11:24: Member "background" not found on type "QObject" [missing-property]
+        color: Theme.p.background
+                       ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/WelcomeScreen.qml:25:28: Member "inkPrimary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkPrimary
+                           ^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/WelcomeScreen.qml:31:28: Member "inkSecondary" not found on type "QObject" [missing-property]
+            color: Theme.p.inkSecondary
+                           ^^^^^^^^^^^^
+Warning: /home/runner/work/Mukei/Mukei/qml/screens/WelcomeScreen.qml:37:28: Member "accent" not found on type "QObject" [missing-property]
+            color: Theme.p.accent
+                           ^^^^^^
+ninja: build stopped: subcommand failed.
+exit_status=255
