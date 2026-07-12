@@ -57,7 +57,8 @@ Rectangle {
                     spacing: Spacing.sm
                     Image {
                         source: modelData.icon
-                        sourceSize: Qt.size(22, 22)
+                        sourceSize.width: 22
+                        sourceSize.height: 22
                         Layout.alignment: Qt.AlignHCenter
                     }
                     Text {
