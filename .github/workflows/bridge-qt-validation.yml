@@ -102,15 +102,27 @@ jobs:
       - name: Enforce QML configure result
         if: steps.qml-configure.outcome == 'failure'
         run: exit 1
-      - name: Build generated qmllint targets
+      - name: Capture generated qmllint diagnostics
+        id: qmllint
+        continue-on-error: true
         run: |
           cmake --build "$CMAKE_BUILD_DIR" --target help > /tmp/mukei-qml-targets.txt
-          if grep -q 'all_qmllint' /tmp/mukei-qml-targets.txt; then
-            cmake --build "$CMAKE_BUILD_DIR" --target all_qmllint
-          else
-            echo "Expected all_qmllint target was not generated." >&2
+          if ! grep -q 'all_qmllint' /tmp/mukei-qml-targets.txt; then
+            echo "Expected all_qmllint target was not generated." > /tmp/mukei-qmllint.log
             exit 1
           fi
+          cmake --build "$CMAKE_BUILD_DIR" --target all_qmllint > /tmp/mukei-qmllint.log 2>&1
+      - name: Upload generated qmllint diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qmllint-diagnostics
+          path: /tmp/mukei-qmllint.log
+          if-no-files-found: error
+          retention-days: 1
+      - name: Enforce generated qmllint result
+        if: steps.qmllint.outcome == 'failure'
+        run: exit 1
       - name: Build QML and test targets
         run: cmake --build "$CMAKE_BUILD_DIR"
       - name: Run CTest
