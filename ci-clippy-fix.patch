@@ -1,0 +1,40 @@
+diff --git a/rust/crates/mukei-core/src/ui_protocol.rs b/rust/crates/mukei-core/src/ui_protocol.rs
+--- a/rust/crates/mukei-core/src/ui_protocol.rs
++++ b/rust/crates/mukei-core/src/ui_protocol.rs
+@@ -599,11 +599,9 @@ fn validate_scope(
+         (
+             CommandType::AppInitialize | CommandType::DownloadCancel | CommandType::SettingsUpdate,
+             _,
+-        ) => {
+-            if has_conversation_scope || has_model_scope || has_document_scope {
+-                return Err(RejectionReason::StaleScope);
+-            }
++        ) if has_conversation_scope || has_model_scope || has_document_scope => {
++            return Err(RejectionReason::StaleScope);
+         }
+         _ => {}
+     }
+diff --git a/rust/crates/mukei-core/src/diagnostics/observability/metrics.rs b/rust/crates/mukei-core/src/diagnostics/observability/metrics.rs
+--- a/rust/crates/mukei-core/src/diagnostics/observability/metrics.rs
++++ b/rust/crates/mukei-core/src/diagnostics/observability/metrics.rs
+@@ -384,7 +384,7 @@ impl MetricRegistry {
+             .iter()
+             .map(|(key, metric)| metric.snapshot(key.clone()))
+             .collect::<Vec<_>>();
+-        series.sort_by(|left, right| metric_sort_key(&left.key).cmp(&metric_sort_key(&right.key)));
++        series.sort_by_key(|item| metric_sort_key(&item.key));
+ 
+         MetricRegistrySnapshot {
+             captured_at: now,
+diff --git a/rust/crates/mukei-core/src/diagnostics/observability/sink.rs b/rust/crates/mukei-core/src/diagnostics/observability/sink.rs
+--- a/rust/crates/mukei-core/src/diagnostics/observability/sink.rs
++++ b/rust/crates/mukei-core/src/diagnostics/observability/sink.rs
+@@ -13,7 +13,7 @@ use super::event::OperationalEvent;
+ use super::metrics::MetricRegistrySnapshot;
+ use super::privacy::{EventScope, PrivacyState, TelemetryPolicy, TelemetryPrivacyMode};
+ 
+-pub const DEFAULT_SINK_QUEUE_BYTES: usize = 1 * 1024 * 1024;
++pub const DEFAULT_SINK_QUEUE_BYTES: usize = 1024 * 1024;
+ pub const MAX_SINK_QUEUE_BYTES: usize = 16 * 1024 * 1024;
+ pub const DEFAULT_SINK_SINGLE_ENVELOPE_BYTES: usize = 512 * 1024;
+ pub const MAX_SINK_SINGLE_ENVELOPE_BYTES: usize = 4 * 1024 * 1024;
