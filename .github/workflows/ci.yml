@@ -17,6 +17,9 @@
 # The goal is a durable green-badge signal for the pure-Rust core so
 # that regressions in config/storage/agent/tools land loud in PR review
 # without waiting for the full mobile pipeline.
+#
+# Diagnostic note: this comment-only change intentionally triggers the
+# exact current main snapshot on a PR so GitHub Actions logs are visible.
 # =====================================================================
 
 name: ci
