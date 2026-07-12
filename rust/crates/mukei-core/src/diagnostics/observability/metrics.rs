@@ -157,7 +157,10 @@ impl DistributionSpec {
         if bounds.is_empty() || bounds.len() > MAX_DISTRIBUTION_BUCKETS {
             return Err(DistributionSpecError::InvalidBucketCount);
         }
-        if bounds.iter().any(|value| !value.is_finite() || *value < 0.0) {
+        if bounds
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+        {
             return Err(DistributionSpecError::InvalidBound);
         }
         bounds.sort_by(|left, right| left.total_cmp(right));
@@ -171,8 +174,8 @@ impl DistributionSpec {
     pub fn latency_millis() -> Self {
         Self {
             bounds: vec![
-                1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1_000.0, 2_500.0,
-                5_000.0, 10_000.0, 30_000.0,
+                1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1_000.0, 2_500.0, 5_000.0,
+                10_000.0, 30_000.0,
             ],
         }
     }
@@ -180,8 +183,17 @@ impl DistributionSpec {
     pub fn size_units() -> Self {
         Self {
             bounds: vec![
-                1.0, 4.0, 16.0, 64.0, 256.0, 1_024.0, 4_096.0, 16_384.0, 65_536.0,
-                262_144.0, 1_048_576.0,
+                1.0,
+                4.0,
+                16.0,
+                64.0,
+                256.0,
+                1_024.0,
+                4_096.0,
+                16_384.0,
+                65_536.0,
+                262_144.0,
+                1_048_576.0,
             ],
         }
     }
@@ -309,7 +321,11 @@ impl MetricRegistry {
             Ok(key) => key,
             Err(status) => return status,
         };
-        self.record(key, MetricUpdate::Counter(delta), self.inner.clock.monotonic_now())
+        self.record(
+            key,
+            MetricUpdate::Counter(delta),
+            self.inner.clock.monotonic_now(),
+        )
     }
 
     pub fn set_gauge(
@@ -325,7 +341,11 @@ impl MetricRegistry {
             Ok(key) => key,
             Err(status) => return status,
         };
-        self.record(key, MetricUpdate::Gauge(value), self.inner.clock.monotonic_now())
+        self.record(
+            key,
+            MetricUpdate::Gauge(value),
+            self.inner.clock.monotonic_now(),
+        )
     }
 
     pub fn observe_distribution(
@@ -342,7 +362,11 @@ impl MetricRegistry {
             Ok(key) => key,
             Err(status) => return status,
         };
-        self.record(key, MetricUpdate::Distribution(value, spec), self.inner.clock.monotonic_now())
+        self.record(
+            key,
+            MetricUpdate::Distribution(value, spec),
+            self.inner.clock.monotonic_now(),
+        )
     }
 
     pub fn snapshot(&self) -> MetricRegistrySnapshot {
@@ -396,12 +420,7 @@ impl MetricRegistry {
             .load(Ordering::Relaxed)
     }
 
-    fn record(
-        &self,
-        key: MetricKey,
-        update: MetricUpdate,
-        now: Duration,
-    ) -> MetricRecordStatus {
+    fn record(&self, key: MetricKey, update: MetricUpdate, now: Duration) -> MetricRecordStatus {
         let mut state = self.inner.state.write();
 
         if let Some(metric) = state.get_mut(&key) {
@@ -655,7 +674,8 @@ fn metric_sort_key(key: &MetricKey) -> (String, u64) {
 fn metric_value_size(value: &MetricValueSnapshot) -> usize {
     match value {
         MetricValueSnapshot::Counter(_) | MetricValueSnapshot::Gauge(_) => 24,
-        MetricValueSnapshot::Distribution(distribution) => 64usize
-            .saturating_add(distribution.buckets.len().saturating_mul(24)),
+        MetricValueSnapshot::Distribution(distribution) => {
+            64usize.saturating_add(distribution.buckets.len().saturating_mul(24))
+        }
     }
 }

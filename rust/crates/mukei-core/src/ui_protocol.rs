@@ -406,7 +406,9 @@ impl CommandAcknowledgementV2 {
             protocol_version: ProtocolVersion::CURRENT,
             command_id: envelope.map(|v| v.command_id.clone()).unwrap_or_default(),
             request_id: envelope.map(|v| v.request_id.clone()).unwrap_or_default(),
-            correlation_id: envelope.map(|v| v.correlation_id.clone()).unwrap_or_default(),
+            correlation_id: envelope
+                .map(|v| v.correlation_id.clone())
+                .unwrap_or_default(),
             operation_id: None,
             status: AcknowledgementStatus::Rejected,
             rejection_reason: Some(reason),
@@ -473,9 +475,9 @@ pub fn valid_protocol_id(value: &str, max_len: usize) -> bool {
     len > 0
         && len <= max_len
         && value == value.trim()
-        && value.chars().all(|ch| {
-            ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/')
-        })
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/'))
 }
 
 fn non_empty_bounded(value: &str, max_len: usize) -> bool {
@@ -553,7 +555,10 @@ fn validate_scope_for_command(
         (CommandType::ModelDownload, ValidatedCommandPayload::ModelDownload(value)) => {
             if has_conversation_scope
                 || has_document_scope
-                || scope.model_id.as_deref().is_some_and(|id| id != value.model_id.as_str())
+                || scope
+                    .model_id
+                    .as_deref()
+                    .is_some_and(|id| id != value.model_id.as_str())
             {
                 return Err(RejectionReason::StaleScope);
             }
@@ -564,7 +569,10 @@ fn validate_scope_for_command(
         ) => {
             if has_conversation_scope
                 || has_document_scope
-                || scope.model_id.as_deref().is_some_and(|id| id != value.model_id.as_str())
+                || scope
+                    .model_id
+                    .as_deref()
+                    .is_some_and(|id| id != value.model_id.as_str())
             {
                 return Err(RejectionReason::StaleScope);
             }
@@ -575,7 +583,10 @@ fn validate_scope_for_command(
         ) => {
             if has_conversation_scope
                 || has_model_scope
-                || scope.document_id.as_deref().is_some_and(|id| id != value.document_id.as_str())
+                || scope
+                    .document_id
+                    .as_deref()
+                    .is_some_and(|id| id != value.document_id.as_str())
             {
                 return Err(RejectionReason::StaleScope);
             }
@@ -617,8 +628,8 @@ pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand,
     if envelope.command_type.is_empty() || envelope.command_type.len() > MAX_COMMAND_TYPE_LEN {
         return Err(RejectionReason::UnknownCommand);
     }
-    let command_type = CommandType::parse(&envelope.command_type)
-        .ok_or(RejectionReason::UnknownCommand)?;
+    let command_type =
+        CommandType::parse(&envelope.command_type).ok_or(RejectionReason::UnknownCommand)?;
     if command_type == CommandType::ChatStopGeneration && envelope.operation_id.is_none() {
         return Err(RejectionReason::StaleScope);
     }
@@ -693,9 +704,7 @@ pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand,
             let value: SettingUpdatePayload = serde_json::from_value(envelope.payload.clone())
                 .map_err(|_| RejectionReason::InvalidPayload)?;
             if !non_empty_bounded(&value.key, 128)
-                || !(value.value.is_boolean()
-                    || value.value.is_number()
-                    || value.value.is_string())
+                || !(value.value.is_boolean() || value.value.is_number() || value.value.is_string())
             {
                 return Err(RejectionReason::InvalidPayload);
             }
@@ -707,7 +716,10 @@ pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand,
         | CommandType::RecoveryResume
         | CommandType::RecoveryRegenerate => {
             if !envelope.payload.is_object()
-                || envelope.payload.as_object().is_some_and(|value| !value.is_empty())
+                || envelope
+                    .payload
+                    .as_object()
+                    .is_some_and(|value| !value.is_empty())
             {
                 return Err(RejectionReason::InvalidPayload);
             }

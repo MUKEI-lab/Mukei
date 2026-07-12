@@ -14,8 +14,8 @@ use crate::saas::{
     EntitlementSnapshot, EntitlementSnapshotId, IdempotencyKey, LocalScope, MembershipId,
     MembershipRole, MembershipStatus, OperationId, QuotaLimitBehavior, QuotaPolicy, QuotaPolicyId,
     RemoteRevision, SnapshotAuthority, SourceOfTruth, SubscriptionSnapshotId, SubscriptionState,
-    SubscriptionStatus, Tenant, TenantId, TenantStatus, UsageAggregation, UsageDimension, UsageEvent,
-    UsageEventId, UsageEventKind, UsageMetadata, UsageSource, UsageWindow, Workspace,
+    SubscriptionStatus, Tenant, TenantId, TenantStatus, UsageAggregation, UsageDimension,
+    UsageEvent, UsageEventId, UsageEventKind, UsageMetadata, UsageSource, UsageWindow, Workspace,
     WorkspaceId, WorkspaceManagement, WorkspaceMembership, WorkspaceStatus,
 };
 use crate::storage::pool::{DatabasePool, DbError, PooledConnectionExt};
@@ -174,7 +174,8 @@ impl TenantWorkspaceRepository {
 
     /// Load one tenant by opaque business identity.
     pub async fn get_tenant(pool: &DatabasePool, tenant_id: TenantId) -> Result<Option<Tenant>> {
-        pool.with_conn(move |c| load_tenant_conn(c, &tenant_id)).await
+        pool.with_conn(move |c| load_tenant_conn(c, &tenant_id))
+            .await
     }
 
     /// Insert/update a local workspace without overwriting a remotely managed
@@ -265,7 +266,10 @@ impl TenantWorkspaceRepository {
                     workspace.status.as_str(),
                     workspace.created_at.to_rfc3339(),
                     workspace.updated_at.to_rfc3339(),
-                    to_sql_u64(workspace.remote_revision.unwrap(), "workspace.remote_revision")?,
+                    to_sql_u64(
+                        workspace.remote_revision.unwrap(),
+                        "workspace.remote_revision"
+                    )?,
                 ],
             )?;
             tx.commit()?;
@@ -1022,7 +1026,10 @@ enum RevisionOrder {
     IncomingNewer,
 }
 
-fn revision_order(current: Option<RemoteRevision>, incoming: Option<RemoteRevision>) -> RevisionOrder {
+fn revision_order(
+    current: Option<RemoteRevision>,
+    incoming: Option<RemoteRevision>,
+) -> RevisionOrder {
     match (current, incoming) {
         (Some(current), Some(incoming)) if incoming < current => RevisionOrder::IncomingOlder,
         (Some(current), Some(incoming)) if incoming == current => RevisionOrder::Same,
@@ -1127,9 +1134,11 @@ fn domain_db_error(error: impl std::fmt::Display) -> DbError {
 fn parse_ts(value: String, field: &'static str) -> std::result::Result<DateTime<Utc>, DbError> {
     DateTime::parse_from_rfc3339(&value)
         .map(|v| v.with_timezone(&Utc))
-        .map_err(|_| DbError::Domain(MukeiError::DatabaseInitFailed(format!(
-            "invalid SaaS timestamp in {field}"
-        ))))
+        .map_err(|_| {
+            DbError::Domain(MukeiError::DatabaseInitFailed(format!(
+                "invalid SaaS timestamp in {field}"
+            )))
+        })
 }
 
 fn parse_optional_ts(
@@ -1285,7 +1294,10 @@ fn invalid_db_enum(field: &'static str) -> DbError {
     )))
 }
 
-fn id<T, E>(value: String, ctor: impl FnOnce(String) -> std::result::Result<T, E>) -> std::result::Result<T, DbError>
+fn id<T, E>(
+    value: String,
+    ctor: impl FnOnce(String) -> std::result::Result<T, E>,
+) -> std::result::Result<T, DbError>
 where
     E: std::fmt::Display,
 {
@@ -1635,7 +1647,11 @@ fn validate_workspace(workspace: &Workspace) -> Result<()> {
 }
 
 fn validate_actor(actor: &Actor) -> Result<()> {
-    if actor.display_name.as_ref().is_some_and(|value| value.len() > 256) {
+    if actor
+        .display_name
+        .as_ref()
+        .is_some_and(|value| value.len() > 256)
+    {
         return Err(MukeiError::Invariant(
             "actor display_name exceeds 256 bytes".into(),
         ));
@@ -1685,7 +1701,10 @@ fn validate_machine_token(value: &str, field: &'static str, max_bytes: usize) ->
 
 fn validate_subscription(snapshot: &SubscriptionState) -> Result<()> {
     validate_machine_token(&snapshot.plan_key, "subscription.plan_key", 128)?;
-    if snapshot.effective_end.is_some_and(|end| end <= snapshot.effective_start) {
+    if snapshot
+        .effective_end
+        .is_some_and(|end| end <= snapshot.effective_start)
+    {
         return Err(MukeiError::Invariant(
             "subscription effective_end must follow effective_start".into(),
         ));
@@ -1734,8 +1753,17 @@ fn load_subscription_where(
     let raw: Option<RawSubscription> = c
         .query_row(&sql, [value], |row| {
             Ok((
-                row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?,
-                row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?,
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+                row.get(9)?,
+                row.get(10)?,
             ))
         })
         .optional()?;
@@ -1751,7 +1779,10 @@ fn parse_subscription_raw(r: RawSubscription) -> std::result::Result<Subscriptio
         effective_start: parse_ts(r.4, "subscription.effective_start")?,
         effective_end: parse_optional_ts(r.5, "subscription.effective_end")?,
         grace_period_end: parse_optional_ts(r.6, "subscription.grace_period_end")?,
-        source_revision: r.7.map(|v| from_sql_u64(v, "subscription.source_revision")).transpose()?,
+        source_revision: r
+            .7
+            .map(|v| from_sql_u64(v, "subscription.source_revision"))
+            .transpose()?,
         last_synced_at: parse_ts(r.8, "subscription.last_synced_at")?,
         authority: parse_authority(&r.9)?,
         stale_marked_at: parse_optional_ts(r.10, "subscription.stale_marked_at")?,
@@ -1816,7 +1847,12 @@ fn load_entitlement_where(
     let raw: Option<RawEntitlementHeader> = c
         .query_row(&sql, [value], |row| {
             Ok((
-                row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?,
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
             ))
         })
         .optional()?;
@@ -1845,11 +1881,17 @@ fn load_entitlement_where(
         let grant = EntitlementGrant {
             key: key.clone(),
             enabled: row.1 != 0,
-            numeric_limit: row.2.map(|v| from_sql_u64(v, "entitlement.numeric_limit")).transpose()?,
+            numeric_limit: row
+                .2
+                .map(|v| from_sql_u64(v, "entitlement.numeric_limit"))
+                .transpose()?,
             string_value: row.3,
             effective_start: parse_optional_ts(row.4, "entitlement.effective_start")?,
             effective_end: parse_optional_ts(row.5, "entitlement.effective_end")?,
-            source_revision: row.6.map(|v| from_sql_u64(v, "entitlement.grant_revision")).transpose()?,
+            source_revision: row
+                .6
+                .map(|v| from_sql_u64(v, "entitlement.grant_revision"))
+                .transpose()?,
         };
         grants.insert(key, grant);
     }
@@ -1857,7 +1899,10 @@ fn load_entitlement_where(
         snapshot_id,
         tenant_id: id(raw.1, TenantId::new)?,
         grants,
-        source_revision: raw.2.map(|v| from_sql_u64(v, "entitlement.source_revision")).transpose()?,
+        source_revision: raw
+            .2
+            .map(|v| from_sql_u64(v, "entitlement.source_revision"))
+            .transpose()?,
         last_synced_at: parse_ts(raw.3, "entitlement.last_synced_at")?,
         authority: parse_authority(&raw.4)?,
         stale_marked_at: parse_optional_ts(raw.5, "entitlement.stale_marked_at")?,
@@ -1923,15 +1968,27 @@ fn usage_select(predicate: &str) -> String {
 
 fn raw_usage_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawUsage> {
     Ok((
-        row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?,
-        row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?,
-        row.get(12)?, row.get(13)?, row.get(14)?,
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+        row.get(10)?,
+        row.get(11)?,
+        row.get(12)?,
+        row.get(13)?,
+        row.get(14)?,
     ))
 }
 
 fn parse_usage_raw(r: RawUsage) -> std::result::Result<UsageEvent, DbError> {
-    let values: BTreeMap<String, crate::saas::UsageMetadataValue> =
-        serde_json::from_str(&r.14).map_err(|_| {
+    let values: BTreeMap<String, crate::saas::UsageMetadataValue> = serde_json::from_str(&r.14)
+        .map_err(|_| {
             DbError::Domain(MukeiError::DatabaseInitFailed(
                 "invalid bounded usage metadata JSON".into(),
             ))
@@ -2113,10 +2170,7 @@ fn validate_quota_policy(policy: &QuotaPolicy) -> Result<()> {
             MukeiError::Invariant("quota warning threshold exceeds SQLite range".into())
         })?;
     }
-    policy
-        .window
-        .bounds_at(Utc::now())
-        .map_err(domain_error)?;
+    policy.window.bounds_at(Utc::now()).map_err(domain_error)?;
     Ok(())
 }
 
@@ -2185,9 +2239,24 @@ fn load_quota_by_id_conn(
 
 fn raw_quota_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawQuota> {
     Ok((
-        row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?,
-        row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?,
-        row.get(12)?, row.get(13)?, row.get(14)?, row.get(15)?, row.get(16)?, row.get(17)?,
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+        row.get(10)?,
+        row.get(11)?,
+        row.get(12)?,
+        row.get(13)?,
+        row.get(14)?,
+        row.get(15)?,
+        row.get(16)?,
+        row.get(17)?,
     ))
 }
 
@@ -2200,12 +2269,21 @@ fn parse_quota_raw(r: RawQuota) -> std::result::Result<QuotaPolicy, DbError> {
         limit: from_sql_u64(r.4, "quota.limit")?,
         window: parse_window(&r.5, r.6, r.7, r.8)?,
         behavior: parse_limit_behavior(&r.9)?,
-        burst_allowance: r.10.map(|v| from_sql_u64(v, "quota.burst_allowance")).transpose()?,
-        warning_threshold: r.11.map(|v| from_sql_u64(v, "quota.warning_threshold")).transpose()?,
+        burst_allowance: r
+            .10
+            .map(|v| from_sql_u64(v, "quota.burst_allowance"))
+            .transpose()?,
+        warning_threshold: r
+            .11
+            .map(|v| from_sql_u64(v, "quota.warning_threshold"))
+            .transpose()?,
         required_entitlement: r.12.map(|v| id(v, EntitlementKey::new)).transpose()?,
         authority: parse_authority(&r.13)?,
         source_of_truth: parse_source(&r.14)?,
-        source_revision: r.15.map(|v| from_sql_u64(v, "quota.source_revision")).transpose()?,
+        source_revision: r
+            .15
+            .map(|v| from_sql_u64(v, "quota.source_revision"))
+            .transpose()?,
         stale_marked_at: parse_optional_ts(r.16, "quota.stale_marked_at")?,
         created_at: parse_ts(r.17, "quota.created_at")?,
     })

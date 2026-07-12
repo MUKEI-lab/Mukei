@@ -406,9 +406,7 @@ pub enum AuthProviderError {
 #[async_trait]
 pub trait AccessTokenProvider: Send + Sync {
     /// Obtain one credential representation for one logical outbound request.
-    async fn access_credential(
-        &self,
-    ) -> Result<CredentialAvailability, AuthProviderError>;
+    async fn access_credential(&self) -> Result<CredentialAvailability, AuthProviderError>;
 }
 
 /// Canonical opaque metadata reused across every retry of one logical request.
@@ -436,10 +434,7 @@ impl SaasRequestContext {
     }
 
     /// Set opaque workspace metadata.
-    pub fn set_workspace_id(
-        &mut self,
-        value: impl Into<String>,
-    ) -> Result<(), SaasTransportError> {
+    pub fn set_workspace_id(&mut self, value: impl Into<String>) -> Result<(), SaasTransportError> {
         self.workspace_id = Some(validate_metadata(value.into())?);
         Ok(())
     }
@@ -457,10 +452,7 @@ impl SaasRequestContext {
     }
 
     /// Set opaque operation identity.
-    pub fn set_operation_id(
-        &mut self,
-        value: impl Into<String>,
-    ) -> Result<(), SaasTransportError> {
+    pub fn set_operation_id(&mut self, value: impl Into<String>) -> Result<(), SaasTransportError> {
         self.operation_id = Some(validate_metadata(value.into())?);
         Ok(())
     }
@@ -809,9 +801,10 @@ impl SaasTransportError {
             Self::RequestTimeout { server, .. }
             | Self::TooEarly { server, .. }
             | Self::RateLimited { server, .. }
-            | Self::TransientServerFailure { server, .. } => {
-                !matches!(server.as_ref().and_then(|server| server.retryable), Some(false))
-            }
+            | Self::TransientServerFailure { server, .. } => !matches!(
+                server.as_ref().and_then(|server| server.retryable),
+                Some(false)
+            ),
             _ => false,
         }
     }
@@ -1135,11 +1128,7 @@ impl SaasClient {
                         }
 
                         retries_completed = retries_completed.saturating_add(1);
-                        let jitter = self
-                            .inner
-                            .policy
-                            .retry_policy
-                            .next_delay(retries_completed);
+                        let jitter = self.inner.policy.retry_policy.next_delay(retries_completed);
                         let delay = error
                             .retry_after()
                             .map(|hint| hint.min(self.inner.policy.max_retry_after))
@@ -1164,7 +1153,9 @@ impl SaasClient {
                 Ok(_) => circuit.record_success(),
                 Err(error) if error.influences_circuit() => circuit.record_transient_failure(),
                 Err(SaasTransportError::Cancelled) => circuit.release_probe_without_signal(),
-                Err(error) if error.proves_server_reachable() => circuit.record_reachable_response(),
+                Err(error) if error.proves_server_reachable() => {
+                    circuit.record_reachable_response()
+                }
                 Err(_) => circuit.release_probe_without_signal(),
             }
         }
@@ -1188,9 +1179,7 @@ impl SaasClient {
             Ok(CredentialAvailability::TemporarilyUnavailable) => {
                 Err(SaasTransportError::NoCredentialAvailable)
             }
-            Ok(CredentialAvailability::Unauthenticated) => {
-                Err(SaasTransportError::Unauthenticated)
-            }
+            Ok(CredentialAvailability::Unauthenticated) => Err(SaasTransportError::Unauthenticated),
             Err(AuthProviderError::TemporarilyUnavailable) => {
                 Err(SaasTransportError::NoCredentialAvailable)
             }
@@ -1204,9 +1193,13 @@ impl SaasClient {
         deadline: Instant,
         cancel: Option<&CancellationToken>,
     ) -> Result<OwnedSemaphorePermit, SaasTransportError> {
-        wait_with_budget(self.inner.semaphore.clone().acquire_owned(), deadline, cancel)
-            .await?
-            .map_err(|_| SaasTransportError::TransportUnavailable)
+        wait_with_budget(
+            self.inner.semaphore.clone().acquire_owned(),
+            deadline,
+            cancel,
+        )
+        .await?
+        .map_err(|_| SaasTransportError::TransportUnavailable)
     }
 
     async fn handle_response<T: DeserializeOwned>(
@@ -1244,11 +1237,7 @@ impl SaasClient {
             });
         }
 
-        let server = parse_error_envelope(
-            &body,
-            retry_after,
-            self.inner.policy.max_retry_after,
-        );
+        let server = parse_error_envelope(&body, retry_after, self.inner.policy.max_retry_after);
         Err(map_status_error(status, server, retry_after, context))
     }
 }
@@ -1267,11 +1256,7 @@ fn build_saas_headers(
     headers.insert(AUTHORIZATION, credential.authorization_header()?);
     insert_header(&mut headers, HEADER_API_VERSION, endpoint.api_version())?;
     insert_optional_header(&mut headers, HEADER_TENANT_ID, context.tenant_id())?;
-    insert_optional_header(
-        &mut headers,
-        HEADER_WORKSPACE_ID,
-        context.workspace_id(),
-    )?;
+    insert_optional_header(&mut headers, HEADER_WORKSPACE_ID, context.workspace_id())?;
     insert_optional_header(&mut headers, HEADER_ACTOR_ID, context.actor_id())?;
     insert_optional_header(&mut headers, HEADER_REQUEST_ID, context.request_id())?;
     insert_optional_header(&mut headers, HEADER_OPERATION_ID, context.operation_id())?;
@@ -1642,10 +1627,11 @@ fn redact_secret_like_token(token: &str) -> String {
     {
         return "[redacted-secret]".to_string();
     }
-    if (lower.starts_with("http://") || lower.starts_with("https://"))
-        && token.contains('?')
-    {
-        let prefix = token.split_once('?').map(|(prefix, _)| prefix).unwrap_or(token);
+    if (lower.starts_with("http://") || lower.starts_with("https://")) && token.contains('?') {
+        let prefix = token
+            .split_once('?')
+            .map(|(prefix, _)| prefix)
+            .unwrap_or(token);
         return format!("{prefix}?[redacted-query]");
     }
     token.to_string()

@@ -20,8 +20,8 @@ use super::privacy::{EventScope, PrivacyState, TelemetryPolicy, TelemetryPrivacy
 use super::sink::{
     DiagnosticSink, SinkDispatcher, SinkEnvelope, SinkHealthState, SinkInstallError,
     SinkQueueLimits, SinkStatsSnapshot, DEFAULT_SINK_DISCONNECT_AFTER_DROPS,
-    DEFAULT_SINK_QUEUE_BYTES,
-    DEFAULT_SINK_SINGLE_ENVELOPE_BYTES, DEFAULT_SINK_SLOW_CALLBACK_THRESHOLD,
+    DEFAULT_SINK_QUEUE_BYTES, DEFAULT_SINK_SINGLE_ENVELOPE_BYTES,
+    DEFAULT_SINK_SLOW_CALLBACK_THRESHOLD,
 };
 use super::slo::{
     SloDimensions, SloObservation, SloRecordStatus, SloRegistry, SloRegistrySnapshot,
@@ -152,9 +152,7 @@ impl ObservabilityMemoryLimits {
             max_single_event_bytes,
             critical_event_reserve_bytes,
             default_sink_queue_bytes: self.default_sink_queue_bytes.max(1),
-            default_sink_single_envelope_bytes: self
-                .default_sink_single_envelope_bytes
-                .max(1),
+            default_sink_single_envelope_bytes: self.default_sink_single_envelope_bytes.max(1),
             sink_disconnect_after_drops: self.sink_disconnect_after_drops.max(1),
             sink_slow_callback_threshold: if self.sink_slow_callback_threshold.is_zero() {
                 DEFAULT_SINK_SLOW_CALLBACK_THRESHOLD
@@ -248,10 +246,7 @@ impl ObservabilityRecorder {
         Self::with_clock_and_limits(config, clock, ObservabilityMemoryLimits::default())
     }
 
-    pub fn with_limits(
-        config: ObservabilityConfig,
-        limits: ObservabilityMemoryLimits,
-    ) -> Self {
+    pub fn with_limits(config: ObservabilityConfig, limits: ObservabilityMemoryLimits) -> Self {
         Self::with_clock_and_limits(config, SystemClock::shared(), limits)
     }
 
@@ -260,15 +255,9 @@ impl ObservabilityRecorder {
         clock: Arc<dyn ObservabilityClock>,
         limits: ObservabilityMemoryLimits,
     ) -> Self {
-        let event_buffer_capacity = config
-            .event_buffer_capacity
-            .min(MAX_EVENT_BUFFER_CAPACITY);
-        let max_metric_series = config
-            .max_metric_series
-            .min(MAX_METRIC_SERIES_CAPACITY);
-        let max_health_signals = config
-            .max_health_signals
-            .min(MAX_HEALTH_SIGNAL_CAPACITY);
+        let event_buffer_capacity = config.event_buffer_capacity.min(MAX_EVENT_BUFFER_CAPACITY);
+        let max_metric_series = config.max_metric_series.min(MAX_METRIC_SERIES_CAPACITY);
+        let max_health_signals = config.max_health_signals.min(MAX_HEALTH_SIGNAL_CAPACITY);
         let max_slo_series = config.max_slo_series.min(MAX_SLO_SERIES_CAPACITY);
         let default_sink_queue_capacity = config
             .default_sink_queue_capacity
@@ -352,10 +341,7 @@ impl ObservabilityRecorder {
         let limits = SinkQueueLimits {
             max_count: queue_capacity.clamp(1, MAX_SINK_QUEUE_CAPACITY),
             max_bytes: self.inner.memory_limits.default_sink_queue_bytes,
-            max_single_envelope_bytes: self
-                .inner
-                .memory_limits
-                .default_sink_single_envelope_bytes,
+            max_single_envelope_bytes: self.inner.memory_limits.default_sink_single_envelope_bytes,
             disconnect_after_drops: self.inner.memory_limits.sink_disconnect_after_drops,
             slow_callback_threshold: self.inner.memory_limits.sink_slow_callback_threshold,
         };
@@ -453,7 +439,9 @@ impl ObservabilityRecorder {
                 .fetch_add(1, Ordering::Relaxed);
             return MetricRecordStatus::PolicyRejected;
         }
-        self.inner.metrics.increment_counter(name, dimensions, delta)
+        self.inner
+            .metrics
+            .increment_counter(name, dimensions, delta)
     }
 
     pub fn set_gauge(
@@ -495,11 +483,7 @@ impl ObservabilityRecorder {
             .observe_distribution(name, dimensions, value, spec)
     }
 
-    pub fn publish_health(
-        &self,
-        scope: EventScope,
-        signal: HealthSignal,
-    ) -> HealthPublishStatus {
+    pub fn publish_health(&self, scope: EventScope, signal: HealthSignal) -> HealthPublishStatus {
         let _gate = self.inner.policy_update_gate.read();
         if !self.inner.privacy.snapshot().policy.allows_event(scope) {
             self.inner
@@ -543,7 +527,9 @@ impl ObservabilityRecorder {
                 .fetch_add(1, Ordering::Relaxed);
             return SloRecordStatus::PolicyRejected;
         }
-        self.inner.slo.record_operation(dimensions, outcome, latency)
+        self.inner
+            .slo
+            .record_operation(dimensions, outcome, latency)
     }
 
     /// Enqueue one immutable metric snapshot shared by all installed sinks.
@@ -596,11 +582,15 @@ impl ObservabilityRecorder {
                 total.callback_failures = total
                     .callback_failures
                     .saturating_add(current.callback_failures);
-                total.callback_panics = total.callback_panics.saturating_add(current.callback_panics);
+                total.callback_panics = total
+                    .callback_panics
+                    .saturating_add(current.callback_panics);
                 total.disconnected_drops = total
                     .disconnected_drops
                     .saturating_add(current.disconnected_drops);
-                total.oversized_drops = total.oversized_drops.saturating_add(current.oversized_drops);
+                total.oversized_drops = total
+                    .oversized_drops
+                    .saturating_add(current.oversized_drops);
                 total.privacy_epoch_drops = total
                     .privacy_epoch_drops
                     .saturating_add(current.privacy_epoch_drops);

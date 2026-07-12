@@ -38,9 +38,9 @@ pub mod pool;
 #[cfg(feature = "rusqlite")]
 pub mod recovery;
 #[cfg(feature = "rusqlite")]
-pub mod saf;
-#[cfg(feature = "rusqlite")]
 pub mod saas;
+#[cfg(feature = "rusqlite")]
+pub mod saf;
 #[cfg(feature = "rusqlite")]
 pub mod settings;
 #[cfg(feature = "rusqlite")]
@@ -54,7 +54,9 @@ pub use conversation::{
     PersistedTurn, TimelinePage, TimelineRow,
 };
 #[cfg(feature = "rusqlite")]
-pub use download_jobs::{DownloadJobRecord, DownloadJobRepository, DownloadJobStatus, DownloadReservation};
+pub use download_jobs::{
+    DownloadJobRecord, DownloadJobRepository, DownloadJobStatus, DownloadReservation,
+};
 #[cfg(feature = "rusqlite")]
 pub use migrations::{
     MigrationBackup, MigrationRecord, Migrator, MIGRATIONS_DIR, MIGRATION_FILE_PREFIX,
@@ -66,13 +68,13 @@ pub use pool::{
 #[cfg(feature = "rusqlite")]
 pub use recovery::{InterruptedTurn, RecoveryAttempt, RecoveryMode, RecoveryState, RecoveryStore};
 #[cfg(feature = "rusqlite")]
-pub use saf::{DocumentProjection, SafCleanupPlan, SafRegistry, SafTokenRow};
-#[cfg(feature = "rusqlite")]
 pub use saas::{
     EntitlementRepository, MembershipRepository, QuotaPolicyRepository, RecordApplyOutcome,
     SnapshotApplyOutcome, SubscriptionRepository, TenantWorkspaceRepository, UsageAppendOutcome,
     UsageLedgerRepository,
 };
+#[cfg(feature = "rusqlite")]
+pub use saf::{DocumentProjection, SafCleanupPlan, SafRegistry, SafTokenRow};
 #[cfg(feature = "rusqlite")]
 pub use settings::{PreferenceRecord, PreferenceValue, SecretRefRecord, SettingsRepository};
 #[cfg(feature = "rusqlite")]

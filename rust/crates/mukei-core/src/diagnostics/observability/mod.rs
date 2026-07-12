@@ -15,7 +15,7 @@ mod sink;
 mod slo;
 
 pub use clock::{ObservabilityClock, SystemClock};
-pub use context::{CorrelationContext, ContextDimensions};
+pub use context::{ContextDimensions, CorrelationContext};
 pub use event::{
     AttributeError, AttributeInsertStatus, AttributeValue, EventAttribute, EventBuildError,
     EventSeverity, OperationalEvent, OutcomeClass, SafeAttributeValue, MAX_ATTRIBUTE_KEY_LEN,
@@ -36,7 +36,8 @@ pub use recorder::{
     ObservabilityRecorder, ProcessMetadata, RecorderStatsSnapshot,
 };
 pub use sink::{
-    DiagnosticSink, SinkError, SinkHealthState, SinkInstallError, SinkQueueLimits, SinkStatsSnapshot,
+    DiagnosticSink, SinkError, SinkHealthState, SinkInstallError, SinkQueueLimits,
+    SinkStatsSnapshot,
 };
 pub use slo::{
     SloDimensions, SloIndicatorKind, SloObservation, SloRecordStatus, SloRegistry,

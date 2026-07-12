@@ -235,12 +235,13 @@ impl UiSessionRepository {
                 reason: "route is too long".into(),
             });
         }
-        let payload = serde_json::from_str::<serde_json::Value>(&record.payload_json).map_err(|_| {
-            MukeiError::ConfigInvalid {
-                field: "ui_session.payload_json".into(),
-                reason: "payload must be valid JSON".into(),
-            }
-        })?;
+        let payload =
+            serde_json::from_str::<serde_json::Value>(&record.payload_json).map_err(|_| {
+                MukeiError::ConfigInvalid {
+                    field: "ui_session.payload_json".into(),
+                    reason: "payload must be valid JSON".into(),
+                }
+            })?;
         if !payload.is_object() {
             return Err(MukeiError::ConfigInvalid {
                 field: "ui_session.payload_json".into(),
@@ -292,7 +293,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(loaded.active_route, "chat");
-        assert_eq!(loaded.active_conversation_id.as_deref(), Some("conversation"));
+        assert_eq!(
+            loaded.active_conversation_id.as_deref(),
+            Some("conversation")
+        );
 
         UiSessionRepository::save_draft(
             &pool,
@@ -315,9 +319,11 @@ mod tests {
         UiSessionRepository::clear_draft(&pool, "conversation", "branch")
             .await
             .unwrap();
-        assert!(UiSessionRepository::load_draft(&pool, "conversation", "branch")
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            UiSessionRepository::load_draft(&pool, "conversation", "branch")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }

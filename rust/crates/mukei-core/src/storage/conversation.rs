@@ -67,7 +67,6 @@ pub struct MessageRecord {
     pub status: MessageStatus,
 }
 
-
 #[derive(Clone, Debug, serde::Serialize, PartialEq, Eq)]
 pub struct ConversationSummary {
     pub conversation_id: String,
@@ -546,7 +545,6 @@ impl ConversationRepository {
         .await
     }
 
-
     pub async fn list_conversation_summaries(
         pool: &DatabasePool,
         limit: usize,
@@ -628,34 +626,39 @@ impl ConversationRepository {
                  ORDER BY m.id DESC LIMIT ?4",
             )?;
             let mut raw = stmt
-                .query_map(rusqlite::params![conversation_id, branch_id, boundary, limit + 1], |row| {
-                    let role: String = row.get(2)?;
-                    let tool_name: String = row.get(6)?;
-                    let (row_type, kind, phase) = match role.as_str() {
-                        "user" => ("user_message", "", ""),
-                        "assistant" if !tool_name.is_empty() => ("timeline_event", "tool", "result"),
-                        "assistant" => ("assistant_message", "", ""),
-                        "tool" => ("timeline_event", "tool", "result"),
-                        "system" => ("timeline_event", "system", "result"),
-                        _ => ("timeline_event", "system", "failure"),
-                    };
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        TimelineRow {
-                            row_id: row.get(1)?,
-                            row_type: row_type.into(),
-                            text: row.get(3)?,
-                            phase: phase.into(),
-                            kind: kind.into(),
-                            status: row.get(5)?,
-                            timestamp: row.get(4)?,
-                            tool_name,
-                            parent_id: row.get(7)?,
-                            conversation_id: conversation_external_id.0.to_string(),
-                            branch_id: branch_external_id.0.to_string(),
-                        },
-                    ))
-                })?
+                .query_map(
+                    rusqlite::params![conversation_id, branch_id, boundary, limit + 1],
+                    |row| {
+                        let role: String = row.get(2)?;
+                        let tool_name: String = row.get(6)?;
+                        let (row_type, kind, phase) = match role.as_str() {
+                            "user" => ("user_message", "", ""),
+                            "assistant" if !tool_name.is_empty() => {
+                                ("timeline_event", "tool", "result")
+                            }
+                            "assistant" => ("assistant_message", "", ""),
+                            "tool" => ("timeline_event", "tool", "result"),
+                            "system" => ("timeline_event", "system", "result"),
+                            _ => ("timeline_event", "system", "failure"),
+                        };
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            TimelineRow {
+                                row_id: row.get(1)?,
+                                row_type: row_type.into(),
+                                text: row.get(3)?,
+                                phase: phase.into(),
+                                kind: kind.into(),
+                                status: row.get(5)?,
+                                timestamp: row.get(4)?,
+                                tool_name,
+                                parent_id: row.get(7)?,
+                                conversation_id: conversation_external_id.0.to_string(),
+                                branch_id: branch_external_id.0.to_string(),
+                            },
+                        ))
+                    },
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
 
             let has_older = raw.len() as i64 > limit;
@@ -955,7 +958,6 @@ mod tests {
         assert_eq!(turn_two.conversation_id, messages[0].conversation_id);
     }
 
-
     #[tokio::test]
     async fn timeline_page_is_conversation_and_branch_scoped() {
         let pool = migrated_pool().await;
@@ -991,18 +993,18 @@ mod tests {
             .await
             .unwrap();
 
-        let page = ConversationRepository::timeline_page(
-            &pool,
-            conversation_a,
-            branch_a,
-            None,
-            20,
-        )
-        .await
-        .unwrap();
+        let page = ConversationRepository::timeline_page(&pool, conversation_a, branch_a, None, 20)
+            .await
+            .unwrap();
         assert_eq!(page.items.len(), 2);
-        assert!(page.items.iter().all(|row| row.conversation_id == conversation_a.0.to_string()));
-        assert!(page.items.iter().all(|row| row.branch_id == branch_a.0.to_string()));
+        assert!(page
+            .items
+            .iter()
+            .all(|row| row.conversation_id == conversation_a.0.to_string()));
+        assert!(page
+            .items
+            .iter()
+            .all(|row| row.branch_id == branch_a.0.to_string()));
         assert!(page.items.iter().any(|row| row.text == "alpha"));
         assert!(!page.items.iter().any(|row| row.text.contains("beta")));
     }
@@ -1034,18 +1036,16 @@ mod tests {
         assert_eq!(newest.items.len(), 2);
         assert!(newest.has_older);
         let anchor = MessageId(uuid::Uuid::parse_str(&newest.oldest_message_id).unwrap());
-        let older = ConversationRepository::timeline_page(
-            &pool,
-            conversation,
-            branch,
-            Some(anchor),
-            2,
-        )
-        .await
-        .unwrap();
+        let older =
+            ConversationRepository::timeline_page(&pool, conversation, branch, Some(anchor), 2)
+                .await
+                .unwrap();
         assert_eq!(older.items.len(), 2);
         assert!(!older.has_older);
-        assert!(older.items.iter().all(|row| !newest.items.iter().any(|newer| newer.row_id == row.row_id)));
+        assert!(older
+            .items
+            .iter()
+            .all(|row| !newest.items.iter().any(|newer| newer.row_id == row.row_id)));
     }
 
     #[tokio::test]

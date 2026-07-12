@@ -42,7 +42,6 @@ pub struct DownloadReservation {
     pub reserved_bytes: u64,
 }
 
-
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct DownloadJobRecord {
     pub job_id: String,
@@ -307,7 +306,8 @@ impl DownloadJobRepository {
                         job_id: row.get(0)?,
                         model_id: row.get(1)?,
                         destination_token: row.get(2)?,
-                        expected_bytes: u64::try_from(expected.unwrap_or(0).max(0)).unwrap_or(u64::MAX),
+                        expected_bytes: u64::try_from(expected.unwrap_or(0).max(0))
+                            .unwrap_or(u64::MAX),
                         bytes_downloaded: u64::try_from(downloaded.max(0)).unwrap_or(u64::MAX),
                         status: row.get(5)?,
                         last_error_code: row.get(6)?,

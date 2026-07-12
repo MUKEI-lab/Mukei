@@ -437,7 +437,10 @@ impl UnavailableInferenceBackend {
 
 impl Default for UnavailableInferenceBackend {
     fn default() -> Self {
-        Self::new_with_reason("backend_not_activated", BackendUnavailableReason::NotInjected)
+        Self::new_with_reason(
+            "backend_not_activated",
+            BackendUnavailableReason::NotInjected,
+        )
     }
 }
 
@@ -725,7 +728,9 @@ mod tests {
     async fn run_inference_compat_shim_returns_tokens() {
         let (tx, mut rx) = mpsc::channel::<String>(64);
         let tok = CancellationToken::new();
-        let (out, n) = run_inference_with_mock_for_tests("hello world", tok, tx).await.unwrap();
+        let (out, n) = run_inference_with_mock_for_tests("hello world", tok, tx)
+            .await
+            .unwrap();
         assert_eq!(out, "hello world");
         assert!(n > 0);
         while rx.try_recv().is_ok() {}

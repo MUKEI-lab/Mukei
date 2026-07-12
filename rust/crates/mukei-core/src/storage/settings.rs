@@ -80,9 +80,7 @@ impl SettingsRepository {
                     reason: "expected a value between 64 and 32768".into(),
                 })
             }
-            ("top_p_milli", PreferenceValue::Integer(value))
-                if !(1..=1000).contains(value) =>
-            {
+            ("top_p_milli", PreferenceValue::Integer(value)) if !(1..=1000).contains(value) => {
                 Err(MukeiError::ToolArgumentInvalid {
                     field: "top_p_milli",
                     reason: "expected a value between 1 and 1000".into(),
@@ -101,15 +99,13 @@ impl SettingsRepository {
             | ("temperature_milli", PreferenceValue::Integer(_))
             | ("max_tokens_default", PreferenceValue::Integer(_))
             | ("top_p_milli", PreferenceValue::Integer(_)) => Ok(()),
-            ("theme_mode", PreferenceValue::String(value)) => {
-                match value.as_str() {
-                    "dolce_vita" | "espresso" | "taupe" => Ok(()),
-                    _ => Err(MukeiError::ToolArgumentInvalid {
-                        field: "theme_mode",
-                        reason: "unsupported theme mode".into(),
-                    }),
-                }
-            }
+            ("theme_mode", PreferenceValue::String(value)) => match value.as_str() {
+                "dolce_vita" | "espresso" | "taupe" => Ok(()),
+                _ => Err(MukeiError::ToolArgumentInvalid {
+                    field: "theme_mode",
+                    reason: "unsupported theme mode".into(),
+                }),
+            },
             ("remote_feature_policy", PreferenceValue::String(value)) => value
                 .parse::<crate::tools::RemoteFeaturePolicy>()
                 .map(|_| ()),
@@ -326,18 +322,14 @@ mod tests {
         )
         .await
         .unwrap();
-        SettingsRepository::upsert_preference(
-            &pool,
-            "reduce_motion",
-            PreferenceValue::Bool(true),
-        )
-        .await
-        .unwrap();
+        SettingsRepository::upsert_preference(&pool, "reduce_motion", PreferenceValue::Bool(true))
+            .await
+            .unwrap();
 
         let rows = SettingsRepository::list_preferences(&pool).await.unwrap();
-        assert!(rows.iter().any(|row| {
-            row.key == "theme_mode" && row.value_json == "\"taupe\""
-        }));
+        assert!(rows
+            .iter()
+            .any(|row| { row.key == "theme_mode" && row.value_json == "\"taupe\"" }));
         assert!(rows
             .iter()
             .any(|row| row.key == "reduce_motion" && row.value_json == "true"));

@@ -241,13 +241,7 @@ impl AgentLoop {
         watchdog: WatchdogHandle,
         inference_backend: Arc<dyn InferenceBackend>,
     ) -> Arc<Self> {
-        Self::new_with_backend_and_observability(
-            context,
-            tools,
-            watchdog,
-            inference_backend,
-            None,
-        )
+        Self::new_with_backend_and_observability(context, tools, watchdog, inference_backend, None)
     }
 
     /// Explicit test/development constructor. Mock identity remains visible and
@@ -1071,11 +1065,7 @@ mod tests {
             Arc::new(ToolRegistry::new()),
             Arc::new(FailureTracker::new()),
         );
-        let watchdog = WatchdogHandle::new(Watchdog::new(
-            4,
-            1_000_000,
-            Duration::from_secs(30),
-        ));
+        let watchdog = WatchdogHandle::new(Watchdog::new(4, 1_000_000, Duration::from_secs(30)));
         (context, tools, watchdog)
     }
 
@@ -1180,7 +1170,9 @@ mod tests {
         assert_eq!(second.final_content.as_deref(), Some("response-1"));
 
         let stale = first.await.unwrap();
-        assert!(matches!(stale, Err(MukeiError::Internal(message)) if message == "stale agent completion ignored"));
+        assert!(
+            matches!(stale, Err(MukeiError::Internal(message)) if message == "stale agent completion ignored")
+        );
         assert_eq!(agent.active_run_generation(), None);
     }
 

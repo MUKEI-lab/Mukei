@@ -43,9 +43,15 @@ fn document_class<'local>(
 ) -> Result<jni::objects::JClass<'local>, String> {
     use jni::objects::{JClass, JObject, JValue};
     let context = ndk_context::android_context();
-    let context_object = unsafe { JObject::from_raw(context.context().cast::<jni::sys::_jobject>()) };
+    let context_object =
+        unsafe { JObject::from_raw(context.context().cast::<jni::sys::_jobject>()) };
     let loader = env
-        .call_method(&context_object, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])
+        .call_method(
+            &context_object,
+            "getClassLoader",
+            "()Ljava/lang/ClassLoader;",
+            &[],
+        )
         .and_then(|value| value.l())
         .map_err(|error| format!("resolve Android app class loader failed: {error}"))?;
     let class_name = env

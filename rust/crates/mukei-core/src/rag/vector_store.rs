@@ -279,13 +279,7 @@ impl VectorStore {
     /// Add a vector with explicit tenant/workspace scope. Scoped retrieval
     /// only returns vectors added through this API, so legacy unscoped vectors
     /// cannot accidentally cross an authorization boundary.
-    pub fn add_scoped(
-        &self,
-        chunk_id: u64,
-        vec: Vec<f32>,
-        digest: String,
-        scope: RetrievalScope,
-    ) {
+    pub fn add_scoped(&self, chunk_id: u64, vec: Vec<f32>, digest: String, scope: RetrievalScope) {
         #[cfg(feature = "usearch_hnsw")]
         if let Some(index) = self.hnsw.lock().as_ref() {
             let _ = index.add(chunk_id, &vec);
@@ -431,12 +425,7 @@ impl VectorStore {
     /// exact tenant/workspace/actor/authorization scope before any candidate
     /// ids are returned to the resolver. Legacy vectors without scope metadata
     /// are intentionally ineligible.
-    pub fn search_scoped(
-        &self,
-        q: &[f32],
-        scope: &RetrievalScope,
-        k: usize,
-    ) -> Vec<(u64, f32)> {
+    pub fn search_scoped(&self, q: &[f32], scope: &RetrievalScope, k: usize) -> Vec<(u64, f32)> {
         if k == 0 {
             return Vec::new();
         }

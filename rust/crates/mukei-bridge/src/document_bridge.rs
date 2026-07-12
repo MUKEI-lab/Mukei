@@ -9,7 +9,8 @@ pub(crate) async fn document_list_snapshot(
     pool: &mukei_core::storage::DatabasePool,
     limit: usize,
 ) -> Result<serde_json::Value, mukei_core::error::MukeiError> {
-    let documents = mukei_core::storage::SafRegistry::list_document_projections(pool, limit).await?;
+    let documents =
+        mukei_core::storage::SafRegistry::list_document_projections(pool, limit).await?;
     serde_json::to_value(documents).map_err(|error| {
         mukei_core::error::MukeiError::Internal(format!(
             "document projection serialization failed: {error}"

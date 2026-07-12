@@ -28,12 +28,11 @@ pub use indexer::{
 
 pub use retriever::{
     normalize_and_budget_results, ChunkResolver, IndexCompatibilityRequirement,
-    IndexCompatibilityState, IndexMetadata, RagCapabilitySnapshot, ResolvedChunk,
-    RetrievalBudget, RetrievalDegradedReason, RetrievalDiagnostics, RetrievalRequest,
-    RetrievalResponse, RetrievalScope, RetrievalStatus, RetrievalUnavailableReason,
-    RetrievedChunk, Retriever, RetrieverError, RetrieverResult, SourceFilters,
-    StructuredRetriever, CONTENT_HASH_DEDUPE_MIN_BYTES, DEFAULT_MAX_CHUNK_BYTES,
-    DEFAULT_RETRIEVAL_TOP_K,
+    IndexCompatibilityState, IndexMetadata, RagCapabilitySnapshot, ResolvedChunk, RetrievalBudget,
+    RetrievalDegradedReason, RetrievalDiagnostics, RetrievalRequest, RetrievalResponse,
+    RetrievalScope, RetrievalStatus, RetrievalUnavailableReason, RetrievedChunk, Retriever,
+    RetrieverError, RetrieverResult, SourceFilters, StructuredRetriever,
+    CONTENT_HASH_DEDUPE_MIN_BYTES, DEFAULT_MAX_CHUNK_BYTES, DEFAULT_RETRIEVAL_TOP_K,
 };
 
 pub use vector_store::{

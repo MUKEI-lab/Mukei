@@ -490,7 +490,10 @@ impl LocalScope {
             tenant_id: TenantId::new(derive_local_identifier("tenant", installation_id))?,
             workspace_id: WorkspaceId::new(derive_local_identifier("workspace", installation_id))?,
             actor_id: ActorId::new(derive_local_identifier("actor", installation_id))?,
-            membership_id: MembershipId::new(derive_local_identifier("membership", installation_id))?,
+            membership_id: MembershipId::new(derive_local_identifier(
+                "membership",
+                installation_id,
+            ))?,
         })
     }
 
@@ -1038,9 +1041,7 @@ impl<'de> Deserialize<'de> for UsageMetadata {
 
 impl UsageMetadata {
     /// Validate and construct bounded structured metadata.
-    pub fn new(
-        values: BTreeMap<String, UsageMetadataValue>,
-    ) -> Result<Self, SaasDomainError> {
+    pub fn new(values: BTreeMap<String, UsageMetadataValue>) -> Result<Self, SaasDomainError> {
         if values.len() > MAX_USAGE_METADATA_ENTRIES {
             return Err(SaasDomainError::UnsafeUsageMetadata("too many entries"));
         }
@@ -1052,10 +1053,10 @@ impl UsageMetadata {
                         "string value exceeds size bound",
                     ));
                 }
-                if !value.bytes().all(|b| {
-                    b.is_ascii_alphanumeric()
-                        || matches!(b, b'_' | b'-' | b'.' | b':')
-                }) {
+                if !value
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.' | b':'))
+                {
                     return Err(SaasDomainError::UnsafeUsageMetadata(
                         "string values must be bounded machine tokens, not free-form text",
                     ));
@@ -1172,8 +1173,9 @@ impl UsageEvent {
     /// Validate correction-shape invariants before persistence.
     pub fn validate(&self) -> Result<(), SaasDomainError> {
         match (self.kind, self.adjusts_usage_event_id.as_ref()) {
-            (UsageEventKind::Consumption, None)
-            | (UsageEventKind::AdjustmentCredit, Some(_)) => Ok(()),
+            (UsageEventKind::Consumption, None) | (UsageEventKind::AdjustmentCredit, Some(_)) => {
+                Ok(())
+            }
             (UsageEventKind::Consumption, Some(_)) => Err(SaasDomainError::InvalidMachineKey {
                 kind: "usage_adjustment",
                 reason: "consumption must not reference a corrected event",

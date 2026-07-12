@@ -44,9 +44,7 @@ use mukei_core::agent::{
     WatchdogHandle,
 };
 use mukei_core::config::MukeiConfig;
-use mukei_core::engine::{
-    BackendUnavailableReason, InferenceBackend, UnavailableInferenceBackend,
-};
+use mukei_core::engine::{BackendUnavailableReason, InferenceBackend, UnavailableInferenceBackend};
 use mukei_core::error::Result;
 use mukei_core::tools::ToolRegistry;
 use mukei_core::types::{BranchId, ChatMessage, ConversationId};

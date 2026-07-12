@@ -100,8 +100,13 @@ mod tests {
     fn sol03_runtime_provenance_snapshot_is_internally_consistent() {
         let value = snapshot();
         assert_eq!(value.schema_version, 1);
-        assert_eq!(value.hardening_mode == HardeningMode::Hardened,
-                   value.feature_flags.iter().any(|flag| flag == "runtime_hardening"));
+        assert_eq!(
+            value.hardening_mode == HardeningMode::Hardened,
+            value
+                .feature_flags
+                .iter()
+                .any(|flag| flag == "runtime_hardening")
+        );
         assert_eq!(value.runtime_environment_mode, runtime_environment_mode());
     }
     #[test]
@@ -112,5 +117,4 @@ mod tests {
         assert!(BRIDGE_MANIFEST.contains("runtime_hardening"));
         assert!(!BRIDGE_MANIFEST.contains("release_hardening   ="));
     }
-
 }

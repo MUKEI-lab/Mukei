@@ -42,8 +42,7 @@ fn accepted_ack_requires_authoritative_operation_id() {
 #[test]
 fn acknowledgement_must_match_transport_correlation() {
     let command = send_command();
-    let mut ack =
-        CommandAcknowledgementV2::accepted(&command, Some("operation-a".into()));
+    let mut ack = CommandAcknowledgementV2::accepted(&command, Some("operation-a".into()));
     ack.correlation_id = "different".into();
     assert!(!ack.validate_for(&command));
 }

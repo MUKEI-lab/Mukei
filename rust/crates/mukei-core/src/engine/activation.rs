@@ -216,8 +216,10 @@ pub trait InferenceBackendFactory: Send + Sync {
     /// Construct a backend for the exact verified descriptor. Implementations
     /// may perform expensive loading here. The activation service never holds
     /// its state lock across this await.
-    async fn activate(&self, descriptor: &VerifiedModelDescriptor)
-        -> Result<Arc<dyn InferenceBackend>>;
+    async fn activate(
+        &self,
+        descriptor: &VerifiedModelDescriptor,
+    ) -> Result<Arc<dyn InferenceBackend>>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -299,7 +301,9 @@ impl ModelActivationService {
     }
 
     fn next_generation(&self) -> u64 {
-        self.generation.fetch_add(1, Ordering::AcqRel).saturating_add(1)
+        self.generation
+            .fetch_add(1, Ordering::AcqRel)
+            .saturating_add(1)
     }
 
     fn is_current_generation(&self, generation: u64) -> bool {
@@ -358,11 +362,7 @@ impl ModelActivationService {
 
     /// Commit a verified descriptor only if it still belongs to the current
     /// verification generation and selected model.
-    pub fn mark_verified(
-        &self,
-        generation: u64,
-        descriptor: VerifiedModelDescriptor,
-    ) -> bool {
+    pub fn mark_verified(&self, generation: u64, descriptor: VerifiedModelDescriptor) -> bool {
         if !self.is_current_generation(generation) {
             return false;
         }
@@ -617,7 +617,10 @@ impl ModelActivationService {
 
     pub fn readiness_snapshot(&self) -> InferenceReadinessSnapshot {
         let inner = self.inner.read();
-        let active_identity = inner.active.as_ref().map(|active| active.backend.identity());
+        let active_identity = inner
+            .active
+            .as_ref()
+            .map(|active| active.backend.identity());
         let ready_state = matches!(&inner.state, ModelActivationState::Ready { .. });
         let active_backend_ready = ready_state && active_identity.is_some();
         let development_mock_active = active_backend_ready
@@ -728,35 +731,50 @@ impl InferenceBackend for ModelActivationService {
             ) if active.operation_id == *operation_id
                 && active.model_id.as_str() == model_id.as_str()
                 && active.revision.as_str() == revision.as_str()
-                && active.artifact_id.as_str() == artifact_id.as_str() => active.backend.identity(),
+                && active.artifact_id.as_str() == artifact_id.as_str() =>
+            {
+                active.backend.identity()
+            }
             (ModelActivationState::NoModelSelected, _) => BackendIdentity::unavailable_with_reason(
                 "activation_service",
                 BackendUnavailableReason::NoModelSelected,
             ),
-            (ModelActivationState::ModelMissing { .. }, _) => BackendIdentity::unavailable_with_reason(
-                "activation_service",
-                BackendUnavailableReason::ModelMissing,
-            ),
-            (ModelActivationState::ModelVerifying { .. }, _) => BackendIdentity::unavailable_with_reason(
-                "activation_service",
-                BackendUnavailableReason::ModelVerifying,
-            ),
-            (ModelActivationState::ModelVerified { .. }, _) => BackendIdentity::unavailable_with_reason(
-                "activation_service",
-                BackendUnavailableReason::ModelVerifiedNotActivated,
-            ),
-            (ModelActivationState::Activating { .. }, _) => BackendIdentity::unavailable_with_reason(
-                "activation_service",
-                BackendUnavailableReason::ActivationInProgress,
-            ),
-            (ModelActivationState::ActivationFailed { .. }, _) => BackendIdentity::unavailable_with_reason(
-                "activation_service",
-                BackendUnavailableReason::ActivationFailed,
-            ),
-            (ModelActivationState::Deactivating { .. }, _) => BackendIdentity::unavailable_with_reason(
-                "activation_service",
-                BackendUnavailableReason::Deactivating,
-            ),
+            (ModelActivationState::ModelMissing { .. }, _) => {
+                BackendIdentity::unavailable_with_reason(
+                    "activation_service",
+                    BackendUnavailableReason::ModelMissing,
+                )
+            }
+            (ModelActivationState::ModelVerifying { .. }, _) => {
+                BackendIdentity::unavailable_with_reason(
+                    "activation_service",
+                    BackendUnavailableReason::ModelVerifying,
+                )
+            }
+            (ModelActivationState::ModelVerified { .. }, _) => {
+                BackendIdentity::unavailable_with_reason(
+                    "activation_service",
+                    BackendUnavailableReason::ModelVerifiedNotActivated,
+                )
+            }
+            (ModelActivationState::Activating { .. }, _) => {
+                BackendIdentity::unavailable_with_reason(
+                    "activation_service",
+                    BackendUnavailableReason::ActivationInProgress,
+                )
+            }
+            (ModelActivationState::ActivationFailed { .. }, _) => {
+                BackendIdentity::unavailable_with_reason(
+                    "activation_service",
+                    BackendUnavailableReason::ActivationFailed,
+                )
+            }
+            (ModelActivationState::Deactivating { .. }, _) => {
+                BackendIdentity::unavailable_with_reason(
+                    "activation_service",
+                    BackendUnavailableReason::Deactivating,
+                )
+            }
             (ModelActivationState::Ready { .. }, _) => BackendIdentity::unavailable_with_reason(
                 "activation_service",
                 BackendUnavailableReason::Unspecified,
@@ -785,7 +803,10 @@ impl InferenceBackend for ModelActivationService {
                 ) if active.operation_id == *operation_id
                     && active.model_id.as_str() == model_id.as_str()
                     && active.revision.as_str() == revision.as_str()
-                    && active.artifact_id.as_str() == artifact_id.as_str() => active.backend.clone(),
+                    && active.artifact_id.as_str() == artifact_id.as_str() =>
+                {
+                    active.backend.clone()
+                }
                 _ => {
                     return Err(MukeiError::ModelLoadFailed(
                         "active inference backend is not ready".to_string(),
@@ -947,7 +968,10 @@ mod tests {
             backend: explicit_mock(),
             delay: Duration::ZERO,
         };
-        assert_eq!(service.activate_verified(&factory).await, ActivationCommit::Ready);
+        assert_eq!(
+            service.activate_verified(&factory).await,
+            ActivationCommit::Ready
+        );
         let snapshot = service.readiness_snapshot();
         assert!(snapshot.active_backend_ready);
         assert!(snapshot.development_mock_active);
@@ -963,7 +987,10 @@ mod tests {
             backend: production_backend(),
             delay: Duration::ZERO,
         };
-        assert_eq!(service.activate_verified(&factory).await, ActivationCommit::Ready);
+        assert_eq!(
+            service.activate_verified(&factory).await,
+            ActivationCommit::Ready
+        );
         let snapshot = service.readiness_snapshot();
         assert!(snapshot.active_backend_ready);
         assert!(!snapshot.development_mock_active);
@@ -980,7 +1007,10 @@ mod tests {
             backend: production_backend(),
             delay: Duration::ZERO,
         };
-        assert_eq!(service.activate_verified(&factory).await, ActivationCommit::Ready);
+        assert_eq!(
+            service.activate_verified(&factory).await,
+            ActivationCommit::Ready
+        );
         let snapshot = service.readiness_snapshot();
         assert!(snapshot.active_backend_ready);
         assert!(!snapshot.real_backend_implementation_available);
@@ -1046,7 +1076,10 @@ mod tests {
             backend: explicit_mock(),
             delay: Duration::ZERO,
         };
-        assert_eq!(service.activate_verified(&fast_factory).await, ActivationCommit::Ready);
+        assert_eq!(
+            service.activate_verified(&fast_factory).await,
+            ActivationCommit::Ready
+        );
         assert_eq!(a.await.unwrap(), ActivationCommit::StaleIgnored);
 
         match service.state() {
@@ -1068,7 +1101,10 @@ mod tests {
             backend: explicit_mock(),
             delay: Duration::ZERO,
         };
-        assert_eq!(service.activate_verified(&factory).await, ActivationCommit::Ready);
+        assert_eq!(
+            service.activate_verified(&factory).await,
+            ActivationCommit::Ready
+        );
 
         let (tx, _rx) = mpsc::channel(8);
         let outcome = service
