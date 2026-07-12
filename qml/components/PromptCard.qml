@@ -24,7 +24,11 @@ Rectangle {
         wrapMode: Text.Wrap
         Component.onCompleted: Type.apply(this, Type.bodySmallItalic)
     }
-    TapHandler {
-        onTapped: root.promptCardAutoSend ? root.sendRequested(root.prompt) : root.fillRequested(root.prompt)
+    MouseArea {
+        anchors.fill: parent
+        cursorShape: Qt.PointingHandCursor
+        onClicked: root.promptCardAutoSend
+                   ? root.sendRequested(root.prompt)
+                   : root.fillRequested(root.prompt)
     }
 }
