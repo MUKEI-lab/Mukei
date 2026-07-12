@@ -1,45 +1,11 @@
+===== /tmp/mukei-qmldir/com/mukei/app/architecture/qmldir =====
+prefer :/com/mukei/app/
+
 ===== /tmp/mukei-qmldir/com/mukei/app/components/qmldir =====
-module com.mukei.components
-AccessibilityAnnouncer 1.0 AccessibilityAnnouncer.qml
-PrimaryButton 1.0 PrimaryButton.qml
-SecondaryButton 1.0 SecondaryButton.qml
-GhostButton 1.0 GhostButton.qml
-IconButton 1.0 IconButton.qml
-DestructiveButton 1.0 DestructiveButton.qml
-SettingsTextField 1.0 SettingsTextField.qml
-SearchField 1.0 SearchField.qml
-ChatComposer 1.0 ChatComposer.qml
-UserMessageBubble 1.0 UserMessageBubble.qml
-AIMessageBubble 1.0 AIMessageBubble.qml
-StatusPill 1.0 StatusPill.qml
-ChatTimelineEvent 1.0 ChatTimelineEvent.qml
-MarkdownRenderer 1.0 MarkdownRenderer.qml
-CodeBlockComponent 1.0 CodeBlockComponent.qml
-CopyButton 1.0 CopyButton.qml
-ToolResultCard 1.0 ToolResultCard.qml
-RAGChunkCard 1.0 RAGChunkCard.qml
-ProgressBar 1.0 ProgressBar.qml
-Spinner 1.0 Spinner.qml
-SkeletonLoader 1.0 SkeletonLoader.qml
-StreamingCaret 1.0 StreamingCaret.qml
-ConfirmationDialog 1.0 ConfirmationDialog.qml
-DestructiveConfirmDialog 1.0 DestructiveConfirmDialog.qml
-ModalSheet 1.0 ModalSheet.qml
-FullScreenModal 1.0 FullScreenModal.qml
-ToastNotification 1.0 ToastNotification.qml
-ThinkingAccordion 1.0 ThinkingAccordion.qml
-NetworkBanner 1.0 NetworkBanner.qml
-PromptCard 1.0 PromptCard.qml
-ConversationList 1.0 ConversationList.qml
-LeftDrawer 1.0 LeftDrawer.qml
-BranchSwitcherSheet 1.0 BranchSwitcherSheet.qml
-FontLoader 1.0 FontLoader.qml
-HapticFeedback 1.0 HapticFeedback.qml
-MukeiIcon 1.0 MukeiIcon.qml
+prefer :/com/mukei/app/
 
 ===== /tmp/mukei-qmldir/com/mukei/app/events/qmldir =====
-module com.mukei.events
-singleton EventDispatcher 1.0 EventDispatcher.qml
+prefer :/com/mukei/app/
 
 ===== /tmp/mukei-qmldir/com/mukei/app/qmldir =====
 module com.mukei.app
@@ -138,44 +104,14 @@ WelcomeScreen 1.0 screens/WelcomeScreen.qml
 
 
 ===== /tmp/mukei-qmldir/com/mukei/app/screens/qmldir =====
-module com.mukei.screens
-WelcomeScreen 1.0 WelcomeScreen.qml
-ModelPickerScreen 1.0 ModelPickerScreen.qml
-VerificationScreen 1.0 VerificationScreen.qml
-EmptyChatScreen 1.0 EmptyChatScreen.qml
-ChatScreen 1.0 ChatScreen.qml
-ModelManagerScreen 1.0 ModelManagerScreen.qml
-SettingsScreen 1.0 SettingsScreen.qml
-SafeModeScreen 1.0 SafeModeScreen.qml
-RagRebuildPromptScreen 1.0 RagRebuildPromptScreen.qml
-ToolResultExpandedScreen 1.0 ToolResultExpandedScreen.qml
-StartupScreen 1.0 StartupScreen.qml
+prefer :/com/mukei/app/
+
+===== /tmp/mukei-qmldir/com/mukei/app/shell/qmldir =====
+prefer :/com/mukei/app/
 
 ===== /tmp/mukei-qmldir/com/mukei/app/stores/qmldir =====
-module Mukei.Stores
-singleton AccessibilityStore 1.0 AccessibilityStore.qml
-singleton CapabilityStore 1.0 CapabilityStore.qml
-singleton ChatStore 1.0 ChatStore.qml
-singleton ContractStore 1.0 ContractStore.qml
-singleton ConversationStore 1.0 ConversationStore.qml
-singleton DiagnosticsStore 1.0 DiagnosticsStore.qml
-singleton DocumentStore 1.0 DocumentStore.qml
-singleton DownloadStore 1.0 DownloadStore.qml
-singleton ErrorStore 1.0 ErrorStore.qml
-singleton LifecycleStore 1.0 LifecycleStore.qml
-singleton ModelStore 1.0 ModelStore.qml
-singleton NavigationStore 1.0 NavigationStore.qml
-singleton OperationStore 1.0 OperationStore.qml
-singleton RecoveryStore 1.0 RecoveryStore.qml
-singleton ResponsiveStore 1.0 ResponsiveStore.qml
-singleton SettingsStore 1.0 SettingsStore.qml
-singleton StorageStore 1.0 StorageStore.qml
-singleton UiSessionStore 1.0 UiSessionStore.qml
+prefer :/com/mukei/app/
 
 ===== /tmp/mukei-qmldir/com/mukei/app/theme/qmldir =====
-module com.mukei.theme
-singleton Theme 1.0 Theme.qml
-singleton Type 1.0 Type.qml
-singleton Spacing 1.0 Spacing.qml
-singleton Motion 1.0 Motion.qml
+prefer :/com/mukei/app/
 
