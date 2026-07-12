@@ -12,12 +12,16 @@ Item {
     property var lastSequenceBySource: ({})
     property var lastSequenceByStream: ({})
     property var trackedStreamOrder: []
+    property var uncertainStreams: ({})
+    property var uncertainStreamResumeSequences: ({})
     property var acceptedEventIds: ({})
     property var acceptedEventOrder: []
     property var acceptedLogicalEvents: ({})
     property var acceptedLogicalOrder: []
     property var acceptedTerminalKeys: ({})
     property var acceptedTerminalOrder: []
+    property var terminalOperations: ({})
+    property var terminalOperationOrder: []
 
     signal eventReceived(var event)
     signal sequenceGapDetected(string feature, int expectedSequence, int receivedSequence)
@@ -32,12 +36,16 @@ Item {
         lastSequenceBySource = ({})
         lastSequenceByStream = ({})
         trackedStreamOrder = []
+        uncertainStreams = ({})
+        uncertainStreamResumeSequences = ({})
         acceptedEventIds = ({})
         acceptedEventOrder = []
         acceptedLogicalEvents = ({})
         acceptedLogicalOrder = []
         acceptedTerminalKeys = ({})
         acceptedTerminalOrder = []
+        terminalOperations = ({})
+        terminalOperationOrder = []
     }
 
     function ingest(eventJson, sourceName) {
@@ -134,6 +142,9 @@ Item {
         event.request_id = raw.request_id || ""
         event.command_id = raw.command_id || ""
         event.command_type = raw.command_type || ""
+        event.conversation_id = raw.conversation_id || event.conversation_id || ""
+        event.branch_id = raw.branch_id || event.branch_id || ""
+        event.turn_id = raw.turn_id || event.turn_id || ""
         event.protocol_mode = "v2"
         return event
     }
@@ -159,6 +170,26 @@ Item {
         if (category === "operation_lifecycle")
             return "operations"
         return "errors"
+    }
+
+    function isChatCategory(category) {
+        return typeof category === "string" && category.indexOf("chat_") === 0
+    }
+
+    function validateV2Scope(raw, event) {
+        if (!isChatCategory(event.category))
+            return true
+        if (typeof raw.conversation_id !== "string" || raw.conversation_id.length === 0
+                || typeof raw.branch_id !== "string" || raw.branch_id.length === 0) {
+            eventRejected("missing_chat_scope")
+            return false
+        }
+        var expectedStreamId = "chat:" + raw.conversation_id + ":" + raw.branch_id
+        if (raw.stream_id !== expectedStreamId) {
+            eventRejected("chat_stream_scope_mismatch")
+            return false
+        }
+        return true
     }
 
     function rememberEventId(eventId) {
@@ -193,11 +224,44 @@ Item {
         trackedStreamOrder = order
     }
 
+    function markStreamUncertain(streamId, observedSequence) {
+        var states = Object.assign({}, uncertainStreams)
+        states[streamId] = true
+        uncertainStreams = states
+
+        var resumes = Object.assign({}, uncertainStreamResumeSequences)
+        var current = Number(resumes[streamId] || 0)
+        var candidate = Math.max(0, Number(observedSequence || 0) - 1)
+        resumes[streamId] = Math.max(current, candidate)
+        uncertainStreamResumeSequences = resumes
+    }
+
+    function clearStreamUncertain(streamId) {
+        var states = Object.assign({}, uncertainStreams)
+        var resumes = Object.assign({}, uncertainStreamResumeSequences)
+        delete states[streamId]
+        delete resumes[streamId]
+        uncertainStreams = states
+        uncertainStreamResumeSequences = resumes
+    }
+
     function shouldAcceptV2(raw, event) {
-        if (!rememberEventId(raw.event_id)) {
+        if (!validateV2Scope(raw, event))
+            return false
+        if (acceptedEventIds[raw.event_id] === true) {
             eventRejected("duplicate_event")
             return false
         }
+        if (event.operation_id && terminalOperations[event.operation_id] === true) {
+            eventRejected("operation_already_terminal")
+            return false
+        }
+        if (uncertainStreams[raw.stream_id] === true) {
+            markStreamUncertain(raw.stream_id, raw.sequence)
+            eventRejected("stream_uncertain_resync_required")
+            return false
+        }
+
         var previous = lastSequenceByStream[raw.stream_id]
         if (typeof previous === "number") {
             if (raw.sequence <= previous) {
@@ -208,9 +272,15 @@ Item {
                 var feature = featureForCategory(event.category)
                 sequenceGapDetected(feature, previous + 1, raw.sequence)
                 streamSequenceGapDetected(feature, raw.stream_id, previous + 1, raw.sequence)
+                markStreamUncertain(raw.stream_id, raw.sequence)
                 eventRejected("sequence_gap_resync_required")
                 return false
             }
+        }
+
+        if (!rememberEventId(raw.event_id)) {
+            eventRejected("duplicate_event")
+            return false
         }
         rememberStreamSequence(raw.stream_id, raw.sequence)
         lastSequence = typeof lastSequence === "number" ? Math.max(lastSequence, raw.sequence) : raw.sequence
@@ -219,8 +289,25 @@ Item {
 
     function completeResynchronization(streamId, baselineSequence) {
         if (!streamId)
-            return
-        rememberStreamSequence(streamId, Number(baselineSequence || 0))
+            return false
+        var baseline = Number(baselineSequence)
+        if (!Number.isFinite(baseline))
+            baseline = Number(uncertainStreamResumeSequences[streamId] || lastSequenceByStream[streamId] || 0)
+        rememberStreamSequence(streamId, Math.max(0, baseline))
+        clearStreamUncertain(streamId)
+        return true
+    }
+
+    function markChatScopeResynchronized(conversationId, branchId, baselineSequence) {
+        if (!conversationId || !branchId)
+            return false
+        var streamId = "chat:" + conversationId + ":" + branchId
+        if (uncertainStreams[streamId] !== true)
+            return false
+        var baseline = Number(baselineSequence)
+        if (!Number.isFinite(baseline))
+            baseline = Number(uncertainStreamResumeSequences[streamId] || lastSequenceByStream[streamId] || 0)
+        return completeResynchronization(streamId, baseline)
     }
 
     function shouldAcceptLegacy(event, sourceName) {
@@ -268,6 +355,21 @@ Item {
         return ""
     }
 
+    function rememberTerminalOperation(operationId) {
+        if (!operationId || terminalOperations[operationId] === true)
+            return
+        var seen = Object.assign({}, terminalOperations)
+        var order = terminalOperationOrder.slice(0)
+        seen[operationId] = true
+        order.push(operationId)
+        while (order.length > 512) {
+            var expired = order.shift()
+            delete seen[expired]
+        }
+        terminalOperations = seen
+        terminalOperationOrder = order
+    }
+
     function rememberLogicalTerminal(event) {
         var terminal = terminalCategory(event)
         if (!terminal || !event.operation_id)
@@ -285,6 +387,7 @@ Item {
         }
         acceptedTerminalKeys = seen
         acceptedTerminalOrder = order
+        rememberTerminalOperation(event.operation_id)
         return true
     }
 
@@ -343,7 +446,8 @@ Item {
         case "capability_snapshot":
             return hasCapabilities(event)
         case "chat_state":
-            return typeof event.state === "string" && hasCapabilities(event)
+            return typeof event.state === "string"
+                    && (event.protocol_mode === "v2" || hasCapabilities(event))
         case "chat_chunk":
             return typeof event.chunk === "string"
         case "chat_completed":
