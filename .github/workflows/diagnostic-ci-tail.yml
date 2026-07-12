@@ -4,64 +4,36 @@ on:
   push:
     branches: [ agent/diagnose-current-ci ]
 
+permissions:
+  contents: write
+
 jobs:
-  core-clippy-diagnostics:
+  capture:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: agent/diagnose-current-ci
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: Capture core Clippy diagnostics
+      - name: Capture compact diagnostics
         working-directory: rust
         shell: bash
         run: |
           set +e
           cargo clippy --quiet -p mukei-core --no-default-features --features std,tokio --lib --tests -- -D warnings > ../core-clippy.log 2>&1
-          status=$?
-          echo "exit_status=$status" >> ../core-clippy.log
-          exit 0
-      - uses: actions/upload-artifact@v4
-        with:
-          name: core-clippy-current
-          path: core-clippy.log
-
-  workspace-clippy-diagnostics:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - name: Capture workspace Clippy diagnostics
-        working-directory: rust
-        shell: bash
-        run: |
-          set +e
+          echo "exit_status=$?" >> ../core-clippy.log
           cargo clippy --quiet --workspace --all-targets --exclude mukei-bridge -- -D warnings > ../workspace-clippy.log 2>&1
-          status=$?
-          echo "exit_status=$status" >> ../workspace-clippy.log
-          exit 0
-      - uses: actions/upload-artifact@v4
-        with:
-          name: workspace-clippy-current
-          path: workspace-clippy.log
-
-  workspace-test-diagnostics:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Capture workspace test diagnostics
-        working-directory: rust
-        shell: bash
-        run: |
-          set +e
+          echo "exit_status=$?" >> ../workspace-clippy.log
           cargo test --quiet --workspace --exclude mukei-bridge > ../workspace-test.log 2>&1
-          status=$?
-          echo "exit_status=$status" >> ../workspace-test.log
+          echo "exit_status=$?" >> ../workspace-test.log
           exit 0
-      - uses: actions/upload-artifact@v4
-        with:
-          name: workspace-test-current
-          path: workspace-test.log
+      - name: Commit diagnostic logs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add core-clippy.log workspace-clippy.log workspace-test.log
+          git commit -m "chore(ci): capture remaining diagnostics"
+          git push origin HEAD:agent/diagnose-current-ci
