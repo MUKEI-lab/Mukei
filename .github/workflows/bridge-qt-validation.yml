@@ -44,24 +44,9 @@ jobs:
           key: ${{ runner.os }}-cargo-bridge-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-bridge-
-      - name: Capture bridge compiler diagnostics
-        id: bridge-build
-        continue-on-error: true
+      - name: cargo build -p mukei-bridge
         working-directory: rust
-        run: >-
-          cargo build --quiet -p mukei-bridge --features "sqlcipher,network"
-          --message-format=short > /tmp/mukei-bridge-build.log 2>&1
-      - name: Upload bridge compiler diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bridge-build-diagnostics
-          path: /tmp/mukei-bridge-build.log
-          if-no-files-found: error
-          retention-days: 1
-      - name: Enforce bridge build result
-        if: steps.bridge-build.outcome == 'failure'
-        run: exit 1
+        run: cargo build -p mukei-bridge --features "sqlcipher,network"
 
   qml-runtime:
     name: qml configure-build-test gate
@@ -97,12 +82,26 @@ jobs:
       - name: Build bridge library for QML linkage
         working-directory: rust
         run: cargo build -p mukei-bridge --features "sqlcipher,network"
-      - name: Configure QML build
+      - name: Capture QML configure diagnostics
+        id: qml-configure
+        continue-on-error: true
         working-directory: qml
         run: >-
           cmake -S . -B "$CMAKE_BUILD_DIR" -G Ninja
           -DMUKEI_USE_REAL_BRIDGE=ON
           -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/debug/libmukei_bridge.so"
+          > /tmp/mukei-qml-configure.log 2>&1
+      - name: Upload QML configure diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qml-configure-diagnostics
+          path: /tmp/mukei-qml-configure.log
+          if-no-files-found: error
+          retention-days: 1
+      - name: Enforce QML configure result
+        if: steps.qml-configure.outcome == 'failure'
+        run: exit 1
       - name: Build generated qmllint targets
         run: |
           cmake --build "$CMAKE_BUILD_DIR" --target help > /tmp/mukei-qml-targets.txt
