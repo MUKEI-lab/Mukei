@@ -57,7 +57,6 @@ fn secret_class<'local>(
     Ok(JClass::from(class_object))
 }
 
-
 #[cfg(target_os = "android")]
 pub fn exists(alias: &str) -> Result<bool, String> {
     use jni::objects::{JObject, JString};

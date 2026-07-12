@@ -22,10 +22,10 @@ mod app_runtime;
 mod async_bridge;
 mod bootstrap;
 mod bridge_state;
-mod protocol;
 mod database_bridge;
 mod document_bridge;
 mod download_bridge;
+mod protocol;
 mod provenance;
 mod recovery_bridge;
 mod settings_bridge;
@@ -45,11 +45,10 @@ compile_error!("Android release builds must enable the mukei-bridge/sqlcipher fe
 ))]
 compile_error!("exactly one runtime environment feature may be enabled");
 
-
 #[cfg(feature = "rusqlite")]
 use mukei_core::storage::{
-    saf as core_saf, AuditChainStatus, AuditEntry, AuditLogReader,
-    ConversationRepository, MessageStatus, PersistedTurn,
+    saf as core_saf, AuditChainStatus, AuditEntry, AuditLogReader, ConversationRepository,
+    MessageStatus, PersistedTurn,
 };
 
 #[cfg(all(feature = "rusqlite", target_os = "android"))]
@@ -95,18 +94,18 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
-use bridge_state::RuntimePhase;
 use app_runtime::application_runtime as runtime_state;
+use bootstrap::{
+    prepare_database_key_with_observer, BootstrapStart, PlatformSecureKeyProvider,
+    SecureBootstrapState,
+};
+use bridge_state::RuntimePhase;
 use bridge_state::{
     single_active_download, ActiveDownload, BusyGuard, DownloadSlotGuard, InitializationGuard,
 };
 #[cfg(feature = "rusqlite")]
 use mukei_core::agent::AgentRunOutcome;
 use mukei_core::agent::{AgentEventSink, AgentRunRequest};
-use bootstrap::{
-    prepare_database_key_with_observer, BootstrapStart, PlatformSecureKeyProvider,
-    SecureBootstrapState,
-};
 use mukei_core::ffi::tags::{TagEvents, TagsStreaming};
 use mukei_core::tools::{RemoteFeaturePolicy, ToolRegistry};
 use mukei_core::types::{BranchId, ConversationId, MessageId};
@@ -118,9 +117,11 @@ use mukei_core::ui_contract::{
 const BRAVE_SECRET_ALIAS: &str = "mukei.provider.brave";
 const TAVILY_SECRET_ALIAS: &str = "mukei.provider.tavily";
 
-
 pub(crate) fn event_json(event: BridgeEvent) -> QString {
-    let json = runtime_state().protocol_state().lock().wrap_bridge_event(event);
+    let json = runtime_state()
+        .protocol_state()
+        .lock()
+        .wrap_bridge_event(event);
     QString::from(json.as_str())
 }
 
@@ -245,7 +246,6 @@ fn download_event_error(code: &'static str, message: String) -> mukei_core::erro
         _ => mukei_core::error::MukeiError::Internal(message),
     }
 }
-
 
 fn default_model_base_dir() -> std::path::PathBuf {
     std::env::var("XDG_DATA_HOME")
@@ -390,15 +390,13 @@ fn preference_value_from_qvariant(
         | "first_run_completed"
         | "search.enable_cache"
         | "reduce_motion"
-        | "high_contrast" => {
-            value
-                .value::<bool>()
-                .map(PreferenceValue::Bool)
-                .ok_or_else(|| mukei_core::error::MukeiError::ConfigInvalid {
-                    field: key.into(),
-                    reason: "expected boolean setting value".into(),
-                })
-        }
+        | "high_contrast" => value
+            .value::<bool>()
+            .map(PreferenceValue::Bool)
+            .ok_or_else(|| mukei_core::error::MukeiError::ConfigInvalid {
+                field: key.into(),
+                reason: "expected boolean setting value".into(),
+            }),
         "search.max_parallel_engines"
         | "search.brave_timeout_secs"
         | "search.tavily_timeout_secs"
@@ -443,26 +441,24 @@ fn preference_value_from_json(
         | "first_run_completed"
         | "search.enable_cache"
         | "reduce_motion"
-        | "high_contrast" => value
-            .as_bool()
-            .map(PreferenceValue::Bool)
-            .ok_or_else(|| mukei_core::error::MukeiError::ConfigInvalid {
+        | "high_contrast" => value.as_bool().map(PreferenceValue::Bool).ok_or_else(|| {
+            mukei_core::error::MukeiError::ConfigInvalid {
                 field: key.into(),
                 reason: "expected boolean setting value".into(),
-            }),
+            }
+        }),
         "search.max_parallel_engines"
         | "search.brave_timeout_secs"
         | "search.tavily_timeout_secs"
         | "font_scale_percent"
         | "temperature_milli"
         | "max_tokens_default"
-        | "top_p_milli" => value
-            .as_i64()
-            .map(PreferenceValue::Integer)
-            .ok_or_else(|| mukei_core::error::MukeiError::ConfigInvalid {
+        | "top_p_milli" => value.as_i64().map(PreferenceValue::Integer).ok_or_else(|| {
+            mukei_core::error::MukeiError::ConfigInvalid {
                 field: key.into(),
                 reason: "expected integer setting value".into(),
-            }),
+            }
+        }),
         "remote_feature_policy" | "theme_mode" => value
             .as_str()
             .map(|value| PreferenceValue::String(value.to_string()))
@@ -489,17 +485,11 @@ pub(crate) fn dispatch_protocol_setting_update(
         let pref = match preference_value_from_json(&key, &value) {
             Ok(value) => value,
             Err(error) => {
-                let error_value = serde_json::to_value(UiError::from_mukei_error(
-                    &error,
-                    "settings.update",
-                ))
-                .unwrap_or_else(|_| serde_json::json!({"code": "ERR_SETTING_INVALID"}));
-                let event = protocol::async_operation_event_json(
-                    &context,
-                    false,
-                    None,
-                    Some(error_value),
-                );
+                let error_value =
+                    serde_json::to_value(UiError::from_mukei_error(&error, "settings.update"))
+                        .unwrap_or_else(|_| serde_json::json!({"code": "ERR_SETTING_INVALID"}));
+                let event =
+                    protocol::async_operation_event_json(&context, false, None, Some(error_value));
                 let _ = qt.queue(move |mut qobject| {
                     qobject.as_mut().event_emitted(event);
                 });
@@ -510,17 +500,11 @@ pub(crate) fn dispatch_protocol_setting_update(
             let error = mukei_core::error::MukeiError::DatabaseInitFailed(
                 "settings database is not initialized".into(),
             );
-            let error_value = serde_json::to_value(UiError::from_mukei_error(
-                &error,
-                "settings.update",
-            ))
-            .unwrap_or_else(|_| serde_json::json!({"code": "ERR_SETTING_BACKEND"}));
-            let event = protocol::async_operation_event_json(
-                &context,
-                false,
-                None,
-                Some(error_value),
-            );
+            let error_value =
+                serde_json::to_value(UiError::from_mukei_error(&error, "settings.update"))
+                    .unwrap_or_else(|_| serde_json::json!({"code": "ERR_SETTING_BACKEND"}));
+            let event =
+                protocol::async_operation_event_json(&context, false, None, Some(error_value));
             let _ = qt.queue(move |mut qobject| {
                 qobject.as_mut().event_emitted(event);
             });
@@ -555,17 +539,10 @@ pub(crate) fn dispatch_protocol_setting_update(
                     None,
                 ),
                 Err(error) => {
-                    let error_value = serde_json::to_value(UiError::from_mukei_error(
-                        &error,
-                        "settings.update",
-                    ))
-                    .unwrap_or_else(|_| serde_json::json!({"code": "ERR_SETTING_PERSIST"}));
-                    protocol::async_operation_event_json(
-                        &context,
-                        false,
-                        None,
-                        Some(error_value),
-                    )
+                    let error_value =
+                        serde_json::to_value(UiError::from_mukei_error(&error, "settings.update"))
+                            .unwrap_or_else(|_| serde_json::json!({"code": "ERR_SETTING_PERSIST"}));
+                    protocol::async_operation_event_json(&context, false, None, Some(error_value))
                 }
             };
             let _ = qt.queue(move |mut qobject| {
@@ -799,12 +776,14 @@ async fn persist_provider_secret_refs(
 /// plaintext never returns to Java and old bridge copies are zeroized
 /// when replaced.
 async fn rebuild_tool_registry_from_secrets() {
-    let brave = runtime_state().brave_api_key()
+    let brave = runtime_state()
+        .brave_api_key()
         .lock()
         .as_ref()
         .map(|key| Zeroizing::new(key.as_str().to_owned()))
         .unwrap_or_else(|| Zeroizing::new("missing-brave-key".to_string()));
-    let tavily = runtime_state().tavily_api_key()
+    let tavily = runtime_state()
+        .tavily_api_key()
         .lock()
         .as_ref()
         .map(|key| Zeroizing::new(key.as_str().to_owned()))
@@ -843,12 +822,14 @@ async fn rebuild_tool_registry_from_secrets() {
 }
 
 fn rebuild_tool_registry_from_secrets_blocking() {
-    let brave = runtime_state().brave_api_key()
+    let brave = runtime_state()
+        .brave_api_key()
         .lock()
         .as_ref()
         .map(|key| Zeroizing::new(key.as_str().to_owned()))
         .unwrap_or_else(|| Zeroizing::new("missing-brave-key".to_string()));
-    let tavily = runtime_state().tavily_api_key()
+    let tavily = runtime_state()
+        .tavily_api_key()
         .lock()
         .as_ref()
         .map(|key| Zeroizing::new(key.as_str().to_owned()))
@@ -915,7 +896,8 @@ async fn record_document_revoke_audit(
         error_code: None,
         fingerprint_sha256: audit_fingerprint,
     };
-    let row_id = runtime_state().audit_log_writer()
+    let row_id = runtime_state()
+        .audit_log_writer()
         .record_with_id(pool, audit_entry)
         .await?;
     core_saf::SafRegistry::link_document_audit_event(pool, token, row_id).await?;
@@ -1025,11 +1007,7 @@ pub mod ffi {
             cursor_position: i32,
         );
         #[qinvokable]
-        fn clear_draft(
-            self: Pin<&mut MukeiAgent>,
-            conversation_id: QString,
-            branch_id: QString,
-        );
+        fn clear_draft(self: Pin<&mut MukeiAgent>, conversation_id: QString, branch_id: QString);
         #[qinvokable]
         fn conversation_list_json(self: Pin<&mut MukeiAgent>, limit: i32) -> QString;
         #[qinvokable]
@@ -1049,15 +1027,9 @@ pub mod ffi {
         #[qinvokable]
         fn settings_snapshot_json(self: Pin<&mut MukeiAgent>) -> QString;
         #[qinvokable]
-        fn select_installed_model_json(
-            self: Pin<&mut MukeiAgent>,
-            model_id: QString,
-        ) -> QString;
+        fn select_installed_model_json(self: Pin<&mut MukeiAgent>, model_id: QString) -> QString;
         #[qinvokable]
-        fn delete_installed_model_json(
-            self: Pin<&mut MukeiAgent>,
-            model_id: QString,
-        ) -> QString;
+        fn delete_installed_model_json(self: Pin<&mut MukeiAgent>, model_id: QString) -> QString;
         #[qinvokable]
         fn grant_document_access_json(
             self: Pin<&mut MukeiAgent>,
@@ -1066,10 +1038,7 @@ pub mod ffi {
             mime: QString,
         ) -> QString;
         #[qinvokable]
-        fn revoke_document_json(
-            self: Pin<&mut MukeiAgent>,
-            document_id: QString,
-        ) -> QString;
+        fn revoke_document_json(self: Pin<&mut MukeiAgent>, document_id: QString) -> QString;
         #[qinvokable]
         fn retry_document_ingestion_json(
             self: Pin<&mut MukeiAgent>,
@@ -2241,9 +2210,7 @@ impl ffi::MukeiAgent {
                         let turn = persisted_turn_for_chunks.lock().await.clone();
                         if let Some(turn) = turn {
                             let content = partial_response_for_chunks.lock().await.clone();
-                            if let Some(pool) =
-                                runtime_state().database_pool()
-                            {
+                            if let Some(pool) = runtime_state().database_pool() {
                                 if let Err(e) = ConversationRepository::update_assistant_partial(
                                     &pool,
                                     turn,
@@ -3057,7 +3024,9 @@ impl ffi::MukeiAgent {
                     },
                     None => Ok(serde_json::Value::Null),
                 };
-                let completion = runtime_state().request_tracker().completion_json(&ticket, result);
+                let completion = runtime_state()
+                    .request_tracker()
+                    .completion_json(&ticket, result);
                 let _ = qt.queue(move |mut qobject| {
                     qobject.as_mut().async_result(QString::from(&completion));
                 });
@@ -3081,7 +3050,6 @@ impl ffi::MukeiAgent {
         start_interrupted_attempt(self, BridgeRecoveryMode::Regenerate);
     }
 
-
     pub fn ui_session_json(self: Pin<&mut Self>) -> QString {
         let qt = self.as_ref().get_ref().qt_thread();
         let tracker = runtime_state().request_tracker();
@@ -3097,7 +3065,9 @@ impl ffi::MukeiAgent {
                         .map_err(|error| async_error_value(&error, "ui_session_json")),
                     None => Ok(serde_json::json!({"session": null, "active_draft": null})),
                 };
-                let completion = runtime_state().request_tracker().completion_json(&ticket, result);
+                let completion = runtime_state()
+                    .request_tracker()
+                    .completion_json(&ticket, result);
                 let _ = qt.queue(move |mut qobject| {
                     qobject.as_mut().async_result(QString::from(&completion));
                 });
@@ -3174,7 +3144,8 @@ impl ffi::MukeiAgent {
                     };
                     let event = error_bridge_event(&error, "save_ui_session");
                     let code = error.error_code().to_string();
-                    let message = mukei_core::diagnostics::sanitize_error_message(error.to_string());
+                    let message =
+                        mukei_core::diagnostics::sanitize_error_message(error.to_string());
                     let _ = qt.queue(move |mut qobject| {
                         qobject.as_mut().event_emitted(event_json(event));
                         qobject
@@ -3190,7 +3161,8 @@ impl ffi::MukeiAgent {
                 {
                     let event = error_bridge_event(&error, "save_ui_session");
                     let code = error.error_code().to_string();
-                    let message = mukei_core::diagnostics::sanitize_error_message(error.to_string());
+                    let message =
+                        mukei_core::diagnostics::sanitize_error_message(error.to_string());
                     let _ = qt.queue(move |mut qobject| {
                         qobject.as_mut().event_emitted(event_json(event));
                         qobject
@@ -3235,7 +3207,9 @@ impl ffi::MukeiAgent {
                         "draft": null,
                     })),
                 };
-                let completion = runtime_state().request_tracker().completion_json(&ticket, result);
+                let completion = runtime_state()
+                    .request_tracker()
+                    .completion_json(&ticket, result);
                 let _ = qt.queue(move |mut qobject| {
                     qobject.as_mut().async_result(QString::from(&completion));
                 });
@@ -3285,7 +3259,8 @@ impl ffi::MukeiAgent {
                 {
                     let event = error_bridge_event(&error, "save_draft");
                     let code = error.error_code().to_string();
-                    let message = mukei_core::diagnostics::sanitize_error_message(error.to_string());
+                    let message =
+                        mukei_core::diagnostics::sanitize_error_message(error.to_string());
                     let _ = qt.queue(move |mut qobject| {
                         qobject.as_mut().event_emitted(event_json(event));
                         qobject
@@ -3301,11 +3276,7 @@ impl ffi::MukeiAgent {
         }
     }
 
-    pub fn clear_draft(
-        self: Pin<&mut Self>,
-        conversation_id: QString,
-        branch_id: QString,
-    ) {
+    pub fn clear_draft(self: Pin<&mut Self>, conversation_id: QString, branch_id: QString) {
         #[cfg(feature = "rusqlite")]
         {
             let Some(pool) = runtime_state().database_pool() else {
@@ -3321,7 +3292,10 @@ impl ffi::MukeiAgent {
                 )
                 .await
                 {
-                    tracing::warn!(code = error.error_code(), "failed to clear persisted UI draft");
+                    tracing::warn!(
+                        code = error.error_code(),
+                        "failed to clear persisted UI draft"
+                    );
                 }
             });
         }
@@ -3376,7 +3350,9 @@ impl ffi::MukeiAgent {
         #[cfg(feature = "rusqlite")]
         {
             let Some(pool) = runtime_state().database_pool() else {
-                return QString::from("{\"items\":[],\"has_older\":false,\"oldest_message_id\":\"\"}");
+                return QString::from(
+                    "{\"items\":[],\"has_older\":false,\"oldest_message_id\":\"\"}",
+                );
             };
             let parsed = (|| {
                 let conversation = conversation_id
@@ -3567,15 +3543,16 @@ impl ffi::MukeiAgent {
             let pool = runtime_state().database_pool();
             mukei_core::runtime::get().spawn(async move {
                 let result = match pool {
-                    Some(pool) => download_bridge::recent_jobs_snapshot(
-                        &pool,
-                        limit.max(1) as usize,
-                    )
-                    .await
-                    .map_err(|error| async_error_value(&error, "download_jobs_json")),
+                    Some(pool) => {
+                        download_bridge::recent_jobs_snapshot(&pool, limit.max(1) as usize)
+                            .await
+                            .map_err(|error| async_error_value(&error, "download_jobs_json"))
+                    }
                     None => Ok(serde_json::json!([])),
                 };
-                let completion = runtime_state().request_tracker().completion_json(&ticket, result);
+                let completion = runtime_state()
+                    .request_tracker()
+                    .completion_json(&ticket, result);
                 let _ = qt.queue(move |mut qobject| {
                     qobject.as_mut().async_result(QString::from(&completion));
                 });
@@ -3599,18 +3576,23 @@ impl ffi::MukeiAgent {
         let accepted = tracker.accepted_json(&ticket);
         let model_root = runtime_state().model_dir();
         mukei_core::runtime::get().spawn(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                storage_bridge::storage_snapshot(&model_root)
-            })
-            .await
-            .map_err(|error| serde_json::json!({
-                "code": "ERR_BLOCKING_JOIN",
-                "safe_message": "Storage usage could not be measured safely.",
-                "technical_message": error.to_string(),
-                "recoverable": true,
-            }))
-            .and_then(|value| value.map_err(|error| async_error_value(&error, "storage_snapshot_json")));
-            let completion = runtime_state().request_tracker().completion_json(&ticket, result);
+            let result =
+                tokio::task::spawn_blocking(move || storage_bridge::storage_snapshot(&model_root))
+                    .await
+                    .map_err(|error| {
+                        serde_json::json!({
+                            "code": "ERR_BLOCKING_JOIN",
+                            "safe_message": "Storage usage could not be measured safely.",
+                            "technical_message": error.to_string(),
+                            "recoverable": true,
+                        })
+                    })
+                    .and_then(|value| {
+                        value.map_err(|error| async_error_value(&error, "storage_snapshot_json"))
+                    });
+            let completion = runtime_state()
+                .request_tracker()
+                .completion_json(&ticket, result);
             let _ = qt.queue(move |mut qobject| {
                 qobject.as_mut().async_result(QString::from(&completion));
             });
@@ -3628,15 +3610,16 @@ impl ffi::MukeiAgent {
             let pool = runtime_state().database_pool();
             mukei_core::runtime::get().spawn(async move {
                 let result = match pool {
-                    Some(pool) => document_bridge::document_list_snapshot(
-                        &pool,
-                        limit.max(1) as usize,
-                    )
-                    .await
-                    .map_err(|error| async_error_value(&error, "document_list_json")),
+                    Some(pool) => {
+                        document_bridge::document_list_snapshot(&pool, limit.max(1) as usize)
+                            .await
+                            .map_err(|error| async_error_value(&error, "document_list_json"))
+                    }
                     None => Ok(serde_json::json!([])),
                 };
-                let completion = runtime_state().request_tracker().completion_json(&ticket, result);
+                let completion = runtime_state()
+                    .request_tracker()
+                    .completion_json(&ticket, result);
                 let _ = qt.queue(move |mut qobject| {
                     qobject.as_mut().async_result(QString::from(&completion));
                 });
@@ -3653,7 +3636,6 @@ impl ffi::MukeiAgent {
         QString::from(&accepted)
     }
 
-
     pub fn settings_snapshot_json(self: Pin<&mut Self>) -> QString {
         let qt = self.as_ref().get_ref().qt_thread();
         let tracker = runtime_state().request_tracker();
@@ -3669,7 +3651,9 @@ impl ffi::MukeiAgent {
                         .map_err(|error| async_error_value(&error, "settings_snapshot_json")),
                     None => Ok(serde_json::json!([])),
                 };
-                let completion = runtime_state().request_tracker().completion_json(&ticket, result);
+                let completion = runtime_state()
+                    .request_tracker()
+                    .completion_json(&ticket, result);
                 let _ = qt.queue(move |mut qobject| {
                     qobject.as_mut().async_result(QString::from(&completion));
                 });
@@ -3685,10 +3669,7 @@ impl ffi::MukeiAgent {
         QString::from(&accepted)
     }
 
-    pub fn select_installed_model_json(
-        self: Pin<&mut Self>,
-        model_id: QString,
-    ) -> QString {
+    pub fn select_installed_model_json(self: Pin<&mut Self>, model_id: QString) -> QString {
         let model_id = model_id.to_string();
         let Some(descriptor) = mukei_core::engine::lookup_model_str(&model_id) else {
             let error = mukei_core::error::MukeiError::ConfigInvalid {
@@ -3735,10 +3716,7 @@ impl ffi::MukeiAgent {
         )
     }
 
-    pub fn delete_installed_model_json(
-        self: Pin<&mut Self>,
-        model_id: QString,
-    ) -> QString {
+    pub fn delete_installed_model_json(self: Pin<&mut Self>, model_id: QString) -> QString {
         let model_id = model_id.to_string();
         let Some(descriptor) = mukei_core::engine::lookup_model_str(&model_id) else {
             let error = mukei_core::error::MukeiError::ConfigInvalid {
@@ -3822,7 +3800,9 @@ impl ffi::MukeiAgent {
                 );
             }
         };
-        if !canonical_path.starts_with(&canonical_root) || canonical_path.parent() != Some(canonical_root.as_path()) {
+        if !canonical_path.starts_with(&canonical_root)
+            || canonical_path.parent() != Some(canonical_root.as_path())
+        {
             let error = mukei_core::error::MukeiError::ConfigInvalid {
                 field: "models_dir".into(),
                 reason: "model path escaped the app-private model directory".into(),
@@ -3908,22 +3888,28 @@ impl ffi::MukeiAgent {
             let pool = runtime_state().database_pool();
             mukei_core::runtime::get().spawn(async move {
                 let result = async {
-                    let pool = pool.ok_or_else(|| mukei_core::error::MukeiError::DatabaseInitFailed(
-                        "private storage is not ready".into(),
-                    ))?;
+                    let pool = pool.ok_or_else(|| {
+                        mukei_core::error::MukeiError::DatabaseInitFailed(
+                            "private storage is not ready".into(),
+                        )
+                    })?;
                     let permission_target = target.clone();
                     let permission_state = tokio::task::spawn_blocking(move || {
-                        let state = android_document_access::persist_read_permission(&permission_target)
-                            .map_err(mukei_core::error::MukeiError::Io)?;
+                        let state =
+                            android_document_access::persist_read_permission(&permission_target)
+                                .map_err(mukei_core::error::MukeiError::Io)?;
                         if state == android_document_access::PermissionState::Failed
-                            || !android_document_access::can_read(&permission_target).unwrap_or(false)
+                            || !android_document_access::can_read(&permission_target)
+                                .unwrap_or(false)
                         {
                             return Err(mukei_core::error::MukeiError::SafRequired);
                         }
                         Ok(state)
                     })
                     .await
-                    .map_err(|error| mukei_core::error::MukeiError::BlockingJoinFailed(error.to_string()))??;
+                    .map_err(|error| {
+                        mukei_core::error::MukeiError::BlockingJoinFailed(error.to_string())
+                    })??;
                     let token = format!("saf-{}", uuid::Uuid::new_v4());
                     let row = core_saf::SafTokenRow {
                         token_id: token,
@@ -3947,10 +3933,15 @@ impl ffi::MukeiAgent {
                             "indexed": false
                         })),
                         Err(error) => {
-                            if matches!(permission_state, android_document_access::PermissionState::Persisted) {
+                            if matches!(
+                                permission_state,
+                                android_document_access::PermissionState::Persisted
+                            ) {
                                 let release_target = target.clone();
                                 let _ = tokio::task::spawn_blocking(move || {
-                                    android_document_access::release_read_permission(&release_target)
+                                    android_document_access::release_read_permission(
+                                        &release_target,
+                                    )
                                 })
                                 .await;
                             }
@@ -3973,7 +3964,9 @@ impl ffi::MukeiAgent {
                         Err(async_error_value(&error, "grant_document_access_json"))
                     }
                 };
-                let completion = runtime_state().request_tracker().completion_json(&ticket, result);
+                let completion = runtime_state()
+                    .request_tracker()
+                    .completion_json(&ticket, result);
                 let _ = qt.queue(move |mut qobject| {
                     qobject.as_mut().async_result(QString::from(&completion));
                 });
@@ -3995,10 +3988,7 @@ impl ffi::MukeiAgent {
         QString::from(&accepted)
     }
 
-    pub fn revoke_document_json(
-        self: Pin<&mut Self>,
-        document_id: QString,
-    ) -> QString {
+    pub fn revoke_document_json(self: Pin<&mut Self>, document_id: QString) -> QString {
         let qt = self.as_ref().get_ref().qt_thread();
         let document_id = document_id.to_string();
         let tracker = runtime_state().request_tracker();
@@ -4009,11 +3999,16 @@ impl ffi::MukeiAgent {
             let pool = runtime_state().database_pool();
             mukei_core::runtime::get().spawn(async move {
                 let result = async {
-                    let pool = pool.ok_or_else(|| mukei_core::error::MukeiError::DatabaseInitFailed(
-                        "private storage is not ready".into(),
-                    ))?;
-                    let token = core_saf::SafRegistry::token_for_document_id(&pool, &document_id).await?;
-                    let target_for_release = core_saf::SafRegistry::target_for_token(&pool, &token).await.ok();
+                    let pool = pool.ok_or_else(|| {
+                        mukei_core::error::MukeiError::DatabaseInitFailed(
+                            "private storage is not ready".into(),
+                        )
+                    })?;
+                    let token =
+                        core_saf::SafRegistry::token_for_document_id(&pool, &document_id).await?;
+                    let target_for_release = core_saf::SafRegistry::target_for_token(&pool, &token)
+                        .await
+                        .ok();
                     let plan = runtime_state()
                         .saf_registry()
                         .persist_revoke(&pool, &token, "user_revoke")
@@ -4026,13 +4021,29 @@ impl ffi::MukeiAgent {
                     )
                     .await
                     {
-                        tracing::error!(code = error.error_code(), "document revoke audit linkage remains retryable");
+                        tracing::error!(
+                            code = error.error_code(),
+                            "document revoke audit linkage remains retryable"
+                        );
                     }
                     if let Some(config) = runtime_state().config() {
-                        match agent_runtime::purge_vector_chunks(&config, plan.chunk_ids.clone()).await {
-                            Ok(_) => core_saf::SafRegistry::mark_document_cleanup_complete(&pool, &plan.file_token).await?,
+                        match agent_runtime::purge_vector_chunks(&config, plan.chunk_ids.clone())
+                            .await
+                        {
+                            Ok(_) => {
+                                core_saf::SafRegistry::mark_document_cleanup_complete(
+                                    &pool,
+                                    &plan.file_token,
+                                )
+                                .await?
+                            }
                             Err(error) => {
-                                core_saf::SafRegistry::mark_document_cleanup_failed(&pool, &plan.file_token, &error).await?;
+                                core_saf::SafRegistry::mark_document_cleanup_failed(
+                                    &pool,
+                                    &plan.file_token,
+                                    &error,
+                                )
+                                .await?;
                             }
                         }
                     }
@@ -4062,7 +4073,9 @@ impl ffi::MukeiAgent {
                         Err(async_error_value(&error, "revoke_document_json"))
                     }
                 };
-                let completion = runtime_state().request_tracker().completion_json(&ticket, result);
+                let completion = runtime_state()
+                    .request_tracker()
+                    .completion_json(&ticket, result);
                 let _ = qt.queue(move |mut qobject| {
                     qobject.as_mut().async_result(QString::from(&completion));
                 });
@@ -4084,10 +4097,7 @@ impl ffi::MukeiAgent {
         QString::from(&accepted)
     }
 
-    pub fn retry_document_ingestion_json(
-        self: Pin<&mut Self>,
-        document_id: QString,
-    ) -> QString {
+    pub fn retry_document_ingestion_json(self: Pin<&mut Self>, document_id: QString) -> QString {
         let qt = self.as_ref().get_ref().qt_thread();
         let document_id = document_id.to_string();
         let tracker = runtime_state().request_tracker();
@@ -4098,10 +4108,13 @@ impl ffi::MukeiAgent {
             let pool = runtime_state().database_pool();
             mukei_core::runtime::get().spawn(async move {
                 let result = async {
-                    let pool = pool.ok_or_else(|| mukei_core::error::MukeiError::DatabaseInitFailed(
-                        "private storage is not ready".into(),
-                    ))?;
-                    let token = core_saf::SafRegistry::token_for_document_id(&pool, &document_id).await?;
+                    let pool = pool.ok_or_else(|| {
+                        mukei_core::error::MukeiError::DatabaseInitFailed(
+                            "private storage is not ready".into(),
+                        )
+                    })?;
+                    let token =
+                        core_saf::SafRegistry::token_for_document_id(&pool, &document_id).await?;
                     let id = core_saf::SafRegistry::queue_document_ingestion(&pool, &token).await?;
                     Ok::<_, mukei_core::error::MukeiError>(serde_json::json!({
                         "document_id": id,
@@ -4124,7 +4137,9 @@ impl ffi::MukeiAgent {
                         Err(async_error_value(&error, "retry_document_ingestion_json"))
                     }
                 };
-                let completion = runtime_state().request_tracker().completion_json(&ticket, result);
+                let completion = runtime_state()
+                    .request_tracker()
+                    .completion_json(&ticket, result);
                 let _ = qt.queue(move |mut qobject| {
                     qobject.as_mut().async_result(QString::from(&completion));
                 });
@@ -4145,7 +4160,6 @@ impl ffi::MukeiAgent {
         }
         QString::from(&accepted)
     }
-
 
     pub fn ui_contract_snapshot_json(self: Pin<&mut Self>) -> QString {
         let snapshot = mukei_core::ui_contract::UiContractSnapshot::current();
@@ -4290,7 +4304,9 @@ impl ffi::MukeiAgent {
     pub fn diagnostics_snapshot_json(self: Pin<&mut Self>) -> QString {
         let runtime_phase = format!("{:?}", runtime_state().runtime_coordinator().phase());
         let model_root = runtime_state().model_dir();
-        let storage = mukei_core::storage::StorageQuotaManager::new(&model_root).usage().ok();
+        let storage = mukei_core::storage::StorageQuotaManager::new(&model_root)
+            .usage()
+            .ok();
         let document_count = runtime_state().saf_registry().count();
         QString::from(
             serde_json::json!({
@@ -4319,7 +4335,9 @@ impl ffi::MukeiAgent {
     pub fn provenance_snapshot_json(self: Pin<&mut Self>) -> QString {
         QString::from(
             serde_json::to_string(&provenance::snapshot())
-                .unwrap_or_else(|_| "{\"schema_version\":1,\"product_version\":\"unknown\"}".to_string())
+                .unwrap_or_else(|_| {
+                    "{\"schema_version\":1,\"product_version\":\"unknown\"}".to_string()
+                })
                 .as_str(),
         )
     }
@@ -4330,7 +4348,7 @@ impl ffi::MukeiAgent {
         }
         let snapshot = self.diagnostics_snapshot_json().to_string();
         let Some(config) = runtime_state().config() else {
-            return QString::from("{\"ok\":false,\"error\":{\"code\":\"ERR_CONFIG\",\"safe_message\":\"Diagnostics are unavailable before initialization.\"}}")
+            return QString::from("{\"ok\":false,\"error\":{\"code\":\"ERR_CONFIG\",\"safe_message\":\"Diagnostics are unavailable before initialization.\"}}");
         };
         let export_dir = config.logs_dir.join("exports");
         if let Err(error) = std::fs::create_dir_all(&export_dir) {
@@ -4383,8 +4401,6 @@ impl ffi::MukeiAgent {
             }
         }
     }
-
-
 }
 
 impl ffi::MukeiBridge {
@@ -4567,7 +4583,9 @@ impl ffi::MukeiBridge {
             .iter()
             .map(|m| {
                 let path = model_dir.join(m.filename);
-                let metadata = std::fs::metadata(&path).ok().filter(|value| value.is_file());
+                let metadata = std::fs::metadata(&path)
+                    .ok()
+                    .filter(|value| value.is_file());
                 Entry {
                     id: m.id.as_str(),
                     display_name: m.display_name,
@@ -4616,7 +4634,8 @@ impl ffi::SafRegistry {
     }
 
     pub fn resolve_token(self: Pin<&mut Self>, token: QString) -> QString {
-        runtime_state().saf_registry()
+        runtime_state()
+            .saf_registry()
             .resolve(&token.to_string())
             .map(|target| QString::from(&target))
             .unwrap_or_else(|_| QString::from(""))

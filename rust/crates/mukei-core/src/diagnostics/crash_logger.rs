@@ -162,7 +162,8 @@ impl CrashSink {
         // arbitrarily large caller-owned string.
         let safe_record = CrashRecord {
             fingerprint: rec.fingerprint.clone(),
-            location: sanitize_telemetry_text(&rec.location, MAX_CRASH_LOCATION_CHARS).into_string(),
+            location: sanitize_telemetry_text(&rec.location, MAX_CRASH_LOCATION_CHARS)
+                .into_string(),
             reason: sanitize_crash_reason(&rec.reason),
             ts: rec.ts,
         };
@@ -372,7 +373,6 @@ mod tests {
         assert!(serde_json::to_vec(&rec).unwrap().len() <= MAX_CRASH_RECORD_BYTES);
     }
 
-
     #[test]
     fn append_resanitizes_public_record_fields_before_serialization() {
         let dir = tempdir().unwrap();
@@ -397,11 +397,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let sink = CrashSink::open(dir.path()).unwrap();
         let fp = CrashFingerprint::from_panic("x.rs:1", "boom");
-        std::fs::write(
-            sink.file_for(&fp),
-            vec![b'x'; MAX_CRASH_RECORD_BYTES + 1],
-        )
-        .unwrap();
+        std::fs::write(sink.file_for(&fp), vec![b'x'; MAX_CRASH_RECORD_BYTES + 1]).unwrap();
         let err = sink.recent_for(&fp).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
@@ -422,5 +418,4 @@ mod tests {
             .count();
         assert!(count <= MAX_CRASH_RECORD_FILES);
     }
-
 }

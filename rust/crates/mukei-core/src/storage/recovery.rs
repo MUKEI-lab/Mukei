@@ -572,7 +572,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(RecoveryStore::interrupted_turn(&pool).await.unwrap().is_none());
+        assert!(RecoveryStore::interrupted_turn(&pool)
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
@@ -588,21 +591,26 @@ mod tests {
             .unwrap();
         assert_eq!(before.len(), 3);
 
-        let second = RecoveryStore::begin_attempt(
-            &pool,
-            RecoveryMode::Regenerate,
-            MessageId::new(),
-        )
-        .await;
-        assert!(second.is_err(), "a claimed recovery snapshot must be single-use");
+        let second =
+            RecoveryStore::begin_attempt(&pool, RecoveryMode::Regenerate, MessageId::new()).await;
+        assert!(
+            second.is_err(),
+            "a claimed recovery snapshot must be single-use"
+        );
 
         let after = ConversationRepository::get_messages_for_conversation(&pool, conversation)
             .await
             .unwrap();
         assert_eq!(after.len(), before.len());
         assert_eq!(
-            after.iter().map(|message| message.external_id).collect::<Vec<_>>(),
-            before.iter().map(|message| message.external_id).collect::<Vec<_>>()
+            after
+                .iter()
+                .map(|message| message.external_id)
+                .collect::<Vec<_>>(),
+            before
+                .iter()
+                .map(|message| message.external_id)
+                .collect::<Vec<_>>()
         );
     }
 

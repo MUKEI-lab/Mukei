@@ -479,10 +479,7 @@ impl SafRegistry {
 
     /// Resolve an internal token to its URI for native permission release.
     /// This value never crosses the bridge into QML.
-    pub async fn target_for_token(
-        pool: &super::pool::DatabasePool,
-        token: &str,
-    ) -> Result<String> {
+    pub async fn target_for_token(pool: &super::pool::DatabasePool, token: &str) -> Result<String> {
         use super::pool::PooledConnectionExt;
         let token = token.to_string();
         pool.with_conn(move |c| {
@@ -819,8 +816,6 @@ mod tests {
             .unwrap()
             .is_empty());
     }
-
-
 
     #[cfg(feature = "rusqlite")]
     #[tokio::test]

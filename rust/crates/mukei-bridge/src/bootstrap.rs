@@ -306,8 +306,8 @@ pub(crate) fn prepare_database_key_with_observer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use parking_lot::Mutex;
+    use std::collections::HashMap;
 
     #[derive(Default)]
     struct FakeProvider {
@@ -337,12 +337,7 @@ mod tests {
             if self.unreadable.lock().get(alias).copied().unwrap_or(false) {
                 return Ok(None);
             }
-            Ok(self
-                .values
-                .lock()
-                .get(alias)
-                .cloned()
-                .map(Zeroizing::new))
+            Ok(self.values.lock().get(alias).cloned().map(Zeroizing::new))
         }
     }
 
@@ -378,7 +373,10 @@ mod tests {
             restart_states.push(state)
         })
         .unwrap();
-        assert_eq!(restart_states, vec![SecureBootstrapState::UnwrappingDatabaseKey]);
+        assert_eq!(
+            restart_states,
+            vec![SecureBootstrapState::UnwrappingDatabaseKey]
+        );
         assert!(!second.first_install);
         assert_eq!(second.key.as_slice(), first_bytes.as_slice());
         assert_eq!(restart.state(), SecureBootstrapState::UnwrappingDatabaseKey);
@@ -387,7 +385,9 @@ mod tests {
     #[test]
     fn sol03_corrupt_wrapped_database_key_is_explicit_failure() {
         let provider = FakeProvider::default();
-        provider.store(WRAPPING_KEY_PROBE_ALIAS, WRAPPING_KEY_PROBE).unwrap();
+        provider
+            .store(WRAPPING_KEY_PROBE_ALIAS, WRAPPING_KEY_PROBE)
+            .unwrap();
         provider.store(DATABASE_KEY_ALIAS, &[1, 2, 3]).unwrap();
         let coordinator = SecureBootstrapCoordinator::new();
         let failure = prepare_database_key(&coordinator, &provider).unwrap_err();
@@ -398,8 +398,12 @@ mod tests {
     #[test]
     fn sol03_invalidated_wrapping_key_requires_reset_or_recovery() {
         let provider = FakeProvider::default();
-        provider.store(WRAPPING_KEY_PROBE_ALIAS, WRAPPING_KEY_PROBE).unwrap();
-        provider.store(DATABASE_KEY_ALIAS, &[7; DATABASE_KEY_BYTES]).unwrap();
+        provider
+            .store(WRAPPING_KEY_PROBE_ALIAS, WRAPPING_KEY_PROBE)
+            .unwrap();
+        provider
+            .store(DATABASE_KEY_ALIAS, &[7; DATABASE_KEY_BYTES])
+            .unwrap();
         provider.set_unreadable(DATABASE_KEY_ALIAS);
         provider.set_unreadable(WRAPPING_KEY_PROBE_ALIAS);
         let coordinator = SecureBootstrapCoordinator::new();

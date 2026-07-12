@@ -52,7 +52,7 @@
 - Removed four redundant `map_err(Into::into)` calls introduced in post-v0.6 storage paths, matching the Clippy fix pattern already applied to settings.
 - Added an explicit unsafe block in the FFI stop-generation function.
 - Corrected README status and badges so historical Rust results are not represented as certification of the combined source.
-- Preserved the v0.6 command log as `reports/02_COMMAND_LOG_v0.6_sol.txt` for provenance.
+- The earlier v0.6 command transcript was retained during the original merge process for provenance, but raw command logs are not part of the current repository taxonomy.
 
 ## Native release gates
 

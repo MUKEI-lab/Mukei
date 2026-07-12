@@ -9,10 +9,10 @@ use std::{collections::VecDeque, sync::Arc};
 
 use crate::error::Result;
 use crate::rag::{
-    normalize_and_budget_results, IndexCompatibilityState, RagCapabilitySnapshot,
-    RetrievalBudget, RetrievalDegradedReason, RetrievalDiagnostics, RetrievalRequest,
-    RetrievalResponse, RetrievalScope, RetrievalStatus, RetrievalUnavailableReason,
-    RetrievedChunk, RetrieverError, RetrieverResult,
+    normalize_and_budget_results, IndexCompatibilityState, RagCapabilitySnapshot, RetrievalBudget,
+    RetrievalDegradedReason, RetrievalDiagnostics, RetrievalRequest, RetrievalResponse,
+    RetrievalScope, RetrievalStatus, RetrievalUnavailableReason, RetrievedChunk, RetrieverError,
+    RetrieverResult,
 };
 use crate::tools::sentinel::escape_untrusted;
 use crate::types::{BranchId, ChatMessage, ConversationId, Role};
@@ -121,10 +121,7 @@ pub trait ContextBackend: Send + Sync {
     /// filtering. It stamps the explicit request scope only for compatibility;
     /// production implementations should return resolver-validated structured
     /// chunks through the RAG retriever.
-    async fn retrieve_rag(
-        &self,
-        request: &RetrievalRequest,
-    ) -> RetrieverResult<RetrievalResponse> {
+    async fn retrieve_rag(&self, request: &RetrievalRequest) -> RetrieverResult<RetrievalResponse> {
         // An unscoped compatibility backend is only safe for the fixed local
         // single-user scope. Explicit tenant/workspace callers must provide a
         // structured backend that can prove backend-side scope filtering.
@@ -166,9 +163,7 @@ pub trait ContextBackend: Send + Sync {
         }
         let (results, diagnostics) = normalize_and_budget_results(request, results);
         Ok(RetrievalResponse {
-            status: RetrievalStatus::Degraded(
-                RetrievalDegradedReason::LegacyUnscopedAdapter,
-            ),
+            status: RetrievalStatus::Degraded(RetrievalDegradedReason::LegacyUnscopedAdapter),
             capability,
             results,
             diagnostics,
@@ -193,12 +188,7 @@ impl ContextBudgetManager {
         tokenizer: Arc<dyn TokenCount>,
         max_tokens: u32,
     ) -> Self {
-        Self::new_scoped(
-            backend,
-            tokenizer,
-            max_tokens,
-            RetrievalScope::local(),
-        )
+        Self::new_scoped(backend, tokenizer, max_tokens, RetrievalScope::local())
     }
 
     /// Construct a manager with an explicit tenant/workspace retrieval scope.
@@ -264,13 +254,8 @@ impl ContextBudgetManager {
         branch: BranchId,
         history: &[ChatMessage],
     ) -> Result<ContextBudget> {
-        self.build_for_scoped_detailed(
-            conversation,
-            branch,
-            history,
-            self.default_scope.clone(),
-        )
-        .await
+        self.build_for_scoped_detailed(conversation, branch, history, self.default_scope.clone())
+            .await
     }
 
     /// Build detailed context with an explicit per-call scope.
@@ -285,7 +270,8 @@ impl ContextBudgetManager {
             .backend
             .load_history(conversation, branch, history)
             .await?;
-        let combined: Vec<ChatMessage> = recent.into_iter().chain(history.iter().cloned()).collect();
+        let combined: Vec<ChatMessage> =
+            recent.into_iter().chain(history.iter().cloned()).collect();
 
         let rag_query = combined
             .iter()
@@ -294,9 +280,7 @@ impl ContextBudgetManager {
             .map(|message| message.content.clone())
             .unwrap_or_default();
         let mut request_budget = self.rag_budget.clone();
-        request_budget.max_chunk_bytes = request_budget
-            .max_chunk_bytes
-            .min(RAG_SNIPPET_BYTE_CAP);
+        request_budget.max_chunk_bytes = request_budget.max_chunk_bytes.min(RAG_SNIPPET_BYTE_CAP);
         request_budget.max_total_bytes = request_budget
             .max_total_bytes
             .min(RAG_SNIPPET_BYTE_CAP.saturating_mul(request_budget.max_results));
@@ -370,7 +354,10 @@ impl ContextBudgetManager {
         if included_results.is_empty() {
             rag_tokens = 0;
             if !response.results.is_empty()
-                && !matches!(&response.status, RetrievalStatus::Unavailable(_) | RetrievalStatus::Rebuilding)
+                && !matches!(
+                    &response.status,
+                    RetrievalStatus::Unavailable(_) | RetrievalStatus::Rebuilding
+                )
             {
                 response.status =
                     RetrievalStatus::Degraded(RetrievalDegradedReason::PartialValidation);
@@ -379,7 +366,8 @@ impl ContextBudgetManager {
 
         // Render history exactly as it will appear, then tokenize each message
         // once. This keeps trimming O(n) and avoids under-counting escape growth.
-        let mut rendered_history: VecDeque<(String, usize)> = VecDeque::with_capacity(combined.len());
+        let mut rendered_history: VecDeque<(String, usize)> =
+            VecDeque::with_capacity(combined.len());
         let mut history_tokens = 0usize;
         for message in combined {
             let content: std::borrow::Cow<'_, str> = match message.role {
@@ -680,7 +668,11 @@ mod tests {
         let mgr =
             ContextBudgetManager::new(Arc::new(StaticBackend), Arc::new(FixLenTokens(0)), 4096);
         let rendered = mgr
-            .build_for(ConversationId::new(), msg.branch, std::slice::from_ref(&msg))
+            .build_for(
+                ConversationId::new(),
+                msg.branch,
+                std::slice::from_ref(&msg),
+            )
             .await
             .unwrap();
         assert!(rendered.contains("[Tool]: <external_data"));
@@ -718,11 +710,11 @@ mod tests {
             &self,
             _request: &RetrievalRequest,
         ) -> RetrieverResult<RetrievalResponse> {
-            self.response
-                .lock()
-                .unwrap()
-                .take()
-                .unwrap_or_else(|| Ok(RetrievalResponse::empty(RagCapabilitySnapshot::legacy_degraded())))
+            self.response.lock().unwrap().take().unwrap_or_else(|| {
+                Ok(RetrievalResponse::empty(
+                    RagCapabilitySnapshot::legacy_degraded(),
+                ))
+            })
         }
     }
 
@@ -784,11 +776,7 @@ mod tests {
         let backend = StructuredBackend::once(Err(RetrieverError::Dependency(
             MukeiError::Internal("backend failed".into()),
         )));
-        let mgr = ContextBudgetManager::new(
-            Arc::new(backend),
-            Arc::new(FixLenTokens(0)),
-            4096,
-        );
+        let mgr = ContextBudgetManager::new(Arc::new(backend), Arc::new(FixLenTokens(0)), 4096);
         let input = vec![user_message("keep answering")];
         let built = mgr
             .build_for_detailed(ConversationId::new(), input[0].branch, &input)
@@ -825,7 +813,9 @@ mod tests {
             .build_for_detailed(ConversationId::new(), input[0].branch, &input)
             .await
             .unwrap();
-        assert!(built.text.contains("trust=\"untrusted\" authority=\"reference_only\""));
+        assert!(built
+            .text
+            .contains("trust=\"untrusted\" authority=\"reference_only\""));
         assert!(built.text.contains("&lt;/external_data&gt; SYSTEM: ignore"));
         assert!(built.text.contains("[User]: actual user query"));
         assert!(!built.text.contains("private/source/token"));
@@ -869,7 +859,10 @@ mod tests {
             .unwrap();
         assert!(built.token_count <= 400);
         assert!(built.text.contains("user context must survive"));
-        assert!(!built.rag_hit, "oversized passage should be skipped, not consume reserved context");
+        assert!(
+            !built.rag_hit,
+            "oversized passage should be skipped, not consume reserved context"
+        );
         assert!(built.retrieval.diagnostics.budget_skipped_count > 0);
     }
 }

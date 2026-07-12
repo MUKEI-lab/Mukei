@@ -88,7 +88,7 @@ async fn run_completes_without_tool_calls() {
         1_000_000,
         std::time::Duration::from_secs(30),
     ));
-    let agent = AgentLoop::new(context, tools, watchdog);
+    let agent = AgentLoop::new_with_mock_for_tests(context, tools, watchdog);
 
     let (tx, mut rx) = mpsc::channel::<String>(256);
     let cancel = CancellationToken::new();
@@ -136,7 +136,7 @@ async fn cancellation_is_observed() {
         1_000_000,
         std::time::Duration::from_secs(30),
     ));
-    let agent = AgentLoop::new(context, tools, watchdog);
+    let agent = AgentLoop::new_with_mock_for_tests(context, tools, watchdog);
 
     let (tx, _rx) = mpsc::channel::<String>(256);
     let cancel = CancellationToken::new();

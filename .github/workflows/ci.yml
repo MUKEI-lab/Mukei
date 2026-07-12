@@ -114,7 +114,7 @@ jobs:
           -p mukei-core
           --no-default-features
           --features std,tokio
-          --lib
+          --lib --tests
 
   # -------------------------------------------------------------------
   # Job 4 — static QML architecture and security guards.

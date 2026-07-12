@@ -13,9 +13,9 @@ use serde_json::{json, Value};
 
 use mukei_core::ui_contract::{BridgeEvent, BridgeEventKind, ChatTurnState, DownloadState};
 use mukei_core::ui_protocol::{
-    validate_command, CommandAcknowledgementV2, CommandEnvelopeV2, CommandScope,
-    CommandType, EventEnvelopeV2, ProtocolVersion, RejectionReason, ValidatedCommand,
-    ValidatedCommandPayload, MAX_COMMAND_ENVELOPE_BYTES,
+    validate_command, CommandAcknowledgementV2, CommandEnvelopeV2, CommandScope, CommandType,
+    EventEnvelopeV2, ProtocolVersion, RejectionReason, ValidatedCommand, ValidatedCommandPayload,
+    MAX_COMMAND_ENVELOPE_BYTES,
 };
 
 use crate::bridge_state::RuntimePhase;
@@ -60,7 +60,10 @@ impl ProtocolRuntimeState {
     }
 
     fn next_sequence(&mut self, stream_id: &str) -> u64 {
-        let next = self.sequence_by_stream.entry(stream_id.to_string()).or_insert(0);
+        let next = self
+            .sequence_by_stream
+            .entry(stream_id.to_string())
+            .or_insert(0);
         *next = next.saturating_add(1);
         *next
     }
@@ -207,7 +210,11 @@ impl ProtocolRuntimeState {
         }
     }
 
-    fn context_for_event(&mut self, stream_id: &str, event: &BridgeEvent) -> Option<CommandContext> {
+    fn context_for_event(
+        &mut self,
+        stream_id: &str,
+        event: &BridgeEvent,
+    ) -> Option<CommandContext> {
         if let Some(context) = self.contexts.get(stream_id).cloned() {
             return Some(context);
         }
@@ -224,10 +231,14 @@ impl ProtocolRuntimeState {
                 .and_then(|id| self.contexts.get(&format!("download:model:{id}")).cloned())
                 .or_else(|| self.contexts.get("download:active").cloned()),
             BridgeEventKind::DownloadFailed { .. } => self.single_download_context(),
-            BridgeEventKind::AppLifecycle { .. } => self.contexts.get("application:lifecycle").cloned(),
+            BridgeEventKind::AppLifecycle { .. } => {
+                self.contexts.get("application:lifecycle").cloned()
+            }
             BridgeEventKind::Error { error } => match error.source.as_str() {
                 "initialize" => self.contexts.get("application:lifecycle").cloned(),
-                "send_message" | "recover_interrupted_turn" => self.contexts.get("chat:active").cloned(),
+                "send_message" | "recover_interrupted_turn" => {
+                    self.contexts.get("chat:active").cloned()
+                }
                 "download_model" => self.single_download_context(),
                 _ => None,
             },
@@ -276,11 +287,22 @@ impl ProtocolRuntimeState {
         found
     }
 
-    fn retire_terminal_context(&mut self, stream_id: &str, event: &BridgeEvent, context: Option<&CommandContext>) {
+    fn retire_terminal_context(
+        &mut self,
+        stream_id: &str,
+        event: &BridgeEvent,
+        context: Option<&CommandContext>,
+    ) {
         let terminal = match &event.kind {
             BridgeEventKind::ChatCompleted | BridgeEventKind::ChatCancelled => true,
-            BridgeEventKind::ChatState { state, .. } => matches!(state, ChatTurnState::Failed | ChatTurnState::Completed | ChatTurnState::Cancelled),
-            BridgeEventKind::DownloadState { state, .. } => matches!(state, DownloadState::Completed | DownloadState::Failed | DownloadState::Cancelled),
+            BridgeEventKind::ChatState { state, .. } => matches!(
+                state,
+                ChatTurnState::Failed | ChatTurnState::Completed | ChatTurnState::Cancelled
+            ),
+            BridgeEventKind::DownloadState { state, .. } => matches!(
+                state,
+                DownloadState::Completed | DownloadState::Failed | DownloadState::Cancelled
+            ),
             BridgeEventKind::AppLifecycle { state, .. } => matches!(
                 state,
                 mukei_core::ui_contract::AppLifecycleState::Ready
@@ -295,7 +317,8 @@ impl ProtocolRuntimeState {
         }
         self.contexts.remove(stream_id);
         if let Some(context) = context {
-            self.contexts.retain(|_, value| value.operation_id != context.operation_id);
+            self.contexts
+                .retain(|_, value| value.operation_id != context.operation_id);
         }
     }
 
@@ -347,7 +370,8 @@ impl ProtocolRuntimeState {
             payload,
         };
         self.retire_terminal_context(&stream_id, &event, context.as_ref());
-        serde_json::to_string(&envelope).unwrap_or_else(|_| fallback_v2_error_json(&stream_id, sequence))
+        serde_json::to_string(&envelope)
+            .unwrap_or_else(|_| fallback_v2_error_json(&stream_id, sequence))
     }
 
     pub(crate) fn operation_event_json(
@@ -379,9 +403,11 @@ impl ProtocolRuntimeState {
             }),
         };
         if matches!(state, "completed" | "failed" | "cancelled") {
-            self.contexts.retain(|_, value| value.operation_id != context.operation_id);
+            self.contexts
+                .retain(|_, value| value.operation_id != context.operation_id);
         }
-        serde_json::to_string(&envelope).unwrap_or_else(|_| fallback_v2_error_json(&stream_id, sequence))
+        serde_json::to_string(&envelope)
+            .unwrap_or_else(|_| fallback_v2_error_json(&stream_id, sequence))
     }
 }
 
@@ -456,11 +482,13 @@ fn stream_id_for_bridge_event(event: &BridgeEvent) -> String {
 fn context_key_for_command(command: &ValidatedCommand, operation_id: &str) -> String {
     match command.command_type {
         CommandType::AppInitialize => "application:lifecycle".into(),
-        CommandType::ChatSendMessage | CommandType::RecoveryResume | CommandType::RecoveryRegenerate => {
-            "chat:active".into()
-        }
+        CommandType::ChatSendMessage
+        | CommandType::RecoveryResume
+        | CommandType::RecoveryRegenerate => "chat:active".into(),
         CommandType::ModelDownload => match &command.payload {
-            ValidatedCommandPayload::ModelDownload(value) => format!("download:model:{}", value.model_id),
+            ValidatedCommandPayload::ModelDownload(value) => {
+                format!("download:model:{}", value.model_id)
+            }
             _ => "download:active".into(),
         },
         _ => format!("operation:{operation_id}"),
@@ -529,7 +557,10 @@ pub(crate) fn submit_command_json(
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let acknowledgement = CommandAcknowledgementV2::accepted(
         &command.envelope,
-        command.command_type.creates_operation().then_some(operation_id.clone()),
+        command
+            .command_type
+            .creates_operation()
+            .then_some(operation_id.clone()),
     );
     let context = CommandContext {
         command_id: command.envelope.command_id.clone(),
@@ -588,7 +619,10 @@ fn acknowledgement_json(acknowledgement: CommandAcknowledgementV2) -> QString {
     )
 }
 
-fn preflight(agent: &Pin<&mut ffi::MukeiAgent>, command: &ValidatedCommand) -> Option<RejectionReason> {
+fn preflight(
+    agent: &Pin<&mut ffi::MukeiAgent>,
+    command: &ValidatedCommand,
+) -> Option<RejectionReason> {
     if runtime_state()
         .protocol_state()
         .lock()
@@ -614,12 +648,22 @@ fn preflight(agent: &Pin<&mut ffi::MukeiAgent>, command: &ValidatedCommand) -> O
 
     match command.command_type {
         CommandType::ChatSendMessage => {
-            if agent.as_ref().rust().busy.load(std::sync::atomic::Ordering::Acquire) {
+            if agent
+                .as_ref()
+                .rust()
+                .busy
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
                 return Some(RejectionReason::BusyConflict);
             }
         }
         CommandType::RecoveryResume | CommandType::RecoveryRegenerate => {
-            if agent.as_ref().rust().busy.load(std::sync::atomic::Ordering::Acquire) {
+            if agent
+                .as_ref()
+                .rust()
+                .busy
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
                 return Some(RejectionReason::BusyConflict);
             }
             if !cfg!(feature = "rusqlite") {
@@ -652,7 +696,12 @@ fn preflight(agent: &Pin<&mut ffi::MukeiAgent>, command: &ValidatedCommand) -> O
             }
         }
         CommandType::ChatStopGeneration => {
-            if !agent.as_ref().rust().busy.load(std::sync::atomic::Ordering::Acquire) {
+            if !agent
+                .as_ref()
+                .rust()
+                .busy
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
                 return Some(RejectionReason::CapabilityUnavailable);
             }
             let Some(operation_id) = command.envelope.operation_id.as_deref() else {
@@ -689,7 +738,12 @@ fn preflight(agent: &Pin<&mut ffi::MukeiAgent>, command: &ValidatedCommand) -> O
             }
         }
         CommandType::ModelSelect | CommandType::ModelDelete => {
-            if agent.as_ref().rust().busy.load(std::sync::atomic::Ordering::Acquire) {
+            if agent
+                .as_ref()
+                .rust()
+                .busy
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
                 return Some(RejectionReason::BusyConflict);
             }
             if let ValidatedCommandPayload::Model(value) = &command.payload {
@@ -703,7 +757,9 @@ fn preflight(agent: &Pin<&mut ffi::MukeiAgent>, command: &ValidatedCommand) -> O
                         .active_downloads
                         .lock()
                         .iter()
-                        .any(|download| download.model_id.as_deref() == Some(value.model_id.as_str()))
+                        .any(|download| {
+                            download.model_id.as_deref() == Some(value.model_id.as_str())
+                        })
                 {
                     return Some(RejectionReason::BusyConflict);
                 }
@@ -712,7 +768,10 @@ fn preflight(agent: &Pin<&mut ffi::MukeiAgent>, command: &ValidatedCommand) -> O
         CommandType::SettingsUpdate => {
             if let ValidatedCommandPayload::SettingUpdate(value) = &command.payload {
                 let lowered = value.key.to_ascii_lowercase();
-                if lowered.contains("secret") || lowered.contains("token") || lowered.contains("api_key") {
+                if lowered.contains("secret")
+                    || lowered.contains("token")
+                    || lowered.contains("api_key")
+                {
                     return Some(RejectionReason::PolicyDenied);
                 }
             }
@@ -758,18 +817,29 @@ fn dispatch_validated_command(
             emit_immediate_operation(agent.as_mut(), &context, true, json!({"cleared": true}));
         }
         (CommandType::ModelDownload, ValidatedCommandPayload::ModelDownload(value)) => {
-            agent.as_mut().download_model(QString::from(&value.model_id), QString::from(&value.sha256));
+            agent
+                .as_mut()
+                .download_model(QString::from(&value.model_id), QString::from(&value.sha256));
         }
         (CommandType::DownloadCancel, ValidatedCommandPayload::Empty) => {
             agent.as_mut().stop_download();
-            emit_immediate_operation(agent.as_mut(), &context, true, json!({"cancel_requested": true}));
+            emit_immediate_operation(
+                agent.as_mut(),
+                &context,
+                true,
+                json!({"cancel_requested": true}),
+            );
         }
         (CommandType::ModelSelect, ValidatedCommandPayload::Model(value)) => {
-            let result = agent.as_mut().select_installed_model_json(QString::from(&value.model_id));
+            let result = agent
+                .as_mut()
+                .select_installed_model_json(QString::from(&value.model_id));
             emit_json_result_operation(agent.as_mut(), &context, result.to_string());
         }
         (CommandType::ModelDelete, ValidatedCommandPayload::Model(value)) => {
-            let result = agent.as_mut().delete_installed_model_json(QString::from(&value.model_id));
+            let result = agent
+                .as_mut()
+                .delete_installed_model_json(QString::from(&value.model_id));
             emit_json_result_operation(agent.as_mut(), &context, result.to_string());
         }
         (CommandType::DocumentGrant, ValidatedCommandPayload::DocumentGrant(value)) => {
@@ -781,7 +851,9 @@ fn dispatch_validated_command(
             emit_json_result_operation(agent.as_mut(), &context, result.to_string());
         }
         (CommandType::DocumentRevoke, ValidatedCommandPayload::Document(value)) => {
-            let result = agent.as_mut().revoke_document_json(QString::from(&value.document_id));
+            let result = agent
+                .as_mut()
+                .revoke_document_json(QString::from(&value.document_id));
             emit_json_result_operation(agent.as_mut(), &context, result.to_string());
         }
         (CommandType::DocumentRetryIngestion, ValidatedCommandPayload::Document(value)) => {
@@ -791,7 +863,12 @@ fn dispatch_validated_command(
             emit_json_result_operation(agent.as_mut(), &context, result.to_string());
         }
         (CommandType::SettingsUpdate, ValidatedCommandPayload::SettingUpdate(value)) => {
-            crate::dispatch_protocol_setting_update(agent.as_mut(), context, value.key, value.value);
+            crate::dispatch_protocol_setting_update(
+                agent.as_mut(),
+                context,
+                value.key,
+                value.value,
+            );
         }
         (CommandType::RecoveryResume, ValidatedCommandPayload::Empty) => {
             agent.as_mut().resume_interrupted_turn();
@@ -844,7 +921,12 @@ fn emit_immediate_operation(
         runtime_state()
             .protocol_state()
             .lock()
-            .operation_event_json(context, if ok { "completed" } else { "failed" }, result, error)
+            .operation_event_json(
+                context,
+                if ok { "completed" } else { "failed" },
+                result,
+                error,
+            )
             .as_str(),
     );
     let qt = agent.as_ref().get_ref().qt_thread();
@@ -860,15 +942,17 @@ pub(crate) fn async_operation_event_json(
     result: Option<Value>,
     error: Option<Value>,
 ) -> QString {
-    let json = runtime_state().protocol_state().lock().operation_event_json(
-        context,
-        if ok { "completed" } else { "failed" },
-        result,
-        error,
-    );
+    let json = runtime_state()
+        .protocol_state()
+        .lock()
+        .operation_event_json(
+            context,
+            if ok { "completed" } else { "failed" },
+            result,
+            error,
+        );
     QString::from(json.as_str())
 }
-
 
 #[cfg(test)]
 mod sol02_tests {
@@ -905,18 +989,24 @@ mod sol02_tests {
     #[test]
     fn sol02_idempotent_replay_rebinds_transport_ids() {
         let first = validate_command(send_envelope(
-            "command-a", "request-a", "correlation-a", "idem-a", "hello",
+            "command-a",
+            "request-a",
+            "correlation-a",
+            "idem-a",
+            "hello",
         ))
         .unwrap();
-        let acknowledgement = CommandAcknowledgementV2::accepted(
-            &first.envelope,
-            Some("operation-a".into()),
-        );
+        let acknowledgement =
+            CommandAcknowledgementV2::accepted(&first.envelope, Some("operation-a".into()));
         let mut state = ProtocolRuntimeState::new();
         state.remember_idempotency(&first, &acknowledgement);
 
         let retry = validate_command(send_envelope(
-            "command-b", "request-b", "correlation-b", "idem-a", "hello",
+            "command-b",
+            "request-b",
+            "correlation-b",
+            "idem-a",
+            "hello",
         ))
         .unwrap();
         let replay = state.replay_acknowledgement(&retry).unwrap().unwrap();
@@ -929,18 +1019,24 @@ mod sol02_tests {
     #[test]
     fn sol02_conflicting_replay_key_is_rejected() {
         let first = validate_command(send_envelope(
-            "command-a", "request-a", "correlation-a", "idem-a", "hello",
+            "command-a",
+            "request-a",
+            "correlation-a",
+            "idem-a",
+            "hello",
         ))
         .unwrap();
-        let acknowledgement = CommandAcknowledgementV2::accepted(
-            &first.envelope,
-            Some("operation-a".into()),
-        );
+        let acknowledgement =
+            CommandAcknowledgementV2::accepted(&first.envelope, Some("operation-a".into()));
         let mut state = ProtocolRuntimeState::new();
         state.remember_idempotency(&first, &acknowledgement);
 
         let conflicting = validate_command(send_envelope(
-            "command-b", "request-b", "correlation-b", "idem-a", "different",
+            "command-b",
+            "request-b",
+            "correlation-b",
+            "idem-a",
+            "different",
         ))
         .unwrap();
         assert_eq!(
@@ -952,7 +1048,11 @@ mod sol02_tests {
     #[test]
     fn sol02_scoped_cancel_cannot_target_another_operation() {
         let send = validate_command(send_envelope(
-            "command-a", "request-a", "correlation-a", "idem-a", "hello",
+            "command-a",
+            "request-a",
+            "correlation-a",
+            "idem-a",
+            "hello",
         ))
         .unwrap();
         let mut state = ProtocolRuntimeState::new();
@@ -969,17 +1069,11 @@ mod sol02_tests {
         );
 
         assert_eq!(
-            state.validate_chat_cancellation_target(
-                "operation-b",
-                send.envelope.scope.as_ref(),
-            ),
+            state.validate_chat_cancellation_target("operation-b", send.envelope.scope.as_ref(),),
             Err(RejectionReason::StaleScope)
         );
         assert!(state
-            .validate_chat_cancellation_target(
-                "operation-a",
-                send.envelope.scope.as_ref(),
-            )
+            .validate_chat_cancellation_target("operation-a", send.envelope.scope.as_ref(),)
             .is_ok());
     }
 }

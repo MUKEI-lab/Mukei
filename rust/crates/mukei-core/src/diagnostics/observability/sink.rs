@@ -13,7 +13,7 @@ use super::event::OperationalEvent;
 use super::metrics::MetricRegistrySnapshot;
 use super::privacy::{EventScope, PrivacyState, TelemetryPolicy, TelemetryPrivacyMode};
 
-pub const DEFAULT_SINK_QUEUE_BYTES: usize = 1 * 1024 * 1024;
+pub const DEFAULT_SINK_QUEUE_BYTES: usize = 1024 * 1024;
 pub const MAX_SINK_QUEUE_BYTES: usize = 16 * 1024 * 1024;
 pub const DEFAULT_SINK_SINGLE_ENVELOPE_BYTES: usize = 512 * 1024;
 pub const MAX_SINK_SINGLE_ENVELOPE_BYTES: usize = 4 * 1024 * 1024;

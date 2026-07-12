@@ -888,7 +888,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn current_ui_contract_accepts_only_supported_qml_versions() {
         let contract = UiContractSnapshot::current();
@@ -902,7 +901,10 @@ mod tests {
             .capabilities
             .iter()
             .any(|f| f == "command_acknowledgement"));
-        assert!(contract.required_features.iter().any(|f| f == "snapshot_delta_sync"));
+        assert!(contract
+            .required_features
+            .iter()
+            .any(|f| f == "snapshot_delta_sync"));
     }
 
     #[test]
@@ -1018,7 +1020,11 @@ mod tests {
             state: ChatTurnState::Submitting,
             capabilities: CapabilitySnapshot::inferencing(),
         })
-        .with_chat_scope(ConversationId::new(), BranchId::new(), MessageId::new().0.to_string());
+        .with_chat_scope(
+            ConversationId::new(),
+            BranchId::new(),
+            MessageId::new().0.to_string(),
+        );
         let json = serde_json::to_value(event).unwrap();
         assert!(json.get("conversation_id").is_some());
         assert!(json.get("branch_id").is_some());

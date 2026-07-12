@@ -151,7 +151,9 @@ impl ApplicationRuntime {
     }
 
     pub(crate) fn set_thermal_status(&self, status: i32) {
-        self.lifecycle.thermal_status.store(status, Ordering::Release);
+        self.lifecycle
+            .thermal_status
+            .store(status, Ordering::Release);
     }
 
     #[cfg(feature = "rusqlite")]
@@ -244,7 +246,6 @@ impl ApplicationRuntime {
     pub(crate) fn protocol_state(&self) -> &ParkingMutex<ProtocolRuntimeState> {
         &self.protocol.runtime
     }
-
 }
 
 static APPLICATION_RUNTIME: OnceLock<ApplicationRuntime> = OnceLock::new();

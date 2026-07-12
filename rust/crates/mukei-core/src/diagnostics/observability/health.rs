@@ -124,7 +124,6 @@ impl HealthSignal {
         };
         now >= self.observed_at + expiry
     }
-
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -320,7 +319,11 @@ impl StoredHealthSignal {
             .unwrap_or(false);
         HealthSignalSnapshot {
             component: self.signal.component.clone(),
-            state: if stale { HealthState::Unknown } else { self.signal.state },
+            state: if stale {
+                HealthState::Unknown
+            } else {
+                self.signal.state
+            },
             reason_code: self.signal.reason_code.clone(),
             observed_at: self.signal.observed_at,
             expires_after: self.signal.expires_after,

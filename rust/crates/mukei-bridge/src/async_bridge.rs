@@ -55,11 +55,7 @@ impl AsyncRequestTracker {
     }
 
     pub(crate) fn is_current(&self, ticket: &AsyncRequestTicket) -> bool {
-        self.latest_generation
-            .lock()
-            .get(&ticket.domain)
-            .copied()
-            == Some(ticket.generation)
+        self.latest_generation.lock().get(&ticket.domain).copied() == Some(ticket.generation)
     }
 
     pub(crate) fn accepted_json(&self, ticket: &AsyncRequestTicket) -> String {
@@ -117,7 +113,10 @@ mod tests {
             serde_json::from_str(&tracker.accepted_json(&ticket)).unwrap();
         assert_eq!(accepted["accepted"], true);
         assert_eq!(accepted["domain"], "settings.snapshot");
-        assert!(accepted["request_id"].as_str().unwrap().starts_with("settings.snapshot:"));
+        assert!(accepted["request_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("settings.snapshot:"));
     }
 
     #[test]
