@@ -1,6 +1,7 @@
 pragma Singleton
 import QtQuick
 
+import "../architecture"
 QtObject {
     readonly property var allowedRoutes: [
         "boot", "unlock", "welcome", "recovery", "chat", "models", "downloads",

@@ -3,6 +3,9 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import "theme"
 
+import "architecture"
+import "stores"
+import "shell"
 ApplicationWindow {
     id: root
 

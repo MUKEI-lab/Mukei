@@ -1,6 +1,7 @@
 pragma Singleton
 import QtQuick
 
+import "../theme"
 QtObject {
     id: root
     property var agentSource: null

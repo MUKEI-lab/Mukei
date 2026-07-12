@@ -4,6 +4,8 @@ import QtQuick.Layouts
 import "../theme"
 import "../components"
 
+import "../architecture"
+import "../stores"
 Rectangle {
     id: root
     visible: LifecycleStore.interactive && !ResponsiveStore.compact

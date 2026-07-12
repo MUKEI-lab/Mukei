@@ -1,1 +1,6 @@
-prefer :/com/mukei/app/
+module com.mukei.architecture
+singleton AppCoordinator 1.0 AppCoordinator.qml
+singleton AppStateHub 1.0 AppStateHub.qml
+singleton IntentDispatcher 1.0 IntentDispatcher.qml
+singleton PresentationPolicy 1.0 PresentationPolicy.qml
+singleton SnapshotController 1.0 SnapshotController.qml

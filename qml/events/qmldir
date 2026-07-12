@@ -1,1 +1,2 @@
-prefer :/com/mukei/app/
+module com.mukei.events
+singleton EventDispatcher 1.0 EventDispatcher.qml

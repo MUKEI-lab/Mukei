@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import "../theme"
 
+import "../stores"
 Rectangle {
     id: root
     implicitHeight: content.implicitHeight + Spacing.lg * 2

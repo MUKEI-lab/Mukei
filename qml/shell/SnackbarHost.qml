@@ -3,6 +3,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import "../theme"
 
+import "../stores"
 Item {
     id: root
     implicitHeight: toast.visible ? toast.implicitHeight + Spacing.lg : 0

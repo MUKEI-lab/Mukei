@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import "../theme"
 
+import "../stores"
 Item {
     id: root
     implicitHeight: banner.visible ? banner.implicitHeight : 0

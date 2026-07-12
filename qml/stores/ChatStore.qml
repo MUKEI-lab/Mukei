@@ -2,6 +2,8 @@ pragma Singleton
 import QtQuick
 import QtQml.Models
 
+import "../events"
+import "../architecture"
 Item {
     id: root
 

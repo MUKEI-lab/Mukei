@@ -3,6 +3,8 @@ import QtQuick.Controls.Basic
 import "../theme"
 import "../screens"
 
+import "../architecture"
+import "../stores"
 Item {
     id: root
 

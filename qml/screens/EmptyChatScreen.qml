@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import "../theme"
 import "../components"
 
+import "../stores"
 Page {
     id: root
     signal promptFilled(string prompt)

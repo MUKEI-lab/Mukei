@@ -1,6 +1,7 @@
 pragma Singleton
 import QtQuick
 
+import "../stores"
 QtObject {
     property var agentSource: null
     property var bridgeSource: null

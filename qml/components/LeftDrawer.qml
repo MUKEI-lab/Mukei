@@ -3,6 +3,8 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import "../theme"
 
+import "../architecture"
+import "../stores"
 Drawer {
     id: root
     width: Type.compact ? Spacing.huge * 3 - Spacing.xs : Spacing.huge * 3 + Spacing.xl

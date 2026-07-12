@@ -3,6 +3,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import "../theme"
 
+import "../stores"
 ListView {
     id: root
     property var conversations: ConversationStore.conversations

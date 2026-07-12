@@ -5,6 +5,8 @@ import QtQml.Models
 import "../theme"
 import "../components"
 
+import "../architecture"
+import "../stores"
 Page {
     id: root
     property bool followTail: true
