@@ -49,6 +49,7 @@ Page {
             reuseItems: true
 
             delegate: Rectangle {
+                id: downloadDelegate
                 required property string jobId
                 required property string modelId
                 required property real progress
@@ -61,7 +62,7 @@ Page {
                 radius: Theme.radiusLg
                 color: Theme.p.surface
                 border.width: 1
-                border.color: state === "failed" ? Theme.error : Theme.p.divider
+                border.color: downloadDelegate.state === "failed" ? Theme.error : Theme.p.divider
 
                 ColumnLayout {
                     id: content
@@ -72,39 +73,39 @@ Page {
                         Layout.fillWidth: true
                         Text {
                             Layout.fillWidth: true
-                            text: modelId || qsTr("Model download")
+                            text: downloadDelegate.modelId || qsTr("Model download")
                             color: Theme.p.inkPrimary
                             elide: Text.ElideRight
                             Component.onCompleted: Type.apply(this, Type.h3)
                         }
                         StatusPill {
-                            text: state
-                            subtype: state === "completed" ? "Success" : state === "failed" ? "Error" : "Neutral"
+                            text: downloadDelegate.state
+                            subtype: downloadDelegate.state === "completed" ? "Success" : downloadDelegate.state === "failed" ? "Error" : "Neutral"
                         }
                     }
                     ProgressBar {
                         Layout.fillWidth: true
-                        visible: ["queued", "starting", "downloading", "cancelling"].indexOf(state) >= 0
-                        value: progress
+                        visible: ["queued", "starting", "downloading", "cancelling"].indexOf(downloadDelegate.state) >= 0
+                        value: downloadDelegate.progress
                     }
                     Text {
-                        text: expectedBytes > 0
-                              ? qsTr("%1 of %2").arg(StorageStore.formatBytes(bytesDownloaded)).arg(StorageStore.formatBytes(expectedBytes))
+                        text: downloadDelegate.expectedBytes > 0
+                              ? qsTr("%1 of %2").arg(StorageStore.formatBytes(downloadDelegate.bytesDownloaded)).arg(StorageStore.formatBytes(downloadDelegate.expectedBytes))
                               : qsTr("Preparing download")
                         color: Theme.p.inkSecondary
                         Component.onCompleted: Type.apply(this, Type.bodySmall)
                     }
                     Text {
-                        visible: lastErrorCode.length > 0
-                        text: lastErrorCode
+                        visible: downloadDelegate.lastErrorCode.length > 0
+                        text: downloadDelegate.lastErrorCode
                         color: Theme.error
                         Component.onCompleted: Type.apply(this, Type.caption)
                     }
                     SecondaryButton {
-                        visible: ["queued", "starting", "downloading"].indexOf(state) >= 0
+                        visible: ["queued", "starting", "downloading"].indexOf(downloadDelegate.state) >= 0
                         enabled: CapabilityStore.canStopDownload
                         text: qsTr("Stop")
-                        onClicked: IntentDispatcher.dispatch({ type: "download.cancel", jobId: jobId })
+                        onClicked: IntentDispatcher.dispatch({ type: "download.cancel", jobId: downloadDelegate.jobId })
                     }
                 }
             }
