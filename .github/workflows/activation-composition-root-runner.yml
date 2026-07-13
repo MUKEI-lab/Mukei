@@ -77,10 +77,24 @@ jobs:
         if: steps.focused.outcome == 'failure'
         run: exit 1
       - name: Build bridge with release-gate features
+        id: bridge
+        continue-on-error: true
         working-directory: rust
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check -p mukei-bridge --features "sqlcipher,network"
+        run: |
+          set -o pipefail
+          cargo check -p mukei-bridge --features "sqlcipher,network" 2>&1 | tee /tmp/activation-composition-bridge-check.log
+      - name: Upload bridge compile diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: activation-composition-bridge-check
+          path: /tmp/activation-composition-bridge-check.log
+          retention-days: 1
+      - name: Enforce bridge compile
+        if: steps.bridge.outcome == 'failure'
+        run: exit 1
       - name: Commit composition-root wiring
         run: |
           git config user.name "github-actions[bot]"
