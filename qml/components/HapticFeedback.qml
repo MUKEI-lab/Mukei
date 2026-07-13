@@ -1,16 +1,12 @@
 import QtQuick
-import QtQuick.Controls.Basic
-import QtQuick.Layouts
-import "../theme"
 
-// Platform-agnostic haptic dispatcher. On Android the bridge injects a
-// C++ QVibrator wrapper into the QML context as `mukeiHaptics`; on other
-// platforms `pulse()` is a silent no-op so QML sites stay identical.
-// The `enabled` flag is honoured (Settings > Accessibility can suppress
-// all haptics globally without touching call-sites).
+// Platform-agnostic haptic dispatcher. Native haptics are an optional injected
+// capability rather than an undeclared QML context dependency. Until a native
+// backend is configured, pulse() is deliberately a silent no-op.
 QtObject {
     id: root
     property bool enabled: true
+    property var backend: null
 
     enum Level {
         Light,
@@ -18,13 +14,14 @@ QtObject {
         Heavy
     }
 
+    function configure(nativeBackend) {
+        backend = nativeBackend || null
+    }
+
     function pulse(level) {
-        if (!root.enabled) return;
-        // The bridge exposes `mukeiHaptics.pulse(int)` when running on
-        // Android; on desktop this context property is absent, so the
-        // typeof-check keeps the call a silent no-op.
-        if (typeof mukeiHaptics !== "undefined" && mukeiHaptics && typeof mukeiHaptics.pulse === "function") {
-            mukeiHaptics.pulse(level);
-        }
+        if (!root.enabled)
+            return
+        if (root.backend !== null && typeof root.backend.pulse === "function")
+            root.backend.pulse(level)
     }
 }
