@@ -1,5 +1,6 @@
 pragma Singleton
 import QtQuick
+import "../stores"
 
 QtObject {
     readonly property var contract: ContractStore
