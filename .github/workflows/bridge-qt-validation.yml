@@ -108,33 +108,7 @@ jobs:
           set -e
           python3 qml/scripts/qmllint_allowlist_guard.py /tmp/mukei-qmllint.log
           exit "$lint_status"
-      - name: Capture QML build diagnostics
-        id: qml-build
-        continue-on-error: true
-        run: cmake --build "$CMAKE_BUILD_DIR" > /tmp/mukei-qml-build.log 2>&1
-      - name: Upload QML build diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qml-build-diagnostics
-          path: /tmp/mukei-qml-build.log
-          if-no-files-found: error
-          retention-days: 1
-      - name: Enforce QML build result
-        if: steps.qml-build.outcome == 'failure'
-        run: exit 1
-      - name: Capture CTest diagnostics
-        id: ctest
-        continue-on-error: true
-        run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure > /tmp/mukei-ctest.log 2>&1
-      - name: Upload CTest diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ctest-diagnostics
-          path: /tmp/mukei-ctest.log
-          if-no-files-found: error
-          retention-days: 1
-      - name: Enforce CTest result
-        if: steps.ctest.outcome == 'failure'
-        run: exit 1
+      - name: Build QML and test targets
+        run: cmake --build "$CMAKE_BUILD_DIR" -j2
+      - name: Run CTest
+        run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
