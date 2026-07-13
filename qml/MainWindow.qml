@@ -1,6 +1,9 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import "architecture"
+import "stores"
+import "shell"
 import "theme"
 
 ApplicationWindow {
@@ -19,7 +22,7 @@ ApplicationWindow {
         ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
     }
 
-    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft // qmllint disable missing-property
     LayoutMirroring.childrenInherit: true
 
     signal accessibilityAnnouncementRequested(string text)
@@ -33,10 +36,9 @@ ApplicationWindow {
 
     Component.onCompleted: {
         ResponsiveStore.updateViewport(width, height)
-        AppCoordinator.configure(mukeiAgent, mukeiBridge, mukeiRuntime)
+        AppCoordinator.configure(mukeiAgent, mukeiBridge, mukeiRuntime) // qmllint disable unqualified
         AppCoordinator.start()
     }
-
 
     Connections {
         target: AccessibilityStore
@@ -48,7 +50,7 @@ ApplicationWindow {
     Connections {
         target: Qt.application
         function onStateChanged() {
-            AppCoordinator.onApplicationStateChanged(Qt.application.state)
+            AppCoordinator.onApplicationStateChanged(Qt.application.state) // qmllint disable missing-property
         }
     }
 
