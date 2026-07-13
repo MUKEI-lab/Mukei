@@ -234,7 +234,6 @@ struct ActiveBackend {
     model_id: String,
     revision: String,
     artifact_id: String,
-    operation_id: u64,
     backend: Arc<dyn InferenceBackend>,
 }
 
@@ -269,8 +268,8 @@ impl Default for ActivationInner {
 ///
 /// The service itself implements [`InferenceBackend`], so the loop owns one
 /// stable dependency while activation can atomically replace the underlying
-/// model backend. A non-ready lifecycle state always rejects inference rather
-/// than falling back to a mock or an older selected model.
+/// model backend. Candidate verification/activation may coexist with a healthy
+/// active backend; only explicit deactivation removes it before replacement.
 pub struct ModelActivationService {
     inner: RwLock<ActivationInner>,
     generation: AtomicU64,
@@ -514,7 +513,6 @@ impl ModelActivationService {
                 model_id: descriptor.model_id.clone(),
                 revision: descriptor.revision.clone(),
                 artifact_id: descriptor.artifact.artifact_id().to_string(),
-                operation_id,
                 backend,
             };
             let retired = inner.active.replace(next);
