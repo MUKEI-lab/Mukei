@@ -254,23 +254,28 @@ TestCase {
         compare(EventDispatcher.lastEvent.final_path, "model:gemma-4-e2b-it")
     }
 
+    function v2ChatStreamId() {
+        return "conversation:conversation-a:branch:branch-a"
+    }
+
     function v2ChatEvent(eventId, sequence, eventType, operationId, payload) {
+        var body = Object.assign({}, payload || ({}))
+        body.conversation_id = "conversation-a"
+        body.branch_id = "branch-a"
+        body.turn_id = "turn-a"
         return {
             protocol_version: { major: 2, minor: 0 },
             event_id: eventId,
-            stream_id: "chat:conversation-a:branch-a",
+            stream_id: v2ChatStreamId(),
             sequence: sequence,
             event_type: eventType,
-            emitted_at: "2026-07-11T13:00:00.000Z",
-            payload: payload || ({}),
+            emitted_at: new Date(1760000000000 + sequence * 1000).toISOString(),
+            payload: body,
             correlation_id: "correlation-a",
             operation_id: operationId,
             request_id: "request-a",
             command_id: "command-a",
-            command_type: "chat_send_message",
-            conversation_id: "conversation-a",
-            branch_id: "branch-a",
-            turn_id: "turn-a"
+            command_type: "chat.send_message"
         }
     }
 
@@ -287,11 +292,11 @@ TestCase {
         EventDispatcher.ingest(JSON.stringify(
             v2ChatEvent("event-v2-stale-1", 1, "chat_chunk", "operation-a", { chunk: "late" })))
         compare(eventSpy.count, 1)
-        compare(EventDispatcher.lastSequenceByStream["chat:conversation-a:branch-a"], 2)
+        compare(EventDispatcher.lastSequenceByStream[v2ChatStreamId()], 2)
     }
 
     function test_v2_gap_requires_snapshot_watermark_covering_quarantine_high_water() {
-        var streamId = "chat:conversation-a:branch-a"
+        var streamId = v2ChatStreamId()
         EventDispatcher.ingest(JSON.stringify(
             v2ChatEvent("event-v2-gap-1", 1, "chat_state", "operation-a", { state: "submitting" })))
         EventDispatcher.ingest(JSON.stringify(
@@ -333,7 +338,7 @@ TestCase {
 
     function test_v2_missing_chat_scope_fails_closed() {
         var event = v2ChatEvent("event-v2-missing-scope", 1, "chat_chunk", "operation-a", { chunk: "x" })
-        delete event.branch_id
+        delete event.payload.branch_id
         EventDispatcher.ingest(JSON.stringify(event))
         compare(eventSpy.count, 0)
     }
