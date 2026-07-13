@@ -1,1 +1,9 @@
-prefer :/com/mukei/app/
+prefer :/com/mukei/app/shell/
+AppShell 1.0 AppShell.qml
+AdaptiveNavigation 1.0 AdaptiveNavigation.qml
+RouterHost 1.0 RouterHost.qml
+BannerHost 1.0 BannerHost.qml
+SnackbarHost 1.0 SnackbarHost.qml
+OperationOverlayHost 1.0 OperationOverlayHost.qml
+SheetHost 1.0 SheetHost.qml
+DialogHost 1.0 DialogHost.qml
