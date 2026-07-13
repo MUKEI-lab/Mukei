@@ -19,7 +19,7 @@ Item {
         opacity: Theme.reduceMotion ? 0.6 : 1
     }
     RotationAnimator on rotation {
-        running: visible && !Theme.reduceMotion
+        running: root.visible && !Theme.reduceMotion
         loops: Animation.Infinite
         from: 0
         to: 360
