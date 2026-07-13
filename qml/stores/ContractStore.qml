@@ -34,7 +34,8 @@ QtObject {
         "persistent_ui_session", "capability_gating",
         "command_envelope_v2", "command_acknowledgement", "event_identity",
         "per_stream_sequencing", "idempotent_command_replay",
-        "operation_lifecycle_events", "legacy_event_v1_compatibility"
+        "operation_lifecycle_events", "scoped_chat_operations",
+        "legacy_event_v1_compatibility"
     ]
     property var requiredFeatures: []
     property string safeMessage: qsTr("The frontend and local service have not negotiated a compatible contract yet.")
