@@ -18,7 +18,7 @@ env:
   EXPECTED_SOURCE_BASE: 9e69306e7ef50bc253fa91816915aa07eeb05515
   RUNNER_PATH: .github/workflows/production-inference-remediation-runner.yml
   PATCH_V1_SHA256: 0d56a8bd479c891229b2794b419247bb9e2f67bb0b034f2734ea989777869417
-  PATCH_V2_SHA256: 97009758c3e0b3df875ac7139bf0b27ead46c2ec6bb051d682be2de0d2b25b4b
+  PATCH_CORRECTED_SHA256: 805b9b1fb3a6aa3b06cf5c5b3147147b7449fe2fdccb5cded554df1e130a0888
   QT_VERSION: 6.5.3
   NATIVE_BUILD_DIR: /tmp/mukei-remediation-native
   QML_BUILD_DIR: /tmp/mukei-remediation-qml
@@ -93,6 +93,8 @@ jobs:
               ('\'llama_cpp = []\\n\',', '\'llama_cpp          = []\\n\','),
               ('\'runtime_production = []\\n\',', '\'runtime_production  = []\\n\','),
               ('\'runtime_production = ["llama_cpp"]\\n\',', '\'runtime_production  = ["llama_cpp"]\\n\','),
+              ("'''                visible: ModelStore.restartRequired || ModelStore.sessionMessage.length > 0\n'''", "'''            visible: ModelStore.restartRequired || ModelStore.sessionMessage.length > 0\n'''") ,
+              ("'''                visible: ModelStore.activationInProgress || ModelStore.activationFailed\n                         || ModelStore.restartRequired || ModelStore.sessionMessage.length > 0\n'''", "'''            visible: ModelStore.activationInProgress || ModelStore.activationFailed\n                     || ModelStore.restartRequired || ModelStore.sessionMessage.length > 0\n'''") ,
           ]
           for old, new in replacements:
               count = content.count(old)
@@ -101,7 +103,7 @@ jobs:
               content = content.replace(old, new, 1)
           path.write_text(content)
           PY
-          echo "$PATCH_V2_SHA256  /tmp/native-inference-patch.py" | sha256sum -c -
+          echo "$PATCH_CORRECTED_SHA256  /tmp/native-inference-patch.py" | sha256sum -c -
           python3 -m py_compile /tmp/native-inference-patch.py
 
       - name: Apply exact-head remediation patch
