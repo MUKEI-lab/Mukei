@@ -2,13 +2,13 @@ name: bridge-qt-validation
 
 on:
   push:
-    branches: [ main, "agent/**" ]
+    branches: [ main, "agent/**", "checkpoint/**" ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
 
 concurrency:
-  group: release-gate-${{ github.workflow }}-${{ github.ref }}
+  group: release-gate-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
