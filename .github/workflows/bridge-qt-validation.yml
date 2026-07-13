@@ -95,15 +95,28 @@ jobs:
           -DMUKEI_USE_REAL_BRIDGE=ON
           -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/debug/libmukei_bridge.a"
           -DMUKEI_CXX_QT_EXPORT_DIR="$CXX_QT_EXPORT_DIR"
-      - name: Build generated qmllint targets
+      - name: Discover generated qmllint targets
         run: |
           cmake --build "$CMAKE_BUILD_DIR" --target help > /tmp/mukei-qml-targets.txt
-          if grep -q 'all_qmllint' /tmp/mukei-qml-targets.txt; then
-            cmake --build "$CMAKE_BUILD_DIR" --target all_qmllint
-          else
+          grep -q 'all_qmllint' /tmp/mukei-qml-targets.txt || {
             echo "Expected all_qmllint target was not generated." >&2
             exit 1
-          fi
+          }
+      - name: Capture strict qmllint diagnostics
+        id: qml-lint
+        continue-on-error: true
+        run: cmake --build "$CMAKE_BUILD_DIR" --target all_qmllint > /tmp/mukei-qmllint.log 2>&1
+      - name: Upload strict qmllint diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qmllint-diagnostics
+          path: /tmp/mukei-qmllint.log
+          if-no-files-found: error
+          retention-days: 1
+      - name: Enforce strict qmllint result
+        if: steps.qml-lint.outcome == 'failure'
+        run: exit 1
       - name: Capture QML build diagnostics
         id: qml-build
         continue-on-error: true
