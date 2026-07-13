@@ -6,11 +6,26 @@ QtObject {
     property int revision: 0
     readonly property bool hasError: currentError !== null
     readonly property string presentation: hasError
-                                                   ? PresentationPolicy.presentationForSeverity(currentError.severity || "error")
-                                                   : "none"
+            ? (typeof PresentationPolicy !== "undefined"
+               ? PresentationPolicy.presentationForSeverity(currentError.severity || "error")
+               : fallbackPresentationForSeverity(currentError.severity || "error"))
+            : "none"
 
     signal errorPresented(var error)
     signal errorDismissed
+
+    function fallbackPresentationForSeverity(severity) {
+        switch (severity) {
+        case "fatal":
+        case "security_critical":
+            return "blocking"
+        case "error":
+            return "banner"
+        case "warning":
+        default:
+            return "snackbar"
+        }
+    }
 
     function normalize(error, fallbackCode) {
         var source = error && typeof error === "object" ? error : ({})
