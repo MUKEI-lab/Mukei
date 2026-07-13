@@ -16,6 +16,7 @@ ListView {
     Accessible.description: qsTr("Recent private conversations")
 
     delegate: ItemDelegate {
+        id: conversationDelegate
         required property string conversationId
         required property string branchId
         required property string title
@@ -24,7 +25,7 @@ ListView {
         implicitHeight: contentColumn.implicitHeight + Spacing.md * 2
         Accessible.name: titleText.text
         Accessible.description: previewText.text
-        onClicked: root.conversationSelected(conversationId || "", branchId || "")
+        onClicked: root.conversationSelected(conversationDelegate.conversationId || "", conversationDelegate.branchId || "")
 
         contentItem: ColumnLayout {
             id: contentColumn
@@ -32,7 +33,7 @@ ListView {
             Text {
                 id: titleText
                 Layout.fillWidth: true
-                text: title || qsTr("Untitled conversation")
+                text: conversationDelegate.title || qsTr("Untitled conversation")
                 color: Theme.p.inkPrimary
                 elide: Text.ElideRight
                 Component.onCompleted: Type.apply(this, Type.bodyUI)
@@ -40,7 +41,7 @@ ListView {
             Text {
                 id: previewText
                 Layout.fillWidth: true
-                text: preview || qsTr("Private conversation")
+                text: conversationDelegate.preview || qsTr("Private conversation")
                 color: Theme.p.inkFaint
                 elide: Text.ElideRight
                 Component.onCompleted: Type.apply(this, Type.caption)
