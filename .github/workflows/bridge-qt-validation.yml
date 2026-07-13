@@ -113,7 +113,12 @@ jobs:
       - name: Capture repeated CTest diagnostics
         id: ctest
         continue-on-error: true
-        run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure --repeat until-fail:5 2>&1 | tee /tmp/mukei-ctest.log
+        run: |
+          set +e
+          ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure --repeat until-fail:5 2>&1 | tee /tmp/mukei-ctest.log
+          ctest_status=${PIPESTATUS[0]}
+          set -e
+          exit "$ctest_status"
       - name: Upload repeated CTest diagnostics
         if: always()
         uses: actions/upload-artifact@v4
