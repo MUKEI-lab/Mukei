@@ -1,5 +1,7 @@
 pragma Singleton
 import QtQuick
+import "../events"
+import "../stores"
 
 Item {
     property bool configured: false
