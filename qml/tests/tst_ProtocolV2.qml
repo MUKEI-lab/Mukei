@@ -176,6 +176,65 @@ TestCase {
         compare(OperationStore.operations.get(OperationStore.findById("operation-a")).state, "cancelling")
     }
 
+    function canonicalRustChatEnvelope(eventId, streamId, sequence, conversationId, branchId, state) {
+        return {
+            protocol_version: { major: 2, minor: 0 },
+            event_id: eventId,
+            stream_id: streamId,
+            sequence: sequence,
+            event_type: "chat_state",
+            emitted_at: new Date(1760000000000 + sequence * 1000).toISOString(),
+            payload: {
+                schema_version: 1,
+                category: "chat_state",
+                state: state,
+                conversation_id: conversationId,
+                branch_id: branchId,
+                turn_id: "turn-" + sequence
+            }
+        }
+    }
+
+    function test_rust_canonical_payload_scope_is_accepted_with_opaque_stream_id() {
+        var streamId = "conversation:conversation-a:branch:branch-a"
+        EventDispatcher.ingest(JSON.stringify(canonicalRustChatEnvelope(
+                                                   "event-canonical-1", streamId, 1,
+                                                   "conversation-a", "branch-a", "submitting")),
+                               "agent")
+        verify(EventDispatcher.lastEvent !== undefined)
+        compare(EventDispatcher.lastEvent.conversation_id, "conversation-a")
+        compare(EventDispatcher.lastEvent.branch_id, "branch-a")
+        compare(EventDispatcher.lastEvent.stream_id, streamId)
+        compare(EventDispatcher.lastSequenceByStream[streamId], 1)
+    }
+
+    function test_bound_stream_rejects_chat_scope_mutation() {
+        var streamId = "opaque-chat-stream-17"
+        EventDispatcher.ingest(JSON.stringify(canonicalRustChatEnvelope(
+                                                   "event-scope-a", streamId, 1,
+                                                   "conversation-a", "branch-a", "submitting")),
+                               "agent")
+        compare(EventDispatcher.lastSequenceByStream[streamId], 1)
+        EventDispatcher.ingest(JSON.stringify(canonicalRustChatEnvelope(
+                                                   "event-scope-b", streamId, 2,
+                                                   "conversation-b", "branch-b", "streaming")),
+                               "agent")
+        compare(EventDispatcher.lastSequenceByStream[streamId], 1)
+        compare(EventDispatcher.lastEvent.conversation_id, "conversation-a")
+    }
+
+    function test_top_level_only_chat_scope_is_rejected() {
+        var envelope = canonicalRustChatEnvelope(
+                    "event-top-level-only", "opaque-top-level-only", 1,
+                    "conversation-a", "branch-a", "submitting")
+        delete envelope.payload.conversation_id
+        delete envelope.payload.branch_id
+        envelope.conversation_id = "conversation-a"
+        envelope.branch_id = "branch-a"
+        EventDispatcher.ingest(JSON.stringify(envelope), "agent")
+        verify(typeof EventDispatcher.lastSequenceByStream[envelope.stream_id] === "undefined")
+    }
+
     function test_background_chat_event_cannot_hijack_active_scope() {
         ChatStore.activeConversationId = "conversation-a"
         ChatStore.activeBranchId = "branch-a"

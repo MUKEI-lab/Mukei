@@ -1077,3 +1077,36 @@ mod sol02_tests {
             .is_ok());
     }
 }
+
+
+#[cfg(test)]
+mod canonical_wire_tests {
+    use super::*;
+    use mukei_core::types::{BranchId, ConversationId};
+    use mukei_core::ui_contract::{CapabilitySnapshot, ChatTurnState};
+
+    #[test]
+    fn canonical_chat_event_serialization_keeps_scope_in_payload() {
+        let conversation = ConversationId::new();
+        let branch = BranchId::new();
+        let event = BridgeEvent::new(BridgeEventKind::ChatState {
+            state: ChatTurnState::Submitting,
+            capabilities: CapabilitySnapshot::inferencing(),
+        })
+        .with_chat_scope(conversation, branch, "turn-wire-contract".to_string());
+
+        let serialized = ProtocolRuntimeState::new().wrap_bridge_event(event);
+        let value: serde_json::Value = serde_json::from_str(&serialized).expect("valid event json");
+        let stream_id = value["stream_id"].as_str().expect("stream id");
+
+        assert_eq!(value["protocol_version"]["major"], 2);
+        assert_eq!(value["event_type"], "chat_state");
+        assert_eq!(value["payload"]["conversation_id"], conversation.0.to_string());
+        assert_eq!(value["payload"]["branch_id"], branch.0.to_string());
+        assert_eq!(value["payload"]["turn_id"], "turn-wire-contract");
+        assert!(value.get("conversation_id").is_none());
+        assert!(value.get("branch_id").is_none());
+        assert!(stream_id.contains(&conversation.0.to_string()));
+        assert!(stream_id.contains(&branch.0.to_string()));
+    }
+}

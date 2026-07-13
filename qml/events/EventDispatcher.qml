@@ -12,6 +12,7 @@ Item {
     property var lastSequenceBySource: ({})
     property var lastSequenceByStream: ({})
     property var trackedStreamOrder: []
+    property var streamScopeById: ({})
     property var uncertainStreams: ({})
     property var uncertainStreamResumeSequences: ({})
     property var acceptedEventIds: ({})
@@ -37,6 +38,7 @@ Item {
         lastSequenceBySource = ({})
         lastSequenceByStream = ({})
         trackedStreamOrder = []
+        streamScopeById = ({})
         uncertainStreams = ({})
         uncertainStreamResumeSequences = ({})
         acceptedEventIds = ({})
@@ -143,9 +145,9 @@ Item {
         event.request_id = raw.request_id || ""
         event.command_id = raw.command_id || ""
         event.command_type = raw.command_type || ""
-        event.conversation_id = raw.conversation_id || event.conversation_id || ""
-        event.branch_id = raw.branch_id || event.branch_id || ""
-        event.turn_id = raw.turn_id || event.turn_id || ""
+        event.conversation_id = event.conversation_id || ""
+        event.branch_id = event.branch_id || ""
+        event.turn_id = event.turn_id || ""
         event.protocol_mode = "v2"
         return event
     }
@@ -177,20 +179,45 @@ Item {
         return typeof category === "string" && category.indexOf("chat_") === 0
     }
 
+    function chatScopeKey(conversationId, branchId) {
+        return conversationId.length + ":" + conversationId + ":" + branchId
+    }
+
     function validateV2Scope(raw, event) {
         if (!isChatCategory(event.category))
             return true
-        if (typeof raw.conversation_id !== "string" || raw.conversation_id.length === 0
-                || typeof raw.branch_id !== "string" || raw.branch_id.length === 0) {
+        if (typeof event.conversation_id !== "string" || event.conversation_id.length === 0
+                || typeof event.branch_id !== "string" || event.branch_id.length === 0) {
             eventRejected("missing_chat_scope")
             return false
         }
-        var expectedStreamId = "chat:" + raw.conversation_id + ":" + raw.branch_id
-        if (raw.stream_id !== expectedStreamId) {
-            eventRejected("chat_stream_scope_mismatch")
+        var boundScope = streamScopeById[raw.stream_id]
+        var eventScope = chatScopeKey(event.conversation_id, event.branch_id)
+        if (typeof boundScope === "string" && boundScope !== eventScope) {
+            eventRejected("stream_scope_mutation")
             return false
         }
         return true
+    }
+
+    function rememberV2StreamScope(streamId, event) {
+        if (!isChatCategory(event.category))
+            return
+        var scopes = Object.assign({}, streamScopeById)
+        scopes[streamId] = chatScopeKey(event.conversation_id, event.branch_id)
+        streamScopeById = scopes
+    }
+
+    function streamIdForChatScope(conversationId, branchId) {
+        if (!conversationId || !branchId)
+            return ""
+        var expected = chatScopeKey(conversationId, branchId)
+        var streamIds = Object.keys(streamScopeById)
+        for (var i = 0; i < streamIds.length; ++i) {
+            if (streamScopeById[streamIds[i]] === expected)
+                return streamIds[i]
+        }
+        return ""
     }
 
     function rememberEventId(eventId) {
@@ -211,6 +238,7 @@ Item {
 
     function rememberStreamSequence(streamId, sequence) {
         var next = Object.assign({}, lastSequenceByStream)
+        var scopes = Object.assign({}, streamScopeById)
         var order = trackedStreamOrder.slice(0)
         var existingIndex = order.indexOf(streamId)
         if (existingIndex >= 0)
@@ -220,8 +248,10 @@ Item {
         while (order.length > 256) {
             var expired = order.shift()
             delete next[expired]
+            delete scopes[expired]
         }
         lastSequenceByStream = next
+        streamScopeById = scopes
         trackedStreamOrder = order
     }
 
@@ -285,6 +315,7 @@ Item {
             return false
         }
         rememberStreamSequence(raw.stream_id, raw.sequence)
+        rememberV2StreamScope(raw.stream_id, event)
         lastSequence = typeof lastSequence === "number" ? Math.max(lastSequence, raw.sequence) : raw.sequence
         return true
     }
@@ -306,8 +337,8 @@ Item {
     function markChatScopeResynchronized(conversationId, branchId, baselineSequence, validatedByController) {
         if (validatedByController !== true || !conversationId || !branchId)
             return false
-        var streamId = "chat:" + conversationId + ":" + branchId
-        return completeResynchronization(streamId, baselineSequence)
+        var streamId = streamIdForChatScope(conversationId, branchId)
+        return streamId.length > 0 && completeResynchronization(streamId, baselineSequence)
     }
 
     function shouldAcceptLegacy(event, sourceName) {

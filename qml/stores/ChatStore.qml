@@ -404,20 +404,11 @@ Item {
                 applied = true
             }
             if (applied) {
-                SnapshotController.markApplied("chat")
                 UiSessionStore.setTimelineAnchor(parsed.oldest_message_id || "")
-                if (!prepend) {
+                if (!prepend)
                     clearBackgroundScopeDirty(activeConversationId, activeBranchId)
-                    // Snapshot reconciliation is the explicit resynchronization
-                    // boundary for a quarantined chat stream. If the snapshot
-                    // exposes a sequence use it; otherwise EventDispatcher uses
-                    // the gap high-water mark that triggered this refresh.
-                    EventDispatcher.markChatScopeResynchronized(
-                                activeConversationId,
-                                activeBranchId,
-                                typeof parsed.stream_sequence === "number"
-                                ? parsed.stream_sequence : undefined)
-                }
+                // AppCoordinator owns correlated resync completion after this
+                // successful store-apply signal; the store never reopens a stream.
                 snapshotApplied()
                 tailUpdated()
             }
