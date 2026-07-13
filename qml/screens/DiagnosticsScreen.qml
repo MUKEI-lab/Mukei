@@ -71,6 +71,8 @@ Page {
             Repeater {
                 model: root.diagnosticRows
                 delegate: Rectangle {
+                    id: diagnosticDelegate
+                    required property var modelData
                     Layout.fillWidth: true
                     implicitHeight: Math.max(56, diagnosticRow.implicitHeight + Spacing.md * 2)
                     radius: Theme.radiusMd
@@ -83,13 +85,13 @@ Page {
                         anchors.margins: Spacing.md
                         Text {
                             Layout.fillWidth: true
-                            text: modelData.label
+                            text: diagnosticDelegate.modelData.label
                             color: Theme.p.inkSecondary
                             wrapMode: Text.Wrap
                             Component.onCompleted: Type.apply(this, Type.bodyUI)
                         }
                         Text {
-                            text: modelData.value
+                            text: diagnosticDelegate.modelData.value
                             color: Theme.p.inkPrimary
                             horizontalAlignment: Text.AlignRight
                             Component.onCompleted: Type.apply(this, Type.bodyUI)
