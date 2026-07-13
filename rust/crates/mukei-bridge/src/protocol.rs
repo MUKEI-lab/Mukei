@@ -1078,7 +1078,6 @@ mod sol02_tests {
     }
 }
 
-
 #[cfg(test)]
 mod canonical_wire_tests {
     use super::*;
@@ -1101,7 +1100,10 @@ mod canonical_wire_tests {
 
         assert_eq!(value["protocol_version"]["major"], 2);
         assert_eq!(value["event_type"], "chat_state");
-        assert_eq!(value["payload"]["conversation_id"], conversation.0.to_string());
+        assert_eq!(
+            value["payload"]["conversation_id"],
+            conversation.0.to_string()
+        );
         assert_eq!(value["payload"]["branch_id"], branch.0.to_string());
         assert_eq!(value["payload"]["turn_id"], "turn-wire-contract");
         assert!(value.get("conversation_id").is_none());
