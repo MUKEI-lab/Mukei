@@ -2,6 +2,8 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Dialogs
 import QtQuick.Layouts
+import "../architecture"
+import "../stores"
 import "../theme"
 import "../components"
 
