@@ -73,7 +73,7 @@ jobs:
       - name: Install native build tools
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
 
-      - name: Decode and apply exact-head patch
+      - name: Verify remediation payload integrity
         shell: bash
         run: |
           set -euo pipefail
@@ -81,9 +81,27 @@ jobs:
           base64 -d /tmp/native-inference-patch.py.gz.b64 | gzip -d > /tmp/native-inference-patch.py
           echo "$PATCH_SHA256  /tmp/native-inference-patch.py" | sha256sum -c -
           python3 -m py_compile /tmp/native-inference-patch.py
-          python3 /tmp/native-inference-patch.py
-          cargo fmt --manifest-path rust/Cargo.toml --all
-          git diff --check
+
+      - name: Apply exact-head remediation patch
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 /tmp/native-inference-patch.py 2>&1 | tee /tmp/native-inference-apply.log
+
+      - name: Upload patch failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-inference-patch-failure
+          path: /tmp/native-inference-apply.log
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Format patched Rust sources
+        run: cargo fmt --manifest-path rust/Cargo.toml --all
+
+      - name: Validate patched source diff
+        run: git diff --check
 
       - name: Configure pinned native capsule
         run: >-
