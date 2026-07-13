@@ -122,6 +122,7 @@ Page {
             reuseItems: true
             cacheBuffer: Math.max(height, 600)
             delegate: Rectangle {
+                id: documentDelegate
                 required property string documentId
                 required property string label
                 required property string mimeType
@@ -140,72 +141,72 @@ Page {
                 radius: Theme.radiusLg
                 color: Theme.p.surface
                 border.width: 1
-                border.color: cleanupPending ? Theme.warning : Theme.p.divider
+                border.color: documentDelegate.cleanupPending ? Theme.warning : Theme.p.divider
                 RowLayout {
                     id: rowContent
                     anchors.fill: parent
                     anchors.margins: Spacing.lg
                     spacing: Spacing.md
-                    MukeiIcon { name: "file"; size: 24; tone: revoked ? Theme.p.inkFaint : Theme.p.inkPrimary }
+                    MukeiIcon { name: "file"; size: 24; tone: documentDelegate.revoked ? Theme.p.inkFaint : Theme.p.inkPrimary }
                     ColumnLayout {
                         Layout.fillWidth: true
                         Text {
                             Layout.fillWidth: true
-                            text: label
+                            text: documentDelegate.label
                             color: Theme.p.inkPrimary
                             elide: Text.ElideMiddle
                             Component.onCompleted: Type.apply(this, Type.h3)
                         }
                         Text {
                             Layout.fillWidth: true
-                            text: chunkCount > 0
-                                  ? qsTr("%1 chunks · %2").arg(chunkCount).arg(StorageStore.formatBytes(sizeBytes))
-                                  : ingestionState === "failed"
+                            text: documentDelegate.chunkCount > 0
+                                  ? qsTr("%1 chunks · %2").arg(documentDelegate.chunkCount).arg(StorageStore.formatBytes(documentDelegate.sizeBytes))
+                                  : documentDelegate.ingestionState === "failed"
                                     ? qsTr("Indexing paused · retry available")
-                                    : ingestionState === "completed"
-                                      ? qsTr("Indexed · %1").arg(StorageStore.formatBytes(sizeBytes))
-                                      : ingestionState === "waiting_for_embedder"
+                                    : documentDelegate.ingestionState === "completed"
+                                      ? qsTr("Indexed · %1").arg(StorageStore.formatBytes(documentDelegate.sizeBytes))
+                                      : documentDelegate.ingestionState === "waiting_for_embedder"
                                         ? qsTr("Private access retained · waiting for the on-device indexer")
-                                      : permissionState === "persisted"
-                                        ? qsTr("Private access retained · indexing %1").arg(ingestionState)
-                                        : permissionState === "transient"
+                                      : documentDelegate.permissionState === "persisted"
+                                        ? qsTr("Private access retained · indexing %1").arg(documentDelegate.ingestionState)
+                                        : documentDelegate.permissionState === "transient"
                                           ? qsTr("Temporary access · reselect may be required after restart")
-                                          : qsTr("Access registered · indexing %1").arg(ingestionState)
+                                          : qsTr("Access registered · indexing %1").arg(documentDelegate.ingestionState)
                             color: Theme.p.inkSecondary
                             wrapMode: Text.Wrap
                             Component.onCompleted: Type.apply(this, Type.bodySmall)
                         }
                         ProgressBar {
                             Layout.fillWidth: true
-                            visible: ["reading", "chunking", "embedding", "committing"].indexOf(ingestionState) >= 0
-                            value: Math.max(0, Math.min(1, ingestionProgress / 100))
+                            visible: ["reading", "chunking", "embedding", "committing"].indexOf(documentDelegate.ingestionState) >= 0
+                            value: Math.max(0, Math.min(1, documentDelegate.ingestionProgress / 100))
                         }
                     }
                     StatusPill {
-                        text: cleanupPending ? qsTr("Cleanup pending")
-                            : revoked ? qsTr("Revoked")
-                            : ingestionState === "failed" ? qsTr("Indexing failed")
-                            : chunkCount > 0 || ingestionState === "completed" ? qsTr("Indexed")
-                            : ingestionState === "queued" ? qsTr("Queued")
-                            : ingestionState === "waiting_for_embedder" ? qsTr("Waiting") : qsTr("Granted")
-                        subtype: cleanupPending || ingestionState === "failed" ? "Warning"
-                            : revoked ? "Neutral" : "Success"
+                        text: documentDelegate.cleanupPending ? qsTr("Cleanup pending")
+                            : documentDelegate.revoked ? qsTr("Revoked")
+                            : documentDelegate.ingestionState === "failed" ? qsTr("Indexing failed")
+                            : documentDelegate.chunkCount > 0 || documentDelegate.ingestionState === "completed" ? qsTr("Indexed")
+                            : documentDelegate.ingestionState === "queued" ? qsTr("Queued")
+                            : documentDelegate.ingestionState === "waiting_for_embedder" ? qsTr("Waiting") : qsTr("Granted")
+                        subtype: documentDelegate.cleanupPending || documentDelegate.ingestionState === "failed" ? "Warning"
+                            : documentDelegate.revoked ? "Neutral" : "Success"
                     }
                     GhostButton {
-                        visible: !revoked && ingestionState === "failed" && ingestionRetryable
+                        visible: !documentDelegate.revoked && documentDelegate.ingestionState === "failed" && documentDelegate.ingestionRetryable
                         text: qsTr("Retry")
                         onClicked: IntentDispatcher.dispatch({
                             type: "documents.retryIngestion",
-                            documentId: documentId
+                            documentId: documentDelegate.documentId
                         })
                     }
                     DestructiveButton {
-                        visible: !revoked
-                        enabled: !cleanupPending
+                        visible: !documentDelegate.revoked
+                        enabled: !documentDelegate.cleanupPending
                         text: qsTr("Revoke")
                         onCommitted: {
-                            root.pendingRevokeDocumentId = documentId
-                            root.pendingRevokeDocumentName = label
+                            root.pendingRevokeDocumentId = documentDelegate.documentId
+                            root.pendingRevokeDocumentName = documentDelegate.label
                             revokeDialog.open()
                         }
                     }
