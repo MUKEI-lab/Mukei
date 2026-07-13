@@ -1,1 +1,17 @@
-prefer :/com/mukei/app/
+prefer :/com/mukei/app/screens/
+ChatScreen 1.0 ChatScreen.qml
+CompatibilityScreen 1.0 CompatibilityScreen.qml
+DownloadsScreen 1.0 DownloadsScreen.qml
+DocumentsScreen 1.0 DocumentsScreen.qml
+DiagnosticsScreen 1.0 DiagnosticsScreen.qml
+EmptyChatScreen 1.0 EmptyChatScreen.qml
+ModelManagerScreen 1.0 ModelManagerScreen.qml
+ModelPickerScreen 1.0 ModelPickerScreen.qml
+RagRebuildPromptScreen 1.0 RagRebuildPromptScreen.qml
+RecoveryScreen 1.0 RecoveryScreen.qml
+SafeModeScreen 1.0 SafeModeScreen.qml
+SettingsScreen 1.0 SettingsScreen.qml
+StartupScreen 1.0 StartupScreen.qml
+ToolResultExpandedScreen 1.0 ToolResultExpandedScreen.qml
+VerificationScreen 1.0 VerificationScreen.qml
+WelcomeScreen 1.0 WelcomeScreen.qml
