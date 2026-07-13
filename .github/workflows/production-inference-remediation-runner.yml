@@ -127,7 +127,19 @@ jobs:
           -DMUKEI_LLAMA_FORCE_REBUILD=ON
 
       - name: Build native capsule and ABI smoke
-        run: cmake --build "$NATIVE_BUILD_DIR" --target mukei_llama_native_smoke -j2
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build "$NATIVE_BUILD_DIR" --target mukei_llama_native_smoke -j2 2>&1 | tee /tmp/mukei-native-build.log
+
+      - name: Upload native build failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-inference-native-build-failure
+          path: /tmp/mukei-native-build.log
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Run native ABI smoke
         run: ctest --test-dir "$NATIVE_BUILD_DIR" --output-on-failure
