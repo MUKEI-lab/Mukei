@@ -15,10 +15,10 @@ Item {
         id: announcer
         onAnnouncementReady: function(text) {
             root.announcementReady(text)
-            if (typeof mukeiAccessibility !== "undefined"
-                    && mukeiAccessibility !== null
-                    && typeof mukeiAccessibility.announce === "function")
-                mukeiAccessibility.announce(text, false)
+            if (typeof mukeiAccessibility !== "undefined" // qmllint disable unqualified
+                    && mukeiAccessibility !== null // qmllint disable unqualified
+                    && typeof mukeiAccessibility.announce === "function") // qmllint disable unqualified
+                mukeiAccessibility.announce(text, false) // qmllint disable unqualified
         }
     }
 
