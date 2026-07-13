@@ -47,9 +47,12 @@ Page {
                 Repeater {
                     model: root.tabs
                     delegate: GhostButton {
-                        text: modelData
-                        active: root.selectedTab === index
-                        onClicked: root.selectedTab = index
+                        id: tabButton
+                        required property var modelData
+                        required property int index
+                        text: tabButton.modelData
+                        active: root.selectedTab === tabButton.index
+                        onClicked: root.selectedTab = tabButton.index
                     }
                 }
             }
