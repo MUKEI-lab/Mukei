@@ -239,6 +239,7 @@ TestCase {
         compare(eventSpy.count, 0)
         verify(typeof EventDispatcher.lastEvent === "undefined")
     }
+
     function test_download_completed_preserves_model_identity() {
         EventDispatcher.ingest(JSON.stringify({
             schema_version: 1,
@@ -289,22 +290,29 @@ TestCase {
         compare(EventDispatcher.lastSequenceByStream["chat:conversation-a:branch-a"], 2)
     }
 
-    function test_v2_gap_is_quarantined_until_snapshot_resync() {
+    function test_v2_gap_requires_snapshot_watermark_covering_quarantine_high_water() {
+        var streamId = "chat:conversation-a:branch-a"
         EventDispatcher.ingest(JSON.stringify(
             v2ChatEvent("event-v2-gap-1", 1, "chat_state", "operation-a", { state: "submitting" })))
         EventDispatcher.ingest(JSON.stringify(
             v2ChatEvent("event-v2-gap-3", 3, "chat_chunk", "operation-a", { chunk: "gap" })))
         compare(eventSpy.count, 1)
-        verify(EventDispatcher.uncertainStreams["chat:conversation-a:branch-a"] === true)
+        verify(EventDispatcher.uncertainStreams[streamId] === true)
 
         EventDispatcher.ingest(JSON.stringify(
             v2ChatEvent("event-v2-gap-4", 4, "chat_chunk", "operation-a", { chunk: "blocked" })))
         compare(eventSpy.count, 1)
 
-        verify(EventDispatcher.markChatScopeResynchronized("conversation-a", "branch-a"))
+        // A snapshot covering only sequence 3 is stale because sequence 4 was
+        // observed while the stream remained quarantined.
+        verify(!EventDispatcher.completeResynchronization(streamId, 3))
+        verify(EventDispatcher.uncertainStreams[streamId] === true)
+
+        verify(EventDispatcher.completeResynchronization(streamId, 4))
         EventDispatcher.ingest(JSON.stringify(
-            v2ChatEvent("event-v2-gap-4", 4, "chat_chunk", "operation-a", { chunk: "accepted" })))
+            v2ChatEvent("event-v2-gap-5", 5, "chat_chunk", "operation-a", { chunk: "accepted" })))
         compare(eventSpy.count, 2)
+        compare(EventDispatcher.lastSequenceByStream[streamId], 5)
     }
 
     function test_v2_duplicate_logical_terminal_is_rejected() {
@@ -351,5 +359,4 @@ TestCase {
         EventDispatcher.ingest(JSON.stringify(event))
         compare(eventSpy.count, 0)
     }
-
 }
