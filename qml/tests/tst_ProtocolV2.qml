@@ -111,6 +111,8 @@ TestCase {
         compare(ContractStore.protocolMode, "v2")
         verify(ContractStore.scopedCancellationAvailable)
         IntentDispatcher.configure(protocolAgent, null, null)
+        IntentDispatcher.configureProtocolDependencies(
+                    ContractStore, CapabilityStore, ChatStore, OperationStore)
         CapabilityStore.applySnapshot(readyCapabilities())
     }
 
