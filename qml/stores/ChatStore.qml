@@ -96,7 +96,9 @@ Item {
             protocolMode: legacyMode === true ? "legacy_v1" : "v2",
             createdAt: Date.now(),
             expiresAt: Date.now() + (legacyMode === true ? 5000 : pendingScopeAdoptionTtlMs),
-            legacySequenceFloor: typeof EventDispatcher.lastSequence === "number"
+            legacySequenceFloor: legacyMode === true
+                                 && typeof EventDispatcher !== "undefined"
+                                 && typeof EventDispatcher.lastSequence === "number"
                                  ? EventDispatcher.lastSequence : 0
         }
         awaitingInitialScopeBinding = true
