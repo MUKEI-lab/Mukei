@@ -9,7 +9,6 @@ permissions:
 
 jobs:
   patch:
-    # Retry marker: previous attempt failed in GitHub hosted-runner setup before checkout.
     if: github.event.pull_request.head.ref == 'checkpoint/stabilization-2026-07-12'
     runs-on: ubuntu-latest
     steps:
@@ -31,6 +30,8 @@ jobs:
           echo "QMAKE=$QT_ROOT_DIR/bin/qmake" >> "$GITHUB_ENV"
       - name: Apply activation composition-root wiring
         run: python3 .github/patch_activation_composition_root.py
+      - name: Apply activation composition compile follow-up
+        run: python3 .github/patch_activation_composition_followup.py
       - name: Align existing capability-mode test with active-model truth
         run: |
           python3 <<'PY'
