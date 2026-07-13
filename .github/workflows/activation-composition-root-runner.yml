@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   patch:
+    # Retry marker: previous attempt failed in GitHub hosted-runner setup before checkout.
     if: github.event.pull_request.head.ref == 'checkpoint/stabilization-2026-07-12'
     runs-on: ubuntu-latest
     steps:
