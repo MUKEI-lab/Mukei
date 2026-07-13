@@ -20,7 +20,24 @@ jobs:
         with:
           components: rustfmt
       - name: Apply transactional activation hardening
-        run: python3 .github/patch_transactional_activation.py
+        id: patch
+        continue-on-error: true
+        run: |
+          set +e
+          python3 .github/patch_transactional_activation.py 2>&1 | tee /tmp/transactional-activation-patch.log
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+      - name: Upload patch diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: transactional-activation-patch-log
+          path: /tmp/transactional-activation-patch.log
+          retention-days: 1
+      - name: Enforce patch success
+        if: steps.patch.outputs.status != '0'
+        run: exit 1
       - name: Apply canonical rustfmt output
         working-directory: rust
         run: cargo fmt --all
