@@ -1,5 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import "../architecture"
+import "../stores"
 import "../theme"
 import "../screens"
 
