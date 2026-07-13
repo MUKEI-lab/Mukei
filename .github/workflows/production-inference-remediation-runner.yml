@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - ".github/workflows/production-inference-remediation-runner.yml"
+      - ".github/remediation/native-inference-patch.corrections.py"
   workflow_dispatch:
 
 permissions:
@@ -18,7 +19,6 @@ env:
   EXPECTED_SOURCE_BASE: 9e69306e7ef50bc253fa91816915aa07eeb05515
   RUNNER_PATH: .github/workflows/production-inference-remediation-runner.yml
   PATCH_V1_SHA256: 0d56a8bd479c891229b2794b419247bb9e2f67bb0b034f2734ea989777869417
-  PATCH_CORRECTED_SHA256: 805b9b1fb3a6aa3b06cf5c5b3147147b7449fe2fdccb5cded554df1e130a0888
   QT_VERSION: 6.5.3
   NATIVE_BUILD_DIR: /tmp/mukei-remediation-native
   QML_BUILD_DIR: /tmp/mukei-remediation-qml
@@ -41,6 +41,7 @@ jobs:
           mapfile -t changed < <(git diff --name-only "$EXPECTED_SOURCE_BASE"..HEAD | sort)
           mapfile -t expected < <(printf '%s\n' \
             "$RUNNER_PATH" \
+            .github/remediation/native-inference-patch.corrections.py \
             .github/remediation/native-inference-patch.part00 \
             .github/remediation/native-inference-patch.part01 \
             .github/remediation/native-inference-patch.part02 \
@@ -83,27 +84,7 @@ jobs:
           cat .github/remediation/native-inference-patch.part* > /tmp/native-inference-patch.py.gz.b64
           base64 -d /tmp/native-inference-patch.py.gz.b64 | gzip -d > /tmp/native-inference-patch.py
           echo "$PATCH_V1_SHA256  /tmp/native-inference-patch.py" | sha256sum -c -
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('/tmp/native-inference-patch.py')
-          content = path.read_text()
-          replacements = [
-              ('\'llama_cpp = ["mukei-core/llama_cpp"]\\n\',', '\'llama_cpp          = ["mukei-core/llama_cpp"]\\n\','),
-              ('\'llama_cpp = []\\n\',', '\'llama_cpp          = []\\n\','),
-              ('\'runtime_production = []\\n\',', '\'runtime_production  = []\\n\','),
-              ('\'runtime_production = ["llama_cpp"]\\n\',', '\'runtime_production  = ["llama_cpp"]\\n\','),
-              ("'''                visible: ModelStore.restartRequired || ModelStore.sessionMessage.length > 0\n'''", "'''            visible: ModelStore.restartRequired || ModelStore.sessionMessage.length > 0\n'''") ,
-              ("'''                visible: ModelStore.activationInProgress || ModelStore.activationFailed\n                         || ModelStore.restartRequired || ModelStore.sessionMessage.length > 0\n'''", "'''            visible: ModelStore.activationInProgress || ModelStore.activationFailed\n                     || ModelStore.restartRequired || ModelStore.sessionMessage.length > 0\n'''") ,
-          ]
-          for old, new in replacements:
-              count = content.count(old)
-              if count != 1:
-                  raise RuntimeError(f'expected exactly one correction anchor, found {count}: {old!r}')
-              content = content.replace(old, new, 1)
-          path.write_text(content)
-          PY
-          echo "$PATCH_CORRECTED_SHA256  /tmp/native-inference-patch.py" | sha256sum -c -
+          python3 .github/remediation/native-inference-patch.corrections.py /tmp/native-inference-patch.py
           python3 -m py_compile /tmp/native-inference-patch.py
 
       - name: Apply exact-head remediation patch
