@@ -1,1 +1,19 @@
-prefer :/com/mukei/app/
+prefer :/com/mukei/app/stores/
+singleton ContractStore 1.0 ContractStore.qml
+singleton LifecycleStore 1.0 LifecycleStore.qml
+singleton CapabilityStore 1.0 CapabilityStore.qml
+singleton ConversationStore 1.0 ConversationStore.qml
+singleton NavigationStore 1.0 NavigationStore.qml
+singleton UiSessionStore 1.0 UiSessionStore.qml
+singleton ChatStore 1.0 ChatStore.qml
+singleton RecoveryStore 1.0 RecoveryStore.qml
+singleton ModelStore 1.0 ModelStore.qml
+singleton DownloadStore 1.0 DownloadStore.qml
+singleton DocumentStore 1.0 DocumentStore.qml
+singleton StorageStore 1.0 StorageStore.qml
+singleton SettingsStore 1.0 SettingsStore.qml
+singleton ResponsiveStore 1.0 ResponsiveStore.qml
+singleton OperationStore 1.0 OperationStore.qml
+singleton ErrorStore 1.0 ErrorStore.qml
+singleton DiagnosticsStore 1.0 DiagnosticsStore.qml
+singleton AccessibilityStore 1.0 AccessibilityStore.qml
