@@ -26,6 +26,7 @@ Item {
     signal eventReceived(var event)
     signal sequenceGapDetected(string feature, int expectedSequence, int receivedSequence)
     signal streamSequenceGapDetected(string feature, string streamId, double expectedSequence, double receivedSequence)
+    signal streamQuarantineAdvanced(string streamId, double observedSequence)
     signal eventRejected(string reason)
 
     Component.onCompleted: reset()
@@ -231,7 +232,7 @@ Item {
 
         var resumes = Object.assign({}, uncertainStreamResumeSequences)
         var current = Number(resumes[streamId] || 0)
-        var candidate = Math.max(0, Number(observedSequence || 0) - 1)
+        var candidate = Math.max(0, Number(observedSequence || 0))
         resumes[streamId] = Math.max(current, candidate)
         uncertainStreamResumeSequences = resumes
     }
@@ -258,6 +259,7 @@ Item {
         }
         if (uncertainStreams[raw.stream_id] === true) {
             markStreamUncertain(raw.stream_id, raw.sequence)
+            streamQuarantineAdvanced(raw.stream_id, raw.sequence)
             eventRejected("stream_uncertain_resync_required")
             return false
         }
@@ -270,9 +272,9 @@ Item {
             }
             if (raw.sequence > previous + 1) {
                 var feature = featureForCategory(event.category)
+                markStreamUncertain(raw.stream_id, raw.sequence)
                 sequenceGapDetected(feature, previous + 1, raw.sequence)
                 streamSequenceGapDetected(feature, raw.stream_id, previous + 1, raw.sequence)
-                markStreamUncertain(raw.stream_id, raw.sequence)
                 eventRejected("sequence_gap_resync_required")
                 return false
             }
@@ -288,26 +290,24 @@ Item {
     }
 
     function completeResynchronization(streamId, baselineSequence) {
-        if (!streamId)
+        if (!streamId || uncertainStreams[streamId] !== true)
             return false
         var baseline = Number(baselineSequence)
-        if (!Number.isFinite(baseline))
-            baseline = Number(uncertainStreamResumeSequences[streamId] || lastSequenceByStream[streamId] || 0)
-        rememberStreamSequence(streamId, Math.max(0, baseline))
+        if (!Number.isFinite(baseline) || Math.floor(baseline) !== baseline || baseline < 1)
+            return false
+        var required = Number(uncertainStreamResumeSequences[streamId] || 0)
+        if (baseline < required)
+            return false
+        rememberStreamSequence(streamId, baseline)
         clearStreamUncertain(streamId)
         return true
     }
 
-    function markChatScopeResynchronized(conversationId, branchId, baselineSequence) {
-        if (!conversationId || !branchId)
+    function markChatScopeResynchronized(conversationId, branchId, baselineSequence, validatedByController) {
+        if (validatedByController !== true || !conversationId || !branchId)
             return false
         var streamId = "chat:" + conversationId + ":" + branchId
-        if (uncertainStreams[streamId] !== true)
-            return false
-        var baseline = Number(baselineSequence)
-        if (!Number.isFinite(baseline))
-            baseline = Number(uncertainStreamResumeSequences[streamId] || lastSequenceByStream[streamId] || 0)
-        return completeResynchronization(streamId, baseline)
+        return completeResynchronization(streamId, baselineSequence)
     }
 
     function shouldAcceptLegacy(event, sourceName) {
