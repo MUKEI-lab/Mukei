@@ -16,9 +16,16 @@ QtObject {
         runtimeSource = runtime
     }
 
+    function publishError(error, fallbackCode) {
+        if (typeof ErrorStore !== "undefined"
+                && ErrorStore !== null
+                && typeof ErrorStore.push === "function")
+            ErrorStore.push(error, fallbackCode)
+    }
+
     function reject(code, message, intent) {
         intentRejected(code, message, intent)
-        ErrorStore.push({
+        publishError({
             code: code,
             severity: "warning",
             recoverable: true,
@@ -118,7 +125,7 @@ QtObject {
         var accepted = OperationStore.applyAcknowledgement(acknowledgement, command)
         if (!accepted || acknowledgement.status !== "accepted") {
             var reason = acknowledgement.rejection_reason || "backend_unavailable"
-            ErrorStore.push({
+            publishError({
                 code: "ERR_COMMAND_REJECTED_" + String(reason).toUpperCase(),
                 severity: "warning",
                 recoverable: true,
