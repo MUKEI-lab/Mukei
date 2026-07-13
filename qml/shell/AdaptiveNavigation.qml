@@ -41,16 +41,16 @@ Rectangle {
                 required property var modelData
                 Layout.fillWidth: true
                 implicitHeight: 52
-                text: ResponsiveStore.expanded ? modelData.label : ""
-                icon.source: modelData.icon
+                text: ResponsiveStore.expanded ? navigationButton.modelData.label : ""
+                icon.source: navigationButton.modelData.icon
                 icon.width: 22
                 icon.height: 22
                 display: ResponsiveStore.expanded ? AbstractButton.TextBesideIcon : AbstractButton.IconOnly
-                Accessible.name: modelData.label
-                checked: NavigationStore.currentRoute === modelData.route
+                Accessible.name: navigationButton.modelData.label
+                checked: NavigationStore.currentRoute === navigationButton.modelData.route
                 checkable: true
                 autoExclusive: true
-                onClicked: IntentDispatcher.dispatch({ type: "navigation.open", route: modelData.route })
+                onClicked: IntentDispatcher.dispatch({ type: "navigation.open", route: navigationButton.modelData.route })
                 background: Rectangle {
                     radius: Theme.radiusLg
                     color: navigationButton.checked || navigationButton.hovered ? Theme.p.surfaceFaint : "transparent"
@@ -60,7 +60,7 @@ Rectangle {
                 contentItem: RowLayout {
                     spacing: Spacing.sm
                     Image {
-                        source: modelData.icon
+                        source: navigationButton.modelData.icon
                         sourceSize.width: 22
                         sourceSize.height: 22
                         Layout.alignment: Qt.AlignHCenter
@@ -68,7 +68,7 @@ Rectangle {
                     Text {
                         visible: ResponsiveStore.expanded
                         Layout.fillWidth: true
-                        text: modelData.label
+                        text: navigationButton.modelData.label
                         color: Theme.p.inkPrimary
                         Component.onCompleted: Type.apply(this, Type.bodyUI)
                     }
