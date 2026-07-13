@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import "../stores"
 import "../theme"
 
 ListView {
@@ -15,11 +16,15 @@ ListView {
     Accessible.description: qsTr("Recent private conversations")
 
     delegate: ItemDelegate {
+        required property string conversationId
+        required property string branchId
+        required property string title
+        required property string preview
         width: ListView.view.width
         implicitHeight: contentColumn.implicitHeight + Spacing.md * 2
         Accessible.name: titleText.text
         Accessible.description: previewText.text
-        onClicked: root.conversationSelected(model.conversationId || "", model.branchId || "")
+        onClicked: root.conversationSelected(conversationId || "", branchId || "")
 
         contentItem: ColumnLayout {
             id: contentColumn
@@ -27,7 +32,7 @@ ListView {
             Text {
                 id: titleText
                 Layout.fillWidth: true
-                text: model.title || qsTr("Untitled conversation")
+                text: title || qsTr("Untitled conversation")
                 color: Theme.p.inkPrimary
                 elide: Text.ElideRight
                 Component.onCompleted: Type.apply(this, Type.bodyUI)
@@ -35,7 +40,7 @@ ListView {
             Text {
                 id: previewText
                 Layout.fillWidth: true
-                text: model.preview || qsTr("Private conversation")
+                text: preview || qsTr("Private conversation")
                 color: Theme.p.inkFaint
                 elide: Text.ElideRight
                 Component.onCompleted: Type.apply(this, Type.caption)
