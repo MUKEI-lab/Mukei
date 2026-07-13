@@ -97,6 +97,7 @@ Page {
             cacheBuffer: Math.max(height, 700)
 
             delegate: Rectangle {
+                id: modelDelegate
                 required property string modelId
                 required property string displayName
                 required property string description
@@ -109,9 +110,9 @@ Page {
                 width: ListView.view.width
                 implicitHeight: card.implicitHeight + Spacing.lg * 2
                 radius: Theme.radiusLg
-                color: ModelStore.activeModelId === modelId ? Theme.p.surfaceFaint : Theme.p.surface
-                border.width: ModelStore.activeModelId === modelId ? 2 : 1
-                border.color: ModelStore.activeModelId === modelId ? Theme.p.accent : Theme.p.divider
+                color: ModelStore.activeModelId === modelDelegate.modelId ? Theme.p.surfaceFaint : Theme.p.surface
+                border.width: ModelStore.activeModelId === modelDelegate.modelId ? 2 : 1
+                border.color: ModelStore.activeModelId === modelDelegate.modelId ? Theme.p.accent : Theme.p.divider
 
                 ColumnLayout {
                     id: card
@@ -126,7 +127,7 @@ Page {
                             spacing: Spacing.xxs
                             Text {
                                 Layout.fillWidth: true
-                                text: displayName
+                                text: modelDelegate.displayName
                                 color: Theme.p.inkPrimary
                                 wrapMode: Text.Wrap
                                 Component.onCompleted: Type.apply(this, Type.h3)
@@ -134,61 +135,61 @@ Page {
                             Text {
                                 Layout.fillWidth: true
                                 text: qsTr("%1 · %2 GB RAM · %3 token context")
-                                      .arg(sizeLabel).arg(Math.ceil(minRamMiB / 1024)).arg(contextTokens)
+                                      .arg(modelDelegate.sizeLabel).arg(Math.ceil(modelDelegate.minRamMiB / 1024)).arg(modelDelegate.contextTokens)
                                 color: Theme.p.inkSecondary
                                 wrapMode: Text.Wrap
                                 Component.onCompleted: Type.apply(this, Type.bodySmall)
                             }
                         }
                         StatusPill {
-                            text: ModelStore.activeModelId === modelId ? qsTr("Selected")
-                                : installed ? qsTr("Installed")
-                                : downloadState === "downloading" ? qsTr("Downloading")
+                            text: ModelStore.activeModelId === modelDelegate.modelId ? qsTr("Selected")
+                                : modelDelegate.installed ? qsTr("Installed")
+                                : modelDelegate.downloadState === "downloading" ? qsTr("Downloading")
                                 : qsTr("Available")
-                            subtype: ModelStore.activeModelId === modelId || installed ? "Success"
-                                   : downloadState === "failed" ? "Error" : "Neutral"
+                            subtype: ModelStore.activeModelId === modelDelegate.modelId || modelDelegate.installed ? "Success"
+                                   : modelDelegate.downloadState === "failed" ? "Error" : "Neutral"
                         }
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: description
+                        text: modelDelegate.description
                         color: Theme.p.inkSecondary
                         wrapMode: Text.Wrap
                         Component.onCompleted: Type.apply(this, Type.bodyUI)
                     }
                     ProgressBar {
                         Layout.fillWidth: true
-                        visible: ["queued", "starting", "downloading", "cancelling"].indexOf(downloadState) >= 0
-                        value: progress
+                        visible: ["queued", "starting", "downloading", "cancelling"].indexOf(modelDelegate.downloadState) >= 0
+                        value: modelDelegate.progress
                     }
                     RowLayout {
                         Layout.fillWidth: true
                         SecondaryButton {
-                            visible: installed && ModelStore.activeModelId !== modelId
+                            visible: modelDelegate.installed && ModelStore.activeModelId !== modelDelegate.modelId
                             enabled: CapabilityStore.canSwitchModel && !CapabilityStore.isInferencing
                             text: qsTr("Select")
                             Accessible.description: qsTr("Validate and select this installed model for the next engine session")
-                            onClicked: IntentDispatcher.dispatch({ type: "model.select", modelId: modelId })
+                            onClicked: IntentDispatcher.dispatch({ type: "model.select", modelId: modelDelegate.modelId })
                         }
                         SecondaryButton {
-                            visible: !installed && ["queued", "starting", "downloading", "cancelling"].indexOf(downloadState) < 0
+                            visible: !modelDelegate.installed && ["queued", "starting", "downloading", "cancelling"].indexOf(modelDelegate.downloadState) < 0
                             enabled: CapabilityStore.canDownloadModel && !StorageStore.critical
                             text: qsTr("Download")
-                            onClicked: IntentDispatcher.dispatch({ type: "model.download", modelId: modelId })
+                            onClicked: IntentDispatcher.dispatch({ type: "model.download", modelId: modelDelegate.modelId })
                         }
                         GhostButton {
-                            visible: ["queued", "starting", "downloading"].indexOf(downloadState) >= 0
+                            visible: ["queued", "starting", "downloading"].indexOf(modelDelegate.downloadState) >= 0
                             enabled: CapabilityStore.canStopDownload
                             text: qsTr("Stop")
-                            onClicked: IntentDispatcher.dispatch({ type: "download.cancel", modelId: modelId })
+                            onClicked: IntentDispatcher.dispatch({ type: "download.cancel", modelId: modelDelegate.modelId })
                         }
                         DestructiveButton {
-                            visible: installed
+                            visible: modelDelegate.installed
                             enabled: CapabilityStore.canDeleteModel && !CapabilityStore.isInferencing
                             text: qsTr("Delete")
                             onCommitted: {
-                                root.pendingDeleteModelId = modelId
-                                root.pendingDeleteModelName = displayName
+                                root.pendingDeleteModelId = modelDelegate.modelId
+                                root.pendingDeleteModelName = modelDelegate.displayName
                                 deleteDialog.open()
                             }
                         }
