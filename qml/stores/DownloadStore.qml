@@ -21,6 +21,8 @@ QtObject {
     }
 
     signal hydrationCompleted
+    signal snapshotApplied
+    signal snapshotFailed
 
     function configure(agent) { agentSource = agent }
 
@@ -68,34 +70,48 @@ QtObject {
         loading = false
         hydrated = true
         OperationStore.reconcileDurableState()
+        snapshotApplied()
+        hydrationCompleted()
+    }
+
+    function failSnapshot(errorValue) {
+        loading = false
+        hydrated = true
+        if (errorValue)
+            ErrorStore.push(errorValue, "ERR_UI_DOWNLOAD_SNAPSHOT")
+        snapshotFailed()
         hydrationCompleted()
     }
 
     function hydrate() {
         if (loading)
-            return
+            return false
         hydrated = false
         if (agentSource === null || typeof agentSource.download_jobs_json !== "function") {
             applySnapshot([])
-            return
+            return true
         }
         loading = true
         try {
             var value = JSON.parse(agentSource.download_jobs_json(100))
             if (value && value.accepted === true) {
                 lastRequestId = value.request_id || ""
-                return
+                return true
             }
-            if (value && value.error)
-                ErrorStore.push(value.error, "ERR_UI_DOWNLOAD_SNAPSHOT")
-            else
-                applySnapshot(value)
+            if (value && value.error) {
+                failSnapshot(value.error)
+                return false
+            }
+            applySnapshot(value)
+            return true
         } catch (error) {
-            loading = false
-            hydrated = true
-            ErrorStore.push({ code: "ERR_UI_DOWNLOAD_SNAPSHOT", severity: "warning", recoverable: true,
-                              safe_message: qsTr("Download history could not be restored.") })
-            hydrationCompleted()
+            failSnapshot({
+                code: "ERR_UI_DOWNLOAD_SNAPSHOT",
+                severity: "warning",
+                recoverable: true,
+                safe_message: qsTr("Download history could not be restored.")
+            })
+            return false
         }
     }
 
@@ -130,12 +146,8 @@ QtObject {
                 return
             if (result.ok === true)
                 root.applySnapshot(result.payload)
-            else {
-                root.loading = false
-                root.hydrated = true
-                ErrorStore.push(result.error, "ERR_UI_DOWNLOAD_SNAPSHOT")
-                root.hydrationCompleted()
-            }
+            else
+                root.failSnapshot(result.error)
         }
     }
 }
