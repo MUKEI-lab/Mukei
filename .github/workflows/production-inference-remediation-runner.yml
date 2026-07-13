@@ -17,7 +17,7 @@ concurrency:
 env:
   EXPECTED_SOURCE_BASE: 9e69306e7ef50bc253fa91816915aa07eeb05515
   RUNNER_PATH: .github/workflows/production-inference-remediation-runner.yml
-  PATCH_SHA256: 0d56a8bd479c891229b2794b419247bb9e2f67bb0b034f2734ea989777869417
+  PATCH_SHA256: 97009758c3e0b3df875ac7139bf0b27ead46c2ec6bb051d682be2de0d2b25b4b
   QT_VERSION: 6.5.3
   NATIVE_BUILD_DIR: /tmp/mukei-remediation-native
   QML_BUILD_DIR: /tmp/mukei-remediation-qml
@@ -45,7 +45,9 @@ jobs:
             .github/remediation/native-inference-patch.part02 \
             .github/remediation/native-inference-patch.part03a \
             .github/remediation/native-inference-patch.part03b \
-            .github/remediation/native-inference-patch.part04 | sort)
+            .github/remediation/native-inference-patch.part04 \
+            .github/remediation/native-inference-patch.v2part00 \
+            .github/remediation/native-inference-patch.v2part01 | sort)
           if [[ "${changed[*]}" != "${expected[*]}" ]]; then
             printf 'Unexpected files changed since exact source base:\n' >&2
             printf '  %s\n' "${changed[@]}" >&2
@@ -77,7 +79,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .github/remediation/native-inference-patch.part* > /tmp/native-inference-patch.py.gz.b64
+          cat .github/remediation/native-inference-patch.v2part* > /tmp/native-inference-patch.py.gz.b64
           base64 -d /tmp/native-inference-patch.py.gz.b64 | gzip -d > /tmp/native-inference-patch.py
           echo "$PATCH_SHA256  /tmp/native-inference-patch.py" | sha256sum -c -
           python3 -m py_compile /tmp/native-inference-patch.py
@@ -167,7 +169,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git rm "$RUNNER_PATH" .github/remediation/native-inference-patch.part*
+          git rm "$RUNNER_PATH" .github/remediation/native-inference-patch.*
           git add -A
           git diff --cached --check
           if git diff --cached --quiet; then
