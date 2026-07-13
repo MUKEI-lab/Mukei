@@ -30,10 +30,37 @@ jobs:
           RUSTFLAGS: -D warnings
         run: cargo check -p mukei-core
       - name: Run focused core tests
+        id: focused
+        continue-on-error: true
         working-directory: rust
         run: |
-          cargo test -p mukei-core engine::activation::tests --lib
-          cargo test -p mukei-core ui_contract::tests --lib
+          set +e
+          {
+            echo '=== engine::activation::tests ==='
+            cargo test -p mukei-core engine::activation::tests --lib
+            activation_status=$?
+            echo '=== ui_contract::tests ==='
+            cargo test -p mukei-core ui_contract::tests --lib
+            ui_status=$?
+            echo "activation_status=$activation_status"
+            echo "ui_status=$ui_status"
+            if [ "$activation_status" -ne 0 ] || [ "$ui_status" -ne 0 ]; then
+              exit 1
+            fi
+          } 2>&1 | tee /tmp/activation-composition-focused-tests.log
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+      - name: Upload focused test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: activation-composition-focused-tests
+          path: /tmp/activation-composition-focused-tests.log
+          retention-days: 1
+      - name: Enforce focused tests
+        if: steps.focused.outputs.status != '0'
+        run: exit 1
       - name: Build bridge with release-gate features
         working-directory: rust
         env:
