@@ -7,6 +7,15 @@ QtObject {
     property var runtimeSource: null
     property int protocolCounter: 0
 
+    // Keep protocol-critical dependencies injectable so isolated QuickTest
+    // harnesses can preserve production semantics without relying on implicit
+    // cross-directory QML name resolution. Production defaults still resolve
+    // the singleton types from the compiled com.mukei.app module.
+    property var contractStoreRef: typeof ContractStore !== "undefined" ? ContractStore : null
+    property var capabilityStoreRef: typeof CapabilityStore !== "undefined" ? CapabilityStore : null
+    property var chatStoreRef: typeof ChatStore !== "undefined" ? ChatStore : null
+    property var operationStoreRef: typeof OperationStore !== "undefined" ? OperationStore : null
+
     signal intentAccepted(string type)
     signal intentRejected(string code, string message, var intent)
 
@@ -14,6 +23,13 @@ QtObject {
         agentSource = agent
         bridgeSource = bridge
         runtimeSource = runtime
+    }
+
+    function configureProtocolDependencies(contractStore, capabilityStore, chatStore, operationStore) {
+        contractStoreRef = contractStore || null
+        capabilityStoreRef = capabilityStore || null
+        chatStoreRef = chatStore || null
+        operationStoreRef = operationStore || null
     }
 
     function publishError(error, fallbackCode) {
@@ -93,6 +109,10 @@ QtObject {
             reject("ERR_UI_PROTOCOL_UNAVAILABLE", qsTr("The reliable local command protocol is unavailable."), ({ type: commandType }))
             return ({ accepted: false })
         }
+        if (operationStoreRef === null) {
+            reject("ERR_UI_DISPATCH_DEPENDENCY", qsTr("The local operation tracker is unavailable."), ({ type: commandType }))
+            return ({ accepted: false })
+        }
 
         var requestId = opaqueId("request")
         var command = {
@@ -110,8 +130,8 @@ QtObject {
         if (options.operationId)
             command.operation_id = options.operationId
 
-        OperationStore.beginCommand(command)
-        OperationStore.markAwaitingAcknowledgement(requestId)
+        operationStoreRef.beginCommand(command)
+        operationStoreRef.markAwaitingAcknowledgement(requestId)
 
         var acknowledgement
         try {
@@ -122,7 +142,7 @@ QtObject {
         if (!validAcknowledgement(acknowledgement, command))
             acknowledgement = syntheticRejection(command, "backend_unavailable")
 
-        var accepted = OperationStore.applyAcknowledgement(acknowledgement, command)
+        var accepted = operationStoreRef.applyAcknowledgement(acknowledgement, command)
         if (!accepted || acknowledgement.status !== "accepted") {
             var reason = acknowledgement.rejection_reason || "backend_unavailable"
             publishError({
@@ -140,10 +160,12 @@ QtObject {
     function dispatch(intent) {
         if (!intent || typeof intent !== "object" || typeof intent.type !== "string")
             return reject("ERR_UI_INVALID_INTENT", qsTr("That action was not valid."), intent)
+        if (contractStoreRef === null || capabilityStoreRef === null || chatStoreRef === null || operationStoreRef === null)
+            return reject("ERR_UI_DISPATCH_DEPENDENCY", qsTr("The local UI state machine is not ready."), intent)
 
         try {
-            if (!ContractStore.compatible && intent.type !== "contract.retry")
-                return reject("ERR_UI_CONTRACT_INCOMPATIBLE", ContractStore.safeMessage, intent)
+            if (!contractStoreRef.compatible && intent.type !== "contract.retry")
+                return reject("ERR_UI_CONTRACT_INCOMPATIBLE", contractStoreRef.safeMessage, intent)
             switch (intent.type) {
             case "contract.retry":
                 if (!AppCoordinator.retryContractNegotiation())
@@ -179,67 +201,67 @@ QtObject {
                 var text = typeof intent.text === "string" ? intent.text.trim() : ""
                 if (text.length === 0)
                     return reject("ERR_UI_EMPTY_MESSAGE", qsTr("Write a message before sending."), intent)
-                if (!CapabilityStore.canSendMessage || ChatStore.streaming)
+                if (!capabilityStoreRef.canSendMessage || chatStoreRef.streaming)
                     return reject("ERR_UI_ACTION_UNAVAILABLE", qsTr("Mukei is not ready to accept another message yet."), intent)
                 var chatScope = ({})
-                if (ChatStore.conversationId && ChatStore.branchId) {
-                    chatScope.conversation_id = ChatStore.conversationId
-                    chatScope.branch_id = ChatStore.branchId
+                if (chatStoreRef.conversationId && chatStoreRef.branchId) {
+                    chatScope.conversation_id = chatStoreRef.conversationId
+                    chatScope.branch_id = chatStoreRef.branchId
                 }
                 var sendResult = submitBackendCommand("chat.send_message", ({ text: text }), chatScope)
                 if (!sendResult.accepted)
                     return false
-                if (!ChatStore.conversationId && !ChatStore.branchId)
-                    ChatStore.beginPendingScopeAdoption(sendResult.command, false)
-                ChatStore.setActiveOperationFromAcknowledgement(
+                if (!chatStoreRef.conversationId && !chatStoreRef.branchId)
+                    chatStoreRef.beginPendingScopeAdoption(sendResult.command, false)
+                chatStoreRef.setActiveOperationFromAcknowledgement(
                             sendResult.acknowledgement.operation_id || "",
                             sendResult.command)
-                ChatStore.stageOutgoing(text)
+                chatStoreRef.stageOutgoing(text)
                 break
             }
             case "chat.stopGeneration": {
-                if (agentSource === null || !CapabilityStore.canStopGeneration)
+                if (agentSource === null || !capabilityStoreRef.canStopGeneration)
                     return reject("ERR_UI_ACTION_UNAVAILABLE", qsTr("There is no active response to stop."), intent)
-                if (!CapabilityStore.scopedCancellationAvailable
-                        || !ChatStore.activeOperationId
-                        || !ChatStore.conversationId
-                        || !ChatStore.branchId)
+                if (!contractStoreRef.scopedCancellationAvailable
+                        || !chatStoreRef.activeOperationId
+                        || !chatStoreRef.conversationId
+                        || !chatStoreRef.branchId)
                     return reject("ERR_UI_STALE_SCOPE", qsTr("The active response can no longer be cancelled safely."), intent)
                 var cancelScope = ({
-                    conversation_id: ChatStore.conversationId,
-                    branch_id: ChatStore.branchId
+                    conversation_id: chatStoreRef.conversationId,
+                    branch_id: chatStoreRef.branchId
                 })
-                if (ChatStore.activeTurnId)
-                    cancelScope.turn_id = ChatStore.activeTurnId
+                if (chatStoreRef.activeTurnId)
+                    cancelScope.turn_id = chatStoreRef.activeTurnId
                 var cancelResult = submitBackendCommand(
                             "chat.stop_generation",
                             ({}),
                             cancelScope,
                             ({
-                                operationId: ChatStore.activeOperationId,
-                                idempotencyKey: "cancel:" + ChatStore.activeOperationId
+                                operationId: chatStoreRef.activeOperationId,
+                                idempotencyKey: "cancel:" + chatStoreRef.activeOperationId
                             }))
                 if (!cancelResult.accepted)
                     return false
-                if (typeof OperationStore.markCancellationRequested === "function")
-                    OperationStore.markCancellationRequested(ChatStore.activeOperationId)
+                if (typeof operationStoreRef.markCancellationRequested === "function")
+                    operationStoreRef.markCancellationRequested(chatStoreRef.activeOperationId)
                 break
             }
             case "chat.updateDraft":
-                ChatStore.setDraft(
+                chatStoreRef.setDraft(
                             typeof intent.text === "string" ? intent.text : "",
                             typeof intent.cursorPosition === "number" ? intent.cursorPosition : 0)
                 break
             case "chat.loadOlder":
-                ChatStore.loadOlderMessages()
+                chatStoreRef.loadOlderMessages()
                 break
             case "chat.clearConversation":
-                if (agentSource === null || !CapabilityStore.canClearConversation)
+                if (agentSource === null || !capabilityStoreRef.canClearConversation)
                     return reject("ERR_UI_ACTION_UNAVAILABLE", qsTr("This conversation cannot be cleared right now."), intent)
                 var clearScope = ({})
-                if (ChatStore.conversationId && ChatStore.branchId) {
-                    clearScope.conversation_id = ChatStore.conversationId
-                    clearScope.branch_id = ChatStore.branchId
+                if (chatStoreRef.conversationId && chatStoreRef.branchId) {
+                    clearScope.conversation_id = chatStoreRef.conversationId
+                    clearScope.branch_id = chatStoreRef.branchId
                 }
                 if (!submitBackendCommand("chat.clear_conversation", ({}), clearScope).accepted)
                     return false
@@ -259,7 +281,7 @@ QtObject {
             }
             case "model.delete": {
                 var deleteModelId = intent.modelId || ""
-                if (!CapabilityStore.canDeleteModel)
+                if (!capabilityStoreRef.canDeleteModel)
                     return reject("ERR_UI_ACTION_UNAVAILABLE", qsTr("Models cannot be deleted while Mukei is busy."), intent)
                 if (!submitBackendCommand("model.delete", ({ model_id: deleteModelId }), ({ model_id: deleteModelId })).accepted)
                     return false
@@ -270,7 +292,7 @@ QtObject {
                 var modelIndex = ModelStore.findIndex(modelId)
                 if (modelIndex < 0)
                     return reject("ERR_UI_MODEL_UNKNOWN", qsTr("That model is not available."), intent)
-                if (!CapabilityStore.canDownloadModel || StorageStore.critical)
+                if (!capabilityStoreRef.canDownloadModel || StorageStore.critical)
                     return reject("ERR_UI_ACTION_UNAVAILABLE", qsTr("A model download cannot start right now."), intent)
                 var downloadResult = submitBackendCommand("model.download", ({ model_id: modelId, sha256: "" }), ({ model_id: modelId }))
                 if (!downloadResult.accepted)
@@ -279,7 +301,7 @@ QtObject {
                 break
             }
             case "download.cancel":
-                if (agentSource === null || !CapabilityStore.canStopDownload)
+                if (agentSource === null || !capabilityStoreRef.canStopDownload)
                     return reject("ERR_UI_ACTION_UNAVAILABLE", qsTr("There is no active download to stop."), intent)
                 if (!submitBackendCommand("download.cancel", ({}), ({})).accepted)
                     return false
