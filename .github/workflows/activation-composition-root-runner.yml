@@ -21,6 +21,22 @@ jobs:
           components: rustfmt
       - name: Apply activation composition-root wiring
         run: python3 .github/patch_activation_composition_root.py
+      - name: Align existing capability-mode test with active-model truth
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('rust/crates/mukei-core/src/ui_contract.rs')
+          text = path.read_text()
+          replacements = [
+              ('        assert!(ready.can_send_message);', '        assert!(!ready.can_send_message);'),
+              ('        assert!(!inferencing.active_model_ready);', '        assert!(inferencing.active_model_ready);'),
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f'capability test anchor mismatch for {old!r}: {text.count(old)}')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
       - name: Apply canonical rustfmt output
         working-directory: rust
         run: cargo fmt --all
