@@ -103,7 +103,19 @@ jobs:
           retention-days: 1
 
       - name: Format patched Rust sources
-        run: cargo fmt --manifest-path rust/Cargo.toml --all
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo fmt --manifest-path rust/Cargo.toml --all 2>&1 | tee /tmp/native-inference-rustfmt.log
+
+      - name: Upload Rust formatting failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-inference-rustfmt-failure
+          path: /tmp/native-inference-rustfmt.log
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Validate patched source diff
         run: git diff --check
