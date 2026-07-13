@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import "../architecture"
+import "../stores"
 import "../theme"
 import "../components"
 
@@ -35,6 +37,8 @@ Rectangle {
                 { route: "settings", label: qsTr("Settings"), icon: "qrc:/icons/settings.svg" }
             ]
             delegate: Button {
+                id: navigationButton
+                required property var modelData
                 Layout.fillWidth: true
                 implicitHeight: 52
                 text: ResponsiveStore.expanded ? modelData.label : ""
@@ -49,8 +53,8 @@ Rectangle {
                 onClicked: IntentDispatcher.dispatch({ type: "navigation.open", route: modelData.route })
                 background: Rectangle {
                     radius: Theme.radiusLg
-                    color: parent.checked || parent.hovered ? Theme.p.surfaceFaint : "transparent"
-                    border.width: parent.visualFocus ? 1 : 0
+                    color: navigationButton.checked || navigationButton.hovered ? Theme.p.surfaceFaint : "transparent"
+                    border.width: navigationButton.visualFocus ? 1 : 0
                     border.color: Theme.p.accent
                 }
                 contentItem: RowLayout {
