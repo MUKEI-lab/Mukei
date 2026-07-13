@@ -110,5 +110,18 @@ jobs:
           exit "$lint_status"
       - name: Build QML and test targets
         run: cmake --build "$CMAKE_BUILD_DIR" -j2
-      - name: Run CTest
-        run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
+      - name: Capture CTest diagnostics
+        id: ctest
+        continue-on-error: true
+        run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure 2>&1 | tee /tmp/mukei-ctest.log
+      - name: Upload CTest diagnostics on failure
+        if: steps.ctest.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-resync-diagnostics
+          path: /tmp/mukei-ctest.log
+          if-no-files-found: error
+          retention-days: 1
+      - name: Enforce CTest result
+        if: steps.ctest.outcome == 'failure'
+        run: exit 1
