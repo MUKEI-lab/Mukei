@@ -89,13 +89,16 @@ TestCase {
     }
 
     function downloadEvent(eventId, sequence, bytesDownloaded) {
+        var millis = sequence < 10 ? "00" + sequence
+                   : sequence < 100 ? "0" + sequence
+                   : String(sequence)
         return {
             protocol_version: { major: 2, minor: 0 },
             event_id: eventId,
             stream_id: streamId,
             sequence: sequence,
             event_type: "download_progress",
-            emitted_at: "2026-07-13T09:00:00.000Z",
+            emitted_at: "2026-07-13T09:00:00." + millis + "Z",
             payload: {
                 category: "download_progress",
                 state: "downloading",
