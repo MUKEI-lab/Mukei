@@ -23,14 +23,14 @@ name: ci
 
 on:
   push:
-    branches: [ main, "agent/**" ]
+    branches: [ main, "agent/**", "checkpoint/**" ]
   pull_request:
     branches: [ main ]
 
-# Cancel superseded runs on the same branch/PR — saves runner minutes
-# and keeps the visible status current.
+# Use the source branch for both push and pull_request events so duplicate
+# validation for the same branch collapses into the newest run.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
