@@ -17,7 +17,7 @@ env:
 
 jobs:
   dependency-security:
-    name: cargo audit + cargo deny
+    name: cargo audit + cargo deny + provenance
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,3 +33,6 @@ jobs:
       - name: cargo deny check
         working-directory: rust
         run: cargo deny check advisories sources licenses bans
+      - name: Verify OpenSSL dependency provenance
+        working-directory: rust
+        run: python3 scripts/verify_openssl_provenance.py
