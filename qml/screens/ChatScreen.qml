@@ -12,7 +12,6 @@ Page {
     id: root
     property bool followTail: true
     property bool unseenTailUpdate: false
-    property real contentHeightBeforePrepend: -1
     signal accessibilityAnnouncementRequested(string text)
 
     background: Rectangle { color: Theme.p.background }
@@ -119,6 +118,7 @@ Page {
             ListView {
                 id: timelineView
                 objectName: "chatTimelineView"
+                property real contentHeightBeforePrepend: -1
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
@@ -129,7 +129,7 @@ Page {
                 reuseItems: true
 
                 header: Item {
-                    width: timelineView.width
+                    width: ListView.view ? ListView.view.width : 0
                     height: ChatStore.hasOlderMessages ? loadOlderButton.implicitHeight + Spacing.md : 0
                     visible: ChatStore.hasOlderMessages
                     GhostButton {
@@ -138,7 +138,8 @@ Page {
                         text: ChatStore.olderPageLoading ? qsTr("Loading…") : qsTr("Load earlier messages")
                         enabled: !ChatStore.olderPageLoading
                         onClicked: {
-                            root.contentHeightBeforePrepend = timelineView.contentHeight
+                            if (ListView.view)
+                                ListView.view.contentHeightBeforePrepend = ListView.view.contentHeight
                             IntentDispatcher.dispatch({ type: "chat.loadOlder" })
                         }
                     }
@@ -161,27 +162,33 @@ Page {
                     DelegateChoice {
                         roleValue: "user_message"
                         delegate: UserMessageBubble {
-                            width: timelineView.width
-                            text: model.text
-                            timestamp: model.timestamp
+                            id: userMessageDelegate
+                            required property var model
+                            width: ListView.view ? ListView.view.width : 0
+                            text: userMessageDelegate.model.text
+                            timestamp: userMessageDelegate.model.timestamp
                         }
                     }
                     DelegateChoice {
                         roleValue: "assistant_message"
                         delegate: AIMessageBubble {
-                            width: timelineView.width
-                            text: model.text
-                            timestamp: model.timestamp
+                            id: assistantMessageDelegate
+                            required property var model
+                            width: ListView.view ? ListView.view.width : 0
+                            text: assistantMessageDelegate.model.text
+                            timestamp: assistantMessageDelegate.model.timestamp
                         }
                     }
                     DelegateChoice {
                         roleValue: "timeline_event"
                         delegate: ChatTimelineEvent {
-                            width: timelineView.width
-                            label: model.text
-                            phase: model.phase
-                            kind: model.kind
-                            iconSource: model.kind === "tool" ? "qrc:/icons/search.svg" : ""
+                            id: timelineEventDelegate
+                            required property var model
+                            width: ListView.view ? ListView.view.width : 0
+                            label: timelineEventDelegate.model.text
+                            phase: timelineEventDelegate.model.phase
+                            kind: timelineEventDelegate.model.kind
+                            iconSource: timelineEventDelegate.model.kind === "tool" ? "qrc:/icons/search.svg" : ""
                         }
                     }
                 }
@@ -263,10 +270,10 @@ Page {
             composer.cursorPosition = Math.min(cursorPosition, composer.text.length)
         }
         function onSnapshotApplied() {
-            if (root.contentHeightBeforePrepend >= 0) {
-                var delta = timelineView.contentHeight - root.contentHeightBeforePrepend
+            if (timelineView.contentHeightBeforePrepend >= 0) {
+                var delta = timelineView.contentHeight - timelineView.contentHeightBeforePrepend
                 timelineView.contentY += Math.max(0, delta)
-                root.contentHeightBeforePrepend = -1
+                timelineView.contentHeightBeforePrepend = -1
             } else if (root.followTail) {
                 Qt.callLater(timelineView.positionViewAtEnd)
             }
