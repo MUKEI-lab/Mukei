@@ -1,0 +1,167 @@
+name: production-inference-remediation-runner
+
+on:
+  push:
+    branches: [ "checkpoint/stabilization-2026-07-12" ]
+    paths:
+      - ".github/workflows/production-inference-remediation-runner.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: production-inference-remediation-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  EXPECTED_SOURCE_BASE: 9e69306e7ef50bc253fa91816915aa07eeb05515
+  RUNNER_PATH: .github/workflows/production-inference-remediation-runner.yml
+  PATCH_SHA256: 0d56a8bd479c891229b2794b419247bb9e2f67bb0b034f2734ea989777869417
+  QT_VERSION: 6.5.3
+  NATIVE_BUILD_DIR: /tmp/mukei-remediation-native
+  QML_BUILD_DIR: /tmp/mukei-remediation-qml
+
+jobs:
+  remediate-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove exact remediation base
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$EXPECTED_SOURCE_BASE" HEAD
+          mapfile -t changed < <(git diff --name-only "$EXPECTED_SOURCE_BASE"..HEAD | sort)
+          mapfile -t expected < <(printf '%s\n' \
+            "$RUNNER_PATH" \
+            .github/remediation/native-inference-patch.part00 \
+            .github/remediation/native-inference-patch.part01 \
+            .github/remediation/native-inference-patch.part02 \
+            .github/remediation/native-inference-patch.part03a \
+            .github/remediation/native-inference-patch.part03b \
+            .github/remediation/native-inference-patch.part04 | sort)
+          if [[ "${changed[*]}" != "${expected[*]}" ]]; then
+            printf 'Unexpected files changed since exact source base:\n' >&2
+            printf '  %s\n' "${changed[@]}" >&2
+            exit 1
+          fi
+          echo "RUNNER_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+
+      - name: Install Qt 6.5
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+
+      - name: Export Qt paths
+        shell: bash
+        run: |
+          echo "$QT_ROOT_DIR/bin" >> "$GITHUB_PATH"
+          echo "QMAKE=$QT_ROOT_DIR/bin/qmake" >> "$GITHUB_ENV"
+
+      - name: Install native build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+
+      - name: Decode and apply exact-head patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/remediation/native-inference-patch.part* > /tmp/native-inference-patch.py.gz.b64
+          base64 -d /tmp/native-inference-patch.py.gz.b64 | gzip -d > /tmp/native-inference-patch.py
+          echo "$PATCH_SHA256  /tmp/native-inference-patch.py" | sha256sum -c -
+          python3 -m py_compile /tmp/native-inference-patch.py
+          python3 /tmp/native-inference-patch.py
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff --check
+
+      - name: Configure pinned native capsule
+        run: >-
+          cmake -S rust/llama-cpp-prebuilt -B "$NATIVE_BUILD_DIR" -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DMUKEI_LLAMA_FORCE_REBUILD=ON
+
+      - name: Build native capsule and ABI smoke
+        run: cmake --build "$NATIVE_BUILD_DIR" --target mukei_llama_native_smoke -j2
+
+      - name: Run native ABI smoke
+        run: ctest --test-dir "$NATIVE_BUILD_DIR" --output-on-failure
+
+      - name: Export native runtime paths
+        shell: bash
+        run: |
+          echo "MUKEI_LLAMA_NATIVE_LIB_DIR=$GITHUB_WORKSPACE/rust/llama-cpp-prebuilt/prebuilt/host" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/rust/llama-cpp-prebuilt/prebuilt/host:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+      - name: Verify activation candidate lifecycle
+        working-directory: rust
+        run: cargo test -p mukei-core --test activation_verification_lifecycle
+
+      - name: Verify native Rust adapter
+        working-directory: rust
+        run: cargo test -p mukei-bridge --no-default-features --features runtime_production native_inference::tests
+
+      - name: Verify default development bridge still compiles
+        working-directory: rust
+        run: cargo check -p mukei-bridge --features "sqlcipher,network"
+
+      - name: Build production bridge and export CXX-Qt artifacts
+        working-directory: rust
+        env:
+          CXX_QT_EXPORT_DIR: ${{ github.workspace }}/rust/target/cxxqt-export
+          CXX_QT_EXPORT_CRATE_mukei-bridge: "1"
+        run: cargo build --release -p mukei-bridge --no-default-features --features "sqlcipher,network,runtime_production"
+
+      - name: Configure final QML composition
+        working-directory: qml
+        run: >-
+          cmake -S . -B "$QML_BUILD_DIR" -G Ninja
+          -DMUKEI_USE_REAL_BRIDGE=ON
+          -DMUKEI_USE_NATIVE_INFERENCE=ON
+          -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/release/libmukei_bridge.a"
+          -DMUKEI_CXX_QT_EXPORT_DIR="$GITHUB_WORKSPACE/rust/target/cxxqt-export"
+          -DMUKEI_LLAMA_NATIVE_LIB="$GITHUB_WORKSPACE/rust/llama-cpp-prebuilt/prebuilt/host/libmukei_llama_native.so"
+
+      - name: Run strict qmllint
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build "$QML_BUILD_DIR" --target all_qmllint 2>&1 | tee /tmp/mukei-remediation-qmllint.log
+          python3 qml/scripts/qmllint_allowlist_guard.py /tmp/mukei-remediation-qmllint.log
+
+      - name: Build QML shipping composition and tests
+        run: cmake --build "$QML_BUILD_DIR" -j2
+
+      - name: Run QML CTest suite
+        run: ctest --test-dir "$QML_BUILD_DIR" --output-on-failure
+
+      - name: Commit verified source repair and remove runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm "$RUNNER_PATH" .github/remediation/native-inference-patch.part*
+          git add -A
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "Patch produced no source changes." >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat: activate pinned native production inference"
+          git fetch origin checkpoint/stabilization-2026-07-12
+          remote_head=$(git rev-parse origin/checkpoint/stabilization-2026-07-12)
+          if [[ "$remote_head" != "$RUNNER_HEAD" ]]; then
+            echo "Branch moved during remediation; refusing to overwrite $remote_head" >&2
+            exit 1
+          fi
+          git push origin HEAD:checkpoint/stabilization-2026-07-12
