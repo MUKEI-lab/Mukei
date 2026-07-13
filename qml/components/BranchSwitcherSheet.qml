@@ -17,6 +17,7 @@ ModalSheet {
         Repeater {
             model: root.branches
             delegate: RowLayout {
+                required property var modelData
                 spacing: Spacing.sm
                 Image {
                     source: "qrc:/icons/active-dot.svg"
