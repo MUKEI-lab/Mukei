@@ -648,6 +648,13 @@ fn preflight(
 
     match command.command_type {
         CommandType::ChatSendMessage => {
+            if !runtime_state()
+                .model_activation_service()
+                .readiness_snapshot()
+                .active_backend_ready
+            {
+                return Some(RejectionReason::CapabilityUnavailable);
+            }
             if agent
                 .as_ref()
                 .rust()
@@ -658,6 +665,13 @@ fn preflight(
             }
         }
         CommandType::RecoveryResume | CommandType::RecoveryRegenerate => {
+            if !runtime_state()
+                .model_activation_service()
+                .readiness_snapshot()
+                .active_backend_ready
+            {
+                return Some(RejectionReason::CapabilityUnavailable);
+            }
             if agent
                 .as_ref()
                 .rust()

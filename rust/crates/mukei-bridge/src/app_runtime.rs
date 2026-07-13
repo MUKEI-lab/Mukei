@@ -28,6 +28,7 @@ use zeroize::Zeroizing;
 
 use mukei_core::agent::AgentLoop;
 use mukei_core::config::MukeiConfig;
+use mukei_core::engine::ModelActivationService;
 use mukei_core::tools::{RemoteFeaturePolicy, ToolRegistry};
 use mukei_core::types::{BranchId, ConversationId};
 
@@ -63,6 +64,7 @@ struct PersistenceServices {
 
 struct AgentServices {
     agent_loop: ParkingMutex<Option<Arc<AgentLoop>>>,
+    activation_service: Arc<ModelActivationService>,
     chat_session: ParkingMutex<Option<(ConversationId, BranchId)>>,
     config: ParkingMutex<Option<MukeiConfig>>,
     tool_registry: ParkingMutex<Arc<ToolRegistry>>,
@@ -105,6 +107,7 @@ impl ApplicationRuntime {
             },
             agent: AgentServices {
                 agent_loop: ParkingMutex::new(None),
+                activation_service: ModelActivationService::new(false),
                 chat_session: ParkingMutex::new(None),
                 config: ParkingMutex::new(None),
                 tool_registry: ParkingMutex::new(Arc::new(
@@ -177,6 +180,10 @@ impl ApplicationRuntime {
 
     pub(crate) fn set_agent_loop(&self, agent_loop: Arc<AgentLoop>) {
         *self.agent.agent_loop.lock() = Some(agent_loop);
+    }
+
+    pub(crate) fn model_activation_service(&self) -> Arc<ModelActivationService> {
+        self.agent.activation_service.clone()
     }
 
     pub(crate) fn chat_session(&self) -> Option<(ConversationId, BranchId)> {
@@ -267,6 +274,9 @@ mod tests {
             application_runtime().runtime_coordinator(),
             application_runtime().runtime_coordinator()
         ));
+        let first_activation = application_runtime().model_activation_service();
+        let second_activation = application_runtime().model_activation_service();
+        assert!(Arc::ptr_eq(&first_activation, &second_activation));
     }
 
     #[test]

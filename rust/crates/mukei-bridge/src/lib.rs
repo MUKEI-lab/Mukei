@@ -106,6 +106,7 @@ use bridge_state::{
 #[cfg(feature = "rusqlite")]
 use mukei_core::agent::AgentRunOutcome;
 use mukei_core::agent::{AgentEventSink, AgentRunRequest};
+use mukei_core::engine::InferenceBackend;
 use mukei_core::ffi::tags::{TagEvents, TagsStreaming};
 use mukei_core::tools::{RemoteFeaturePolicy, ToolRegistry};
 use mukei_core::types::{BranchId, ConversationId, MessageId};
@@ -179,6 +180,15 @@ fn database_open_failure_category(error: &mukei_core::error::MukeiError) -> &'st
         MukeiError::DatabaseInitFailed(_) => "database_open",
         _ => "database_open_other",
     }
+}
+
+fn current_ready_capabilities() -> CapabilitySnapshot {
+    CapabilitySnapshot::ready_with_model(
+        runtime_state()
+            .model_activation_service()
+            .readiness_snapshot()
+            .active_backend_ready,
+    )
 }
 
 fn production_safety_status() -> mukei_core::config::ProductionSafetyStatus {
@@ -807,6 +817,7 @@ async fn rebuild_tool_registry_from_secrets() {
                     registry.clone(),
                     pool,
                     runtime_state().audit_log_writer().clone(),
+                    runtime_state().model_activation_service(),
                 );
                 runtime_state().set_agent_loop(loop_handle);
                 tracing::info!("agent loop rebuilt alongside tool registry");
@@ -814,7 +825,11 @@ async fn rebuild_tool_registry_from_secrets() {
         }
         #[cfg(not(feature = "rusqlite"))]
         {
-            let loop_handle = agent_runtime::build_agent_loop(&cfg, registry.clone());
+            let loop_handle = agent_runtime::build_agent_loop(
+                &cfg,
+                registry.clone(),
+                runtime_state().model_activation_service(),
+            );
             runtime_state().set_agent_loop(loop_handle);
             tracing::info!("agent loop rebuilt alongside tool registry");
         }
@@ -853,13 +868,18 @@ fn rebuild_tool_registry_from_secrets_blocking() {
                     registry.clone(),
                     pool,
                     runtime_state().audit_log_writer().clone(),
+                    runtime_state().model_activation_service(),
                 );
                 runtime_state().set_agent_loop(loop_handle);
             }
         }
         #[cfg(not(feature = "rusqlite"))]
         {
-            let loop_handle = agent_runtime::build_agent_loop(&cfg, registry.clone());
+            let loop_handle = agent_runtime::build_agent_loop(
+                &cfg,
+                registry.clone(),
+                runtime_state().model_activation_service(),
+            );
             runtime_state().set_agent_loop(loop_handle);
         }
     }
@@ -1478,7 +1498,7 @@ fn start_interrupted_attempt(mut agent: Pin<&mut ffi::MukeiAgent>, mode: BridgeR
             let final_event = if failed {
                 BridgeEvent::new(BridgeEventKind::ChatState {
                     state: ChatTurnState::Failed,
-                    capabilities: CapabilitySnapshot::ready(),
+                    capabilities: current_ready_capabilities(),
                 })
             } else if cancel_token.is_cancelled() {
                 BridgeEvent::new(BridgeEventKind::ChatCancelled)
@@ -1527,7 +1547,7 @@ impl ffi::MukeiAgent {
                         qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
                             BridgeEventKind::AppLifecycle {
                                 state: AppLifecycleState::Ready,
-                                capabilities: CapabilitySnapshot::ready(),
+                                capabilities: current_ready_capabilities(),
                                 android_storage: Some(AndroidStorageState::Ready {
                                     saf_grant_count: runtime_state().saf_registry().count(),
                                 }),
@@ -2070,6 +2090,7 @@ impl ffi::MukeiAgent {
                     registry_arc,
                     pool.clone(),
                     runtime_state().audit_log_writer().clone(),
+                    runtime_state().model_activation_service(),
                 );
                 runtime_state().set_agent_loop(loop_handle);
                 runtime_state().set_database_pool(pool);
@@ -2077,7 +2098,11 @@ impl ffi::MukeiAgent {
             #[cfg(not(feature = "rusqlite"))]
             {
                 let registry_arc = runtime_state().tool_registry();
-                let loop_handle = agent_runtime::build_agent_loop(&cfg, registry_arc);
+                let loop_handle = agent_runtime::build_agent_loop(
+                    &cfg,
+                    registry_arc,
+                    runtime_state().model_activation_service(),
+                );
                 runtime_state().set_agent_loop(loop_handle);
             }
 
@@ -2088,7 +2113,7 @@ impl ffi::MukeiAgent {
                 qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
                     BridgeEventKind::AppLifecycle {
                         state: AppLifecycleState::Ready,
-                        capabilities: CapabilitySnapshot::ready(),
+                        capabilities: current_ready_capabilities(),
                         android_storage: Some(AndroidStorageState::Ready {
                             saf_grant_count: runtime_state().saf_registry().count(),
                         }),
@@ -2112,6 +2137,25 @@ impl ffi::MukeiAgent {
                 "runtime is not ready: {:?}",
                 runtime_state().runtime_coordinator().phase()
             ));
+            let event = error_bridge_event(&err, "send_message");
+            let code = err.error_code().to_string();
+            let message = mukei_core::diagnostics::sanitize_error_message(err.to_string());
+            let _ = qt_thread.queue(move |mut qobject| {
+                qobject.as_mut().event_emitted(event_json(event));
+                qobject
+                    .as_mut()
+                    .error_occurred(QString::from(&code), QString::from(&message));
+            });
+            return;
+        }
+        if !runtime_state()
+            .model_activation_service()
+            .readiness_snapshot()
+            .active_backend_ready
+        {
+            let err = mukei_core::error::MukeiError::ModelLoadFailed(
+                "no active production inference backend".to_string(),
+            );
             let event = error_bridge_event(&err, "send_message");
             let code = err.error_code().to_string();
             let message = mukei_core::diagnostics::sanitize_error_message(err.to_string());
@@ -2276,7 +2320,7 @@ impl ffi::MukeiAgent {
             let mut event_sink: Option<Arc<dyn AgentEventSink>> = None;
             #[cfg(not(feature = "rusqlite"))]
             let event_sink: Option<Arc<dyn AgentEventSink>> = None;
-            let mut final_capabilities = CapabilitySnapshot::ready();
+            let mut final_capabilities = current_ready_capabilities();
             #[cfg(feature = "rusqlite")]
             {
                 if let Some(pool) = runtime_state().database_pool() {
@@ -2581,7 +2625,7 @@ impl ffi::MukeiAgent {
                         state: DownloadState::Failed,
                         model_id: model_id.clone(),
                         destination: None,
-                        capabilities: CapabilitySnapshot::ready(),
+                        capabilities: current_ready_capabilities(),
                     });
                     let event = BridgeEvent::new(BridgeEventKind::DownloadFailed {
                         error: UiError::from_mukei_error(&e, "download_model"),
@@ -2620,7 +2664,7 @@ impl ffi::MukeiAgent {
                         state: DownloadState::Failed,
                         model_id: model_id.clone(),
                         destination: Some(destination_token.clone()),
-                        capabilities: CapabilitySnapshot::ready(),
+                        capabilities: current_ready_capabilities(),
                     });
                     let event = BridgeEvent::new(BridgeEventKind::DownloadFailed {
                         error: UiError::from_mukei_error(&err, "download_model"),
@@ -2659,7 +2703,7 @@ impl ffi::MukeiAgent {
                         state: DownloadState::Failed,
                         model_id: model_id.clone(),
                         destination: Some(destination_token.clone()),
-                        capabilities: CapabilitySnapshot::ready(),
+                        capabilities: current_ready_capabilities(),
                     });
                     let error_event = BridgeEvent::new(BridgeEventKind::DownloadFailed {
                         error: UiError::from_mukei_error(&error, "download_model"),
@@ -2859,7 +2903,7 @@ impl ffi::MukeiAgent {
                             state,
                             model_id: model_id.clone(),
                             destination: destination.clone(),
-                            capabilities: CapabilitySnapshot::ready(),
+                            capabilities: current_ready_capabilities(),
                         });
                         let failed_event =
                             if matches!(&err, mukei_core::error::MukeiError::Cancelled) {
@@ -2907,7 +2951,7 @@ impl ffi::MukeiAgent {
                             state,
                             model_id: model_id.clone(),
                             destination: Some(destination_token.clone()),
-                            capabilities: CapabilitySnapshot::ready(),
+                            capabilities: current_ready_capabilities(),
                         });
                         let event = BridgeEvent::new(BridgeEventKind::DownloadFailed {
                             error: UiError::from_mukei_error(&e, "download_model"),
@@ -2930,7 +2974,7 @@ impl ffi::MukeiAgent {
                         state: DownloadState::Failed,
                         model_id: model_id.clone(),
                         destination: Some(destination_token.clone()),
-                        capabilities: CapabilitySnapshot::ready(),
+                        capabilities: current_ready_capabilities(),
                     });
                     let event = BridgeEvent::new(BridgeEventKind::DownloadFailed {
                         error: UiError {
@@ -2983,7 +3027,7 @@ impl ffi::MukeiAgent {
         let _ = qt.queue(|mut qobject| {
             qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
                 BridgeEventKind::CapabilitySnapshot {
-                    capabilities: CapabilitySnapshot::ready(),
+                    capabilities: current_ready_capabilities(),
                 },
             )));
             qobject.as_mut().state_changed(QString::from("IDLE_READY"));
@@ -4290,15 +4334,32 @@ impl ffi::MukeiAgent {
                 None::<String>
             }
         };
-        let restart_required = selected_model_id.is_some();
+        let activation = runtime_state().model_activation_service();
+        let readiness = activation.readiness_snapshot();
+        let active = activation.active_model_snapshot();
+        let identity = activation.identity();
+        let loaded_model_id = active.as_ref().map(|snapshot| snapshot.model_id.clone());
+        let activation_required = selected_model_id.as_ref() != loaded_model_id.as_ref();
+        let safe_message = if readiness.active_backend_ready {
+            "The active model is ready for local inference."
+        } else if !readiness.real_backend_implementation_available {
+            "A production inference backend factory is not registered in this runtime."
+        } else {
+            "Select and activate an installed model before starting chat."
+        };
         QString::from(serde_json::json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "selected_model_id": selected_model_id,
-            "loaded_model_id": serde_json::Value::Null,
-            "inference_backend": "mock_unwired",
-            "activation_supported": false,
-            "restart_required": restart_required,
-            "safe_message": "The selected model is stored for a future engine session. Live llama.cpp activation is not wired in this build."
+            "loaded_model_id": loaded_model_id,
+            "inference_backend": identity.implementation,
+            "backend_kind": identity.kind.as_tag(),
+            "backend_unavailable_reason": identity.unavailable_reason.map(|reason| reason.as_tag()),
+            "activation_supported": readiness.real_backend_implementation_available,
+            "activation_required": activation_required,
+            "active_model_ready": readiness.active_backend_ready,
+            "product_ready": readiness.product_ready,
+            "restart_required": false,
+            "safe_message": safe_message
         }).to_string().as_str())
     }
 
@@ -4511,7 +4572,7 @@ impl ffi::MukeiBridge {
                     qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
                         BridgeEventKind::AppLifecycle {
                             state: AppLifecycleState::Degraded,
-                            capabilities: CapabilitySnapshot::ready(),
+                            capabilities: current_ready_capabilities(),
                             android_storage: Some(AndroidStorageState::Ready {
                                 saf_grant_count: runtime_state().saf_registry().count(),
                             }),

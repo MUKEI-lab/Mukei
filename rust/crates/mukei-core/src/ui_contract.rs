@@ -395,14 +395,16 @@ impl CapabilitySnapshot {
         }
     }
 
-    /// Ready capability set for the current bridge implementation.
-    ///
-    /// This means the bridge runtime is initialized and can accept UI
-    /// commands. It does not prove a GGUF has been verified or loaded.
+    /// Ready capability set with no active inference backend.
     pub fn ready() -> Self {
+        Self::ready_with_model(false)
+    }
+
+    /// Ready capability set projected from authoritative model readiness.
+    pub fn ready_with_model(active_model_ready: bool) -> Self {
         Self {
             can_initialize: false,
-            can_send_message: true,
+            can_send_message: active_model_ready,
             can_stop_generation: false,
             can_download_model: Self::network_enabled(),
             can_stop_download: false,
@@ -412,7 +414,7 @@ impl CapabilitySnapshot {
             can_open_settings: true,
             needs_config: false,
             needs_storage_permission: false,
-            active_model_ready: false,
+            active_model_ready,
             is_busy: false,
             is_downloading: false,
             is_inferencing: false,
@@ -436,7 +438,7 @@ impl CapabilitySnapshot {
             can_open_settings: true,
             needs_config: false,
             needs_storage_permission: false,
-            active_model_ready: false,
+            active_model_ready: true,
             is_busy: true,
             is_downloading: false,
             is_inferencing: true,
@@ -813,6 +815,27 @@ mod tests {
     }
 
     #[test]
+    fn ready_capabilities_fail_closed_without_active_model() {
+        let capabilities = CapabilitySnapshot::ready();
+        assert!(!capabilities.can_send_message);
+        assert!(!capabilities.active_model_ready);
+    }
+
+    #[test]
+    fn ready_capabilities_enable_chat_only_with_active_model() {
+        let capabilities = CapabilitySnapshot::ready_with_model(true);
+        assert!(capabilities.can_send_message);
+        assert!(capabilities.active_model_ready);
+    }
+
+    #[test]
+    fn inferencing_capabilities_require_an_active_model() {
+        let capabilities = CapabilitySnapshot::inferencing();
+        assert!(capabilities.active_model_ready);
+        assert!(capabilities.is_inferencing);
+    }
+
+    #[test]
     fn bridge_event_serializes_stable_snake_case_envelope() {
         let event = BridgeEvent::new(BridgeEventKind::AppLifecycle {
             state: AppLifecycleState::Ready,
@@ -991,7 +1014,7 @@ mod tests {
         assert!(!uninitialized.can_send_message);
 
         let ready = CapabilitySnapshot::ready();
-        assert!(ready.can_send_message);
+        assert!(!ready.can_send_message);
         assert_eq!(
             ready.can_download_model,
             CapabilitySnapshot::network_enabled()
@@ -1003,7 +1026,7 @@ mod tests {
         assert!(inferencing.can_stop_generation);
         assert!(inferencing.is_busy);
         assert!(inferencing.is_inferencing);
-        assert!(!inferencing.active_model_ready);
+        assert!(inferencing.active_model_ready);
 
         let downloading = CapabilitySnapshot::downloading(false);
         assert_eq!(

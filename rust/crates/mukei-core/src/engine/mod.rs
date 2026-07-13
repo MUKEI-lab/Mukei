@@ -22,7 +22,7 @@ pub mod streaming;
 pub mod tokenizer;
 
 pub use activation::{
-    ActivationCommit, ActivationFailureCategory, InferenceBackendFactory,
+    ActivationCommit, ActivationFailureCategory, ActiveModelSnapshot, InferenceBackendFactory,
     InferenceReadinessSnapshot, ModelActivationService, ModelActivationState,
     VerifiedModelArtifact, VerifiedModelDescriptor,
 };

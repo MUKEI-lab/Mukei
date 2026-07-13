@@ -44,7 +44,7 @@ use mukei_core::agent::{
     WatchdogHandle,
 };
 use mukei_core::config::MukeiConfig;
-use mukei_core::engine::{BackendUnavailableReason, InferenceBackend, UnavailableInferenceBackend};
+use mukei_core::engine::{InferenceBackend, ModelActivationService};
 use mukei_core::error::Result;
 use mukei_core::tools::ToolRegistry;
 use mukei_core::types::{BranchId, ChatMessage, ConversationId};
@@ -306,31 +306,22 @@ impl ContextBackend for BridgeContextBackend {
     }
 }
 
-/// Build the shared `Arc<AgentLoop>` from loaded config, rebuilt tool
-/// registry, and optional database pool. This compatibility assembly is
-/// intentionally fail-closed until a production activation path injects a
-/// runnable backend; it never selects the development mock implicitly.
+/// Build the shared `Arc<AgentLoop>` around the process-owned activation
+/// router. The loop remains stable while verified model backends are swapped
+/// atomically by `ModelActivationService`.
 #[cfg(feature = "rusqlite")]
 pub fn build_agent_loop(
     cfg: &MukeiConfig,
     registry: Arc<ToolRegistry>,
     pool: Arc<mukei_core::storage::DatabasePool>,
     audit_writer: Arc<mukei_core::storage::AuditLogWriter>,
+    activation_service: Arc<ModelActivationService>,
 ) -> Arc<AgentLoop> {
-    tracing::warn!(
-        backend_kind = "unavailable",
-        "agent runtime built without an activated production inference backend"
+    tracing::info!(
+        backend_kind = activation_service.identity().kind.as_tag(),
+        "agent runtime wired to process-owned model activation service"
     );
-    build_agent_loop_with_backend(
-        cfg,
-        registry,
-        pool,
-        audit_writer,
-        Arc::new(UnavailableInferenceBackend::new_with_reason(
-            "production_backend_not_activated",
-            BackendUnavailableReason::NotInjected,
-        )),
-    )
+    build_agent_loop_with_backend(cfg, registry, pool, audit_writer, activation_service)
 }
 
 /// Production assembly boundary. A caller that owns model activation injects
@@ -365,19 +356,16 @@ pub fn build_agent_loop_with_backend(
 }
 
 #[cfg(not(feature = "rusqlite"))]
-pub fn build_agent_loop(cfg: &MukeiConfig, registry: Arc<ToolRegistry>) -> Arc<AgentLoop> {
-    tracing::warn!(
-        backend_kind = "unavailable",
-        "agent runtime built without an activated production inference backend"
+pub fn build_agent_loop(
+    cfg: &MukeiConfig,
+    registry: Arc<ToolRegistry>,
+    activation_service: Arc<ModelActivationService>,
+) -> Arc<AgentLoop> {
+    tracing::info!(
+        backend_kind = activation_service.identity().kind.as_tag(),
+        "agent runtime wired to process-owned model activation service"
     );
-    build_agent_loop_with_backend(
-        cfg,
-        registry,
-        Arc::new(UnavailableInferenceBackend::new_with_reason(
-            "production_backend_not_activated",
-            BackendUnavailableReason::NotInjected,
-        )),
-    )
+    build_agent_loop_with_backend(cfg, registry, activation_service)
 }
 
 #[cfg(not(feature = "rusqlite"))]

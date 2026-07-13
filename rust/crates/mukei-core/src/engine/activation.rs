@@ -211,6 +211,17 @@ pub struct InferenceReadinessSnapshot {
     pub state: ModelActivationState,
 }
 
+/// Authoritative identity of the backend currently serving inference turns.
+/// Candidate verification state is intentionally excluded so a failed or
+/// in-progress replacement cannot masquerade as the active model.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActiveModelSnapshot {
+    pub model_id: String,
+    pub revision: String,
+    pub artifact_id: String,
+    pub backend: BackendIdentity,
+}
+
 #[async_trait::async_trait]
 pub trait InferenceBackendFactory: Send + Sync {
     /// Construct a backend for the exact verified descriptor. Implementations
@@ -324,6 +335,19 @@ impl ModelActivationService {
 
     pub fn state(&self) -> ModelActivationState {
         self.inner.read().state.clone()
+    }
+
+    pub fn active_model_snapshot(&self) -> Option<ActiveModelSnapshot> {
+        self.inner
+            .read()
+            .active
+            .as_ref()
+            .map(|active| ActiveModelSnapshot {
+                model_id: active.model_id.clone(),
+                revision: active.revision.clone(),
+                artifact_id: active.artifact_id.clone(),
+                backend: active.backend.identity(),
+            })
     }
 
     pub fn mark_model_missing(
