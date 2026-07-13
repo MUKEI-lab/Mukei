@@ -1,5 +1,6 @@
 pragma Singleton
 import QtQuick
+import "../architecture"
 
 QtObject {
     property var currentError: null
