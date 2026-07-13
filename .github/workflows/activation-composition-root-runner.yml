@@ -49,7 +49,6 @@ jobs:
             fi
           } 2>&1 | tee /tmp/activation-composition-focused-tests.log
           status=${PIPESTATUS[0]}
-          echo "status=$status" >> "$GITHUB_OUTPUT"
           exit "$status"
       - name: Upload focused test diagnostics
         if: always()
@@ -59,7 +58,7 @@ jobs:
           path: /tmp/activation-composition-focused-tests.log
           retention-days: 1
       - name: Enforce focused tests
-        if: steps.focused.outputs.status != '0'
+        if: steps.focused.outcome == 'failure'
         run: exit 1
       - name: Build bridge with release-gate features
         working-directory: rust
