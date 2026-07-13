@@ -24,7 +24,7 @@ TestCase {
 
     function test_default_tap_fills_without_auto_send() {
         var fixture = createTemporaryObject(fixtureFactory, this)
-        mouseClick(fixture.card, fixture.card.width / 2, fixture.card.height / 2)
+        fixture.card.clicked()
         compare(fixture.fillSpy.count, 1)
         compare(fixture.sendSpy.count, 0)
     }
