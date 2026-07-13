@@ -4,7 +4,7 @@ import hashlib
 import sys
 from pathlib import Path
 
-EXPECTED_OUTPUT_SHA256 = "7e568026c642ae97634802610a8fdd1ab39fee1cacaac2e477ca710a51f66cb1"
+EXPECTED_OUTPUT_SHA256 = "c8b813ea0b75dc388359e0421c540d376e321f743e741869a4018a6c40411b8b"
 
 REPLACEMENTS = [
     ('\'llama_cpp = ["mukei-core/llama_cpp"]\\n\',', '\'llama_cpp          = ["mukei-core/llama_cpp"]\\n\','),
@@ -15,6 +15,7 @@ REPLACEMENTS = [
     ("'''                visible: ModelStore.activationInProgress || ModelStore.activationFailed\n                         || ModelStore.restartRequired || ModelStore.sessionMessage.length > 0\n'''", "'''            visible: ModelStore.activationInProgress || ModelStore.activationFailed\n                     || ModelStore.restartRequired || ModelStore.sessionMessage.length > 0\n'''") ,
     ("'''                       : qsTr(\"The selected model will be used after a supported engine session starts.\")\n'''", "'''                      : qsTr(\"The selected model will be used after a supported engine session starts.\")\n'''") ,
     ("'''                       : ModelStore.activationInProgress\n                         ? qsTr(\"The selected model is being verified and activated.\")\n                         : ModelStore.activationFailed\n                           ? qsTr(\"The replacement model could not be activated; the previous ready model remains active when available.\")\n                           : qsTr(\"No model backend is active yet.\")\n'''", "'''                      : ModelStore.activationInProgress\n                        ? qsTr(\"The selected model is being verified and activated.\")\n                        : ModelStore.activationFailed\n                          ? qsTr(\"The replacement model could not be activated; the previous ready model remains active when available.\")\n                          : qsTr(\"No model backend is active yet.\")\n'''") ,
+    ("    unsafe {{ mukei_llama_abi_version() }} == EXPECTED_ABI_VERSION\n", "    (unsafe {{ mukei_llama_abi_version() }}) == EXPECTED_ABI_VERSION\n"),
 ]
 
 
