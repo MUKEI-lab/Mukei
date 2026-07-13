@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import "../architecture"
+import "../stores"
 import "../theme"
 
 Drawer {
