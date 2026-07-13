@@ -8,42 +8,43 @@ Column {
     property var ast: []
     property string fallbackText: ""
     spacing: Spacing.sm
+
     Repeater {
         model: root.ast && root.ast.length > 0 ? root.ast : [{
                 "type": "Paragraph",
                 "text": root.fallbackText
             }]
-        delegate: Loader {
+        delegate: Column {
+            id: markdownNode
+            required property var modelData
             width: root.width
-            sourceComponent: modelData.type === "CodeBlock" ? codeBlockComponent : modelData.type === "HorizontalRule" ? ruleComponent : textComponent
-            property var node: modelData
-        }
-    }
-    Component {
-        id: textComponent
-        Text {
-            width: root.width
-            text: node.text || ""
-            wrapMode: Text.Wrap
-            textFormat: Text.PlainText
-            color: Theme.p.inkPrimary
-            Component.onCompleted: Type.apply(this, node.type === "Heading" ? Type.h2 : Type.bodyAI)
-        }
-    }
-    Component {
-        id: codeBlockComponent
-        CodeBlockComponent {
-            width: root.width
-            code: node.text || ""
-            language: node.lang || ""
-        }
-    }
-    Component {
-        id: ruleComponent
-        Rectangle {
-            width: root.width
-            height: 1
-            color: Theme.p.divider
+
+            Text {
+                width: markdownNode.width
+                visible: markdownNode.modelData.type !== "CodeBlock"
+                         && markdownNode.modelData.type !== "HorizontalRule"
+                text: markdownNode.modelData.text || ""
+                wrapMode: Text.Wrap
+                textFormat: Text.PlainText
+                color: Theme.p.inkPrimary
+                Component.onCompleted: Type.apply(this,
+                                                  markdownNode.modelData.type === "Heading"
+                                                  ? Type.h2 : Type.bodyAI)
+            }
+
+            CodeBlockComponent {
+                width: markdownNode.width
+                visible: markdownNode.modelData.type === "CodeBlock"
+                code: markdownNode.modelData.text || ""
+                language: markdownNode.modelData.lang || ""
+            }
+
+            Rectangle {
+                width: markdownNode.width
+                height: visible ? 1 : 0
+                visible: markdownNode.modelData.type === "HorizontalRule"
+                color: Theme.p.divider
+            }
         }
     }
 }
