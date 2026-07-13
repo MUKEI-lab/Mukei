@@ -49,8 +49,8 @@ ApplicationWindow {
 
     Connections {
         target: Qt.application
-        function onStateChanged() {
-            AppCoordinator.onApplicationStateChanged(Qt.application.state) // qmllint disable missing-property
+        function onStateChanged(state) {
+            AppCoordinator.onApplicationStateChanged(state)
         }
     }
 
