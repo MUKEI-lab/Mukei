@@ -30,7 +30,8 @@ Button {
             width: Spacing.lg
             height: Spacing.lg
             source: root.iconSource
-            sourceSize: Qt.size(Spacing.lg, Spacing.lg)
+            sourceSize.width: Spacing.lg
+            sourceSize.height: Spacing.lg
             fillMode: Image.PreserveAspectFit
             visible: false
         }
