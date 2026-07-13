@@ -17,17 +17,18 @@ ModalSheet {
         Repeater {
             model: root.branches
             delegate: RowLayout {
+                id: branchRow
                 required property var modelData
                 spacing: Spacing.sm
                 Image {
                     source: "qrc:/icons/active-dot.svg"
-                    visible: modelData.active === true
+                    visible: branchRow.modelData.active === true
                     Layout.preferredWidth: Spacing.md
                     Layout.preferredHeight: Spacing.md
                 }
                 GhostButton {
-                    text: modelData.title || qsTr("Branch")
-                    onClicked: root.branchSelected(modelData.id || "")
+                    text: branchRow.modelData.title || qsTr("Branch")
+                    onClicked: root.branchSelected(branchRow.modelData.id || "")
                 }
             }
         }
