@@ -1,9 +1,10 @@
 //! End-to-end integration tests for the agent loop's graceful-degrade
 //! behaviour (PRD REQ-AGT-04 + TRD §2.3).
 //!
-//! These tests drive `AgentLoop::run` with mock backends — they do NOT
-//! load llama.cpp — so they verify the loop's structural contract
-//! independent of any model.
+//! These tests drive `AgentLoop::run` through both explicit mock and
+//! unavailable backend paths. They do NOT load llama.cpp, so they verify
+//! success/degrade contracts independently of any model while ensuring the
+//! production-default no-backend path fails closed instead of fabricating output.
 //!
 //! Contract under test:
 //!   * When a tool fails [`MAX_FAILURES_PER_TOOL` + 1] times with the
@@ -30,6 +31,7 @@ use mukei_core::agent::tools::{
     ToolExecutionPolicy, ToolExecutor,
 };
 use mukei_core::agent::watchdog::{Watchdog, WatchdogHandle};
+use mukei_core::engine::BackendKind;
 use mukei_core::error::MukeiError;
 use mukei_core::tools::ToolRegistry;
 use mukei_core::types::{BranchId, ChatMessage, ConversationId, MessageId};
@@ -119,6 +121,55 @@ async fn run_completes_without_tool_calls() {
         received_any = true;
     }
     assert!(received_any, "the stub inference engine emitted no chunks");
+}
+
+#[tokio::test]
+async fn unavailable_production_backend_fails_closed_without_streaming_output() {
+    let backend: Arc<dyn ContextBackend> = Arc::new(StaticBackend);
+    let tokenizer: Arc<dyn TokenCount> = Arc::new(FixedTokenizer);
+    let context = ContextBudgetManager::new(backend, tokenizer, 100_000);
+
+    let registry = Arc::new(ToolRegistry::new());
+    let tracker = Arc::new(FailureTracker::new());
+    let tools = ToolExecutor::new(registry, tracker);
+
+    let watchdog = WatchdogHandle::new(Watchdog::new(
+        4,
+        1_000_000,
+        std::time::Duration::from_secs(30),
+    ));
+
+    // The compatibility/production-default constructor deliberately installs
+    // an unavailable backend, never the development mock.
+    let agent = AgentLoop::new(context, tools, watchdog);
+    assert_eq!(agent.backend_kind(), BackendKind::Unavailable);
+
+    let (tx, mut rx) = mpsc::channel::<String>(256);
+    let result = agent
+        .run(AgentRunRequest::new(
+            "hello world",
+            ConversationId::new(),
+            BranchId::new(),
+            MessageId::new(),
+            CancellationToken::new(),
+            tx,
+        ))
+        .await;
+
+    match result {
+        Err(MukeiError::ModelLoadFailed(message)) => {
+            assert!(
+                message.contains("inference backend is unavailable"),
+                "unexpected unavailable-backend error: {message}"
+            );
+        }
+        other => panic!("unavailable production backend must fail closed, got {other:?}"),
+    }
+
+    assert!(
+        rx.try_recv().is_err(),
+        "unavailable production backend must not fabricate or stream model output"
+    );
 }
 
 #[tokio::test]
