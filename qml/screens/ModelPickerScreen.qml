@@ -38,6 +38,7 @@ Page {
             spacing: Spacing.md
             clip: true
             delegate: Rectangle {
+                id: modelPickerDelegate
                 required property string modelId
                 required property string displayName
                 required property string description
@@ -55,27 +56,27 @@ Page {
                     anchors.margins: Spacing.lg
                     Text {
                         Layout.fillWidth: true
-                        text: displayName
+                        text: modelPickerDelegate.displayName
                         color: Theme.p.inkPrimary
                         wrapMode: Text.Wrap
                         Component.onCompleted: Type.apply(this, Type.h3)
                     }
                     Text {
-                        text: sizeLabel
+                        text: modelPickerDelegate.sizeLabel
                         color: Theme.p.inkSecondary
                         Component.onCompleted: Type.apply(this, Type.bodySmall)
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: description
+                        text: modelPickerDelegate.description
                         color: Theme.p.inkSecondary
                         wrapMode: Text.Wrap
                         Component.onCompleted: Type.apply(this, Type.bodyUI)
                     }
                     SecondaryButton {
-                        text: installed ? qsTr("Installed") : qsTr("Download")
-                        enabled: !installed && CapabilityStore.canDownloadModel && !StorageStore.critical
-                        onClicked: IntentDispatcher.dispatch({ type: "model.download", modelId: modelId })
+                        text: modelPickerDelegate.installed ? qsTr("Installed") : qsTr("Download")
+                        enabled: !modelPickerDelegate.installed && CapabilityStore.canDownloadModel && !StorageStore.critical
+                        onClicked: IntentDispatcher.dispatch({ type: "model.download", modelId: modelPickerDelegate.modelId })
                     }
                 }
             }
