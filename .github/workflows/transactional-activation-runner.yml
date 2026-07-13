@@ -19,6 +19,36 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+      - name: Narrow ambiguous service-field patch anchor
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('.github/patch_transactional_activation.py')
+          text = path.read_text()
+          old = '''replace_once(
+              "    real_backend_implementation_available: bool,",
+              "    real_backend_implementation_available: AtomicBool,",
+              "activation dynamic availability field",
+          )'''
+          new = '''replace_once(
+              """pub struct ModelActivationService {
+              inner: RwLock<ActivationInner>,
+              generation: AtomicU64,
+              real_backend_implementation_available: bool,
+              observability: Option<ObservabilityRecorder>,
+          }""",
+              """pub struct ModelActivationService {
+              inner: RwLock<ActivationInner>,
+              generation: AtomicU64,
+              real_backend_implementation_available: AtomicBool,
+              observability: Option<ObservabilityRecorder>,
+          }""",
+              "activation dynamic availability field",
+          )'''
+          if text.count(old) != 1:
+              raise SystemExit(f'patch-script service-field anchor mismatch: {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
       - name: Apply transactional activation hardening
         id: patch
         continue-on-error: true
