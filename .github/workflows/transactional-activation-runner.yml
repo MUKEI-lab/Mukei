@@ -1,0 +1,37 @@
+name: transactional-activation-runner
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.ref == 'checkpoint/stabilization-2026-07-12'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: checkpoint/stabilization-2026-07-12
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Apply transactional activation hardening
+        run: python3 .github/patch_transactional_activation.py
+      - name: Apply canonical rustfmt output
+        working-directory: rust
+        run: cargo fmt --all
+      - name: Run focused activation tests
+        working-directory: rust
+        run: cargo test -p mukei-core engine::activation::tests --lib
+      - name: Commit hardened activation core
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "engine: make model activation swaps transactional"
+          git push origin HEAD:checkpoint/stabilization-2026-07-12
