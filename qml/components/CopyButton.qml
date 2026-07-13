@@ -16,7 +16,7 @@ IconButton {
     Accessible.description: qsTr("Copy text to the clipboard")
 
     onClicked: {
-        mukeiClipboard.setText(root.textToCopy);
+        mukeiClipboard.setText(root.textToCopy); // qmllint disable unqualified
         root._acknowledging = true;
         _ackTimer.restart();
     }
