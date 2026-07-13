@@ -110,23 +110,5 @@ jobs:
           exit "$lint_status"
       - name: Build QML and test targets
         run: cmake --build "$CMAKE_BUILD_DIR" -j2
-      - name: Capture repeated CTest diagnostics
-        id: ctest
-        continue-on-error: true
-        run: |
-          set +e
-          ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure --repeat until-fail:5 2>&1 | tee /tmp/mukei-ctest.log
-          ctest_status=${PIPESTATUS[0]}
-          set -e
-          exit "$ctest_status"
-      - name: Upload repeated CTest diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ctest-resync-repeat-diagnostics
-          path: /tmp/mukei-ctest.log
-          if-no-files-found: error
-          retention-days: 1
-      - name: Enforce CTest result
-        if: steps.ctest.outcome == 'failure'
-        run: exit 1
+      - name: Run CTest
+        run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
