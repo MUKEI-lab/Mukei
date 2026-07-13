@@ -207,6 +207,71 @@ Item {
         }
     }
 
+    function scheduleResyncRetry(streamId, resyncId) {
+        Qt.callLater(function() {
+            SnapshotController.retry(streamId, resyncId)
+        })
+    }
+
+    function retryWaitingFeatureSnapshots(feature) {
+        var waiting = SnapshotController.waitingTicketsForFeature(feature)
+        for (var i = 0; i < waiting.length; ++i)
+            scheduleResyncRetry(waiting[i].streamId, waiting[i].resyncId)
+    }
+
+    function finishFeatureResynchronization(feature) {
+        var tickets = SnapshotController.inFlightTicketsForFeature(feature)
+        for (var i = 0; i < tickets.length; ++i) {
+            var ticket = tickets[i]
+            var watermark = Number(ticket.requestWatermark)
+            if (!SnapshotController.validateApplied(ticket.streamId, ticket.resyncId, watermark)) {
+                scheduleResyncRetry(ticket.streamId, ticket.resyncId)
+                continue
+            }
+            if (!EventDispatcher.completeResynchronization(ticket.streamId, watermark)) {
+                SnapshotController.markFailed(ticket.streamId, ticket.resyncId,
+                                              "dispatcher_rejected_snapshot_watermark")
+                continue
+            }
+            SnapshotController.markApplied(ticket.streamId, ticket.resyncId)
+        }
+        retryWaitingFeatureSnapshots(feature)
+    }
+
+    function failFeatureResynchronization(feature, reason) {
+        var tickets = SnapshotController.inFlightTicketsForFeature(feature)
+        for (var i = 0; i < tickets.length; ++i)
+            SnapshotController.markFailed(tickets[i].streamId, tickets[i].resyncId, reason)
+        retryWaitingFeatureSnapshots(feature)
+    }
+
+    function startFeatureSnapshot(feature, streamId, resyncId, expectedSequence, snapshotWatermark) {
+        if (feature === "chat") {
+            if (!SnapshotController.markRequestStarted(streamId, resyncId, snapshotWatermark))
+                return
+            if (!ChatStore.requestSnapshot(false))
+                SnapshotController.markFailed(streamId, resyncId, "chat_snapshot_request_failed")
+            return
+        }
+
+        if (feature === "downloads") {
+            if (DownloadStore.loading) {
+                SnapshotController.markWaiting(streamId, resyncId)
+                return
+            }
+            if (!SnapshotController.markRequestStarted(streamId, resyncId, snapshotWatermark))
+                return
+            DownloadStore.hydrate()
+            return
+        }
+
+        // No authoritative, completion-correlated snapshot contract exists for
+        // these streams yet. Keep them quarantined rather than reopening the
+        // event gate on a best-effort hydrate.
+        SnapshotController.markFailed(streamId, resyncId,
+                                      "authoritative_snapshot_not_supported_for_" + feature)
+    }
+
     Connections {
         target: UiSessionStore
         function onHydrationCompleted() { AppCoordinator.tryFinishReadyHydration() }
@@ -218,42 +283,41 @@ Item {
     }
 
     Connections {
+        target: ChatStore
+        function onSnapshotApplied() {
+            AppCoordinator.finishFeatureResynchronization("chat")
+        }
+    }
+
+    Connections {
+        target: DownloadStore
+        function onSnapshotApplied() {
+            AppCoordinator.finishFeatureResynchronization("downloads")
+        }
+        function onSnapshotFailed() {
+            AppCoordinator.failFeatureResynchronization("downloads", "download_snapshot_failed")
+        }
+    }
+
+    Connections {
         target: EventDispatcher
         function onEventReceived(event) {
             AppCoordinator.applyEvent(event)
         }
         function onStreamSequenceGapDetected(feature, streamId, expectedSequence, receivedSequence) {
-            SnapshotController.requestFeatureSnapshot(feature, expectedSequence, receivedSequence)
-            EventDispatcher.completeResynchronization(streamId, receivedSequence)
-            SnapshotController.markApplied(feature)
+            SnapshotController.requestFeatureSnapshot(feature, streamId,
+                                                      expectedSequence, receivedSequence)
+        }
+        function onStreamQuarantineAdvanced(streamId, observedSequence) {
+            SnapshotController.noteObservedSequence(streamId, observedSequence)
         }
     }
 
     Connections {
         target: SnapshotController
-        function onSnapshotRequested(feature) {
-            if (feature === "chat")
-                ChatStore.requestSnapshot(false)
-            else if (feature === "downloads")
-                DownloadStore.hydrate()
-            else if (feature === "models")
-                ModelStore.hydrate()
-            else if (feature === "documents")
-                DocumentStore.hydrate()
-            else if (feature === "storage")
-                StorageStore.hydrate()
-            else if (feature === "operations" || feature === "errors")
-                OperationStore.hydrate()
-            else if (feature === "app") {
-                ConversationStore.hydrate()
-                RecoveryStore.hydrate()
-                ModelStore.hydrate()
-                DownloadStore.hydrate()
-                DocumentStore.hydrate()
-                StorageStore.hydrate()
-                SettingsStore.hydrate()
-                DiagnosticsStore.hydrate()
-            }
+        function onSnapshotRequested(feature, streamId, resyncId, expectedSequence, snapshotWatermark) {
+            AppCoordinator.startFeatureSnapshot(feature, streamId, resyncId,
+                                                expectedSequence, snapshotWatermark)
         }
     }
 }
