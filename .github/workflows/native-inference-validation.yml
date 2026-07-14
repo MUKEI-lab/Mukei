@@ -1,0 +1,86 @@
+name: native-inference-validation
+
+on:
+  push:
+    branches: [ main, "agent/**", "checkpoint/**" ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: native-inference-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  RUST_BACKTRACE: 1
+  QT_VERSION: 6.5.3
+  NATIVE_BUILD_DIR: /tmp/mukei-llama-native-build
+  QML_BUILD_DIR: /tmp/mukei-native-qml-build
+
+jobs:
+  native-production-path:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Qt 6.5
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+      - name: Export Qt toolchain paths
+        run: |
+          echo "$QT_ROOT_DIR/bin" >> "$GITHUB_PATH"
+          echo "QMAKE=$QT_ROOT_DIR/bin/qmake" >> "$GITHUB_ENV"
+      - name: Ensure native build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Cache native capsule
+        uses: actions/cache@v4
+        with:
+          path: rust/llama-cpp-prebuilt/prebuilt/host
+          key: ${{ runner.os }}-mukei-llama-native-${{ hashFiles('rust/llama-cpp-prebuilt/CMakeLists.txt', 'rust/llama-cpp-prebuilt/VENDORED_SNAPSHOT.md', 'rust/llama-cpp-prebuilt/shim/**', 'rust/llama-cpp-prebuilt/vendor/llama.cpp/**') }}
+      - name: Configure native capsule
+        run: cmake -S rust/llama-cpp-prebuilt -B "$NATIVE_BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build native capsule and ABI smoke
+        run: cmake --build "$NATIVE_BUILD_DIR" --target mukei_llama_native_smoke -j2
+      - name: Run native ABI smoke
+        run: ctest --test-dir "$NATIVE_BUILD_DIR" --output-on-failure
+      - name: Export native runtime paths
+        run: |
+          echo "MUKEI_LLAMA_NATIVE_LIB_DIR=$GITHUB_WORKSPACE/rust/llama-cpp-prebuilt/prebuilt/host" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/rust/llama-cpp-prebuilt/prebuilt/host:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+      - name: Verify activation state-machine lifecycle
+        working-directory: rust
+        run: cargo test -p mukei-core --test activation_verification_lifecycle
+      - name: Verify native adapter identity and UTF-8 streaming
+        working-directory: rust
+        run: cargo test -p mukei-bridge --no-default-features --features runtime_production native_inference::tests
+      - name: Build production bridge and export CXX-Qt headers
+        working-directory: rust
+        env:
+          CXX_QT_EXPORT_DIR: ${{ github.workspace }}/rust/target/cxxqt-export
+          CXX_QT_EXPORT_CRATE_mukei-bridge: "1"
+        run: cargo build --release -p mukei-bridge --no-default-features --features "sqlcipher,network,runtime_production"
+      - name: Configure final QML shipping composition
+        working-directory: qml
+        run: >-
+          cmake -S . -B "$QML_BUILD_DIR" -G Ninja
+          -DMUKEI_USE_REAL_BRIDGE=ON
+          -DMUKEI_USE_NATIVE_INFERENCE=ON
+          -DMUKEI_BRIDGE_LIB="$GITHUB_WORKSPACE/rust/target/release/libmukei_bridge.a"
+          -DMUKEI_CXX_QT_EXPORT_DIR="$GITHUB_WORKSPACE/rust/target/cxxqt-export"
+          -DMUKEI_LLAMA_NATIVE_LIB="$GITHUB_WORKSPACE/rust/llama-cpp-prebuilt/prebuilt/host/libmukei_llama_native.so"
+      - name: Run strict qmllint gate
+        run: |
+          cmake --build "$QML_BUILD_DIR" --target all_qmllint 2>&1 | tee /tmp/mukei-native-qmllint.log
+          python3 qml/scripts/qmllint_allowlist_guard.py /tmp/mukei-native-qmllint.log
+      - name: Build final QML composition and tests
+        run: cmake --build "$QML_BUILD_DIR" -j2
+      - name: Run QML CTest suite
+        run: ctest --test-dir "$QML_BUILD_DIR" --output-on-failure
