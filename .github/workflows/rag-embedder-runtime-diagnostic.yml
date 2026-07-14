@@ -1,0 +1,75 @@
+name: rag-embedder-runtime-diagnostic
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rag-embedder-runtime-diagnostic-${{ github.event.pull_request.head.ref }}
+  cancel-in-progress: true
+
+env:
+  EXPECTED_BASE: ab023fd1ac94b64ad7e8079e02922b9ed3763b97
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - name: Gate exact diagnostic commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD^)" == "$EXPECTED_BASE" ]]
+          [[ "$(git diff --name-only HEAD^ HEAD)" == ".github/workflows/rag-embedder-runtime-diagnostic.yml" ]]
+
+      - name: Reproduce patch and capture full traceback
+        id: reproduce
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 - <<'PY' 2>&1 | tee /tmp/rag-embedder-patch-diagnostic.log
+          import base64
+          import traceback
+          from pathlib import Path
+
+          source = Path('.github/workflows/rag-embedder-runtime-slice-runner.yml').read_text()
+          marker = '          PATCH_B64: >-\n'
+          start = source.index(marker) + len(marker)
+          end = source.index('        run: |\n', start)
+          payload = ''.join(line.strip() for line in source[start:end].splitlines())
+          print(f'payload_chars={len(payload)}')
+          script = base64.b64decode(payload, validate=True).decode('utf-8')
+          print(f'script_chars={len(script)}')
+          compile(script, '<rag-embedder-runtime-patch>', 'exec')
+          try:
+              exec(script, {'__name__': '__main__'})
+          except BaseException:
+              traceback.print_exc()
+              raise
+          PY
+          status=${PIPESTATUS[0]}
+          {
+            echo
+            echo '--- git status ---'
+            git status --short
+            echo '--- changed paths ---'
+            git diff --name-only
+          } | tee -a /tmp/rag-embedder-patch-diagnostic.log
+          exit "$status"
+
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-embedder-patch-diagnostic
+          path: /tmp/rag-embedder-patch-diagnostic.log
+          if-no-files-found: error
+          retention-days: 3
