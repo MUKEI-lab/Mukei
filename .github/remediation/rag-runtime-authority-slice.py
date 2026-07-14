@@ -9,6 +9,16 @@ def replace_once(path: Path, old: str, new: str) -> None:
     path.write_text(text.replace(old, new, 1))
 
 
+def replace_exact(path: Path, old: str, new: str, expected: int) -> None:
+    text = path.read_text()
+    count = text.count(old)
+    if count != expected:
+        raise SystemExit(
+            f"{path}: expected {expected} anchors, found {count}: {old!r}"
+        )
+    path.write_text(text.replace(old, new))
+
+
 rag_path = Path("rust/crates/mukei-bridge/src/app_runtime/rag_runtime.rs")
 rag_path.parent.mkdir(parents=True, exist_ok=True)
 if rag_path.exists():
@@ -166,4 +176,10 @@ replace_once(
     agent,
     "    let backend = Arc::new(BridgeContextBackend::new(\n        cfg.agent.recovered_history_window as i64,\n    ));\n",
     "    let backend = Arc::new(BridgeContextBackend::new(\n        cfg.agent.recovered_history_window as i64,\n        application_runtime().rag_runtime(),\n    ));\n",
+)
+replace_exact(
+    agent,
+    "        let backend = BridgeContextBackend::new(pool.clone(), 32);\n",
+    "        let backend = BridgeContextBackend::new(\n            pool.clone(),\n            32,\n            std::sync::Arc::new(RagRuntime::new()),\n        );\n",
+    2,
 )
