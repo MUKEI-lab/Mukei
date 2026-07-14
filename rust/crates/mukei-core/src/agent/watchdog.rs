@@ -78,6 +78,15 @@ impl Watchdog {
         let start = *self.start.lock().expect("watchdog start mutex poisoned");
         self.max_wall.saturating_sub(start.elapsed())
     }
+
+    /// Remaining generation budget for the current turn.
+    ///
+    /// The agent loop passes this value into every inference attempt so a
+    /// multi-iteration tool flow cannot grant the model the full per-turn
+    /// budget again on each iteration.
+    pub fn remaining_token_budget(&self, tokens_so_far: u64) -> u64 {
+        self.max_tokens.saturating_sub(tokens_so_far)
+    }
 }
 
 /// Convenience: cloneable handle carried across awaits (REQ-CON-03).
@@ -107,6 +116,11 @@ impl WatchdogHandle {
     pub fn remaining_wall_clock(&self) -> std::time::Duration {
         self.inner.remaining_wall_clock()
     }
+
+    /// See [`Watchdog::remaining_token_budget`].
+    pub fn remaining_token_budget(&self, tokens_so_far: u64) -> u64 {
+        self.inner.remaining_token_budget(tokens_so_far)
+    }
 }
 
 #[cfg(test)]
@@ -127,6 +141,15 @@ mod tests {
     fn token_limit_triggers() {
         let w = Watchdog::new(100, 5, Duration::from_secs(60));
         assert!(w.check(0, 5).is_err());
+    }
+
+    #[test]
+    fn remaining_token_budget_saturates_at_zero() {
+        let w = Watchdog::new(100, 5, Duration::from_secs(60));
+        assert_eq!(w.remaining_token_budget(0), 5);
+        assert_eq!(w.remaining_token_budget(3), 2);
+        assert_eq!(w.remaining_token_budget(5), 0);
+        assert_eq!(w.remaining_token_budget(9), 0);
     }
 
     #[test]

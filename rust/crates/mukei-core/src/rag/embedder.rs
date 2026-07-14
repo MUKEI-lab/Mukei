@@ -50,6 +50,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "candle")]
 use crate::error::MukeiError;
 use crate::error::Result;
+#[cfg(feature = "candle")]
+use crate::rag::artifact_manifest::VerifiedEmbeddingArtifacts;
 
 /// L2-normalised dense vector returned by an [`Embedder`].
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -185,6 +187,26 @@ impl CandleMiniLmEmbedder {
         })
     }
 
+    /// Load from an artifact bundle whose filenames, sizes, and complete
+    /// digests were already verified by [`VerifiedEmbeddingArtifacts`].
+    /// This avoids a second full-file weights allocation after the safetensors
+    /// mmap has been established.
+    pub fn from_verified_artifacts(artifacts: &VerifiedEmbeddingArtifacts) -> Result<Self> {
+        let expected_dim = artifacts.embedding_dim() as usize;
+        let embedder = Self::with_config_and_embedder_id(
+            CandleConfig {
+                model_dir: artifacts.model_dir().to_path_buf(),
+                max_seq_len: 512,
+                pooling: Pooling::Mean,
+            },
+            Some(artifacts.embedder_id().to_string()),
+        )?;
+        if embedder.inner.dim != expected_dim {
+            return Err(MukeiError::ModelCorrupted);
+        }
+        Ok(embedder)
+    }
+
     /// Load with an explicit [`CandleConfig`].
     ///
     /// Returns a typed [`MukeiError`] if any of the model files is
@@ -192,6 +214,13 @@ impl CandleMiniLmEmbedder {
     /// human-readable error in the editor's first-run UI rather than
     /// crashing on a malformed checkpoint.
     pub fn with_config(config: CandleConfig) -> Result<Self> {
+        Self::with_config_and_embedder_id(config, None)
+    }
+
+    fn with_config_and_embedder_id(
+        config: CandleConfig,
+        verified_embedder_id: Option<String>,
+    ) -> Result<Self> {
         use candle_core::{DType, Device};
         use candle_nn::VarBuilder;
         use candle_transformers::models::bert::{BertModel, Config as BertConfig};
@@ -253,18 +282,12 @@ impl CandleMiniLmEmbedder {
         let model = BertModel::load(vb, &bert_config)
             .map_err(|e| MukeiError::ModelLoadFailed(format!("BertModel::load failed: {e}")))?;
 
-        // Stable embedder id derived from the safetensors SHA-256 so
-        // the vector-store header tracks the EXACT weights used.
-        let embedder_id = {
-            use sha2::{Digest, Sha256};
-            let bytes = std::fs::read(&weights_path).map_err(|e| {
-                MukeiError::ModelLoadFailed(format!("weights re-read for hashing: {e}"))
-            })?;
-            let digest = Sha256::digest(&bytes);
-            format!(
-                "minilm-candle:sha256:{}",
-                crate::diagnostics::crash_logger::hex_helper(&digest)
-            )
+        // Production passes a cryptographically verified identity from the
+        // artifact manifest. Legacy/direct callers still derive the same identity
+        // with a streaming hash rather than allocating a second weights-sized buffer.
+        let embedder_id = match verified_embedder_id {
+            Some(value) => value,
+            None => weights_embedder_id(&weights_path)?,
         };
 
         Ok(Self {
@@ -283,6 +306,33 @@ impl CandleMiniLmEmbedder {
     pub fn model_dir(&self) -> &Path {
         &self.inner.config.model_dir
     }
+}
+
+#[cfg(feature = "candle")]
+fn weights_embedder_id(path: &Path) -> Result<String> {
+    use std::io::{BufReader, Read};
+
+    use sha2::{Digest, Sha256};
+
+    let file = std::fs::File::open(path).map_err(|error| {
+        MukeiError::ModelLoadFailed(format!("weights hash open failed: {error}"))
+    })?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = reader.read(&mut buffer).map_err(|error| {
+            MukeiError::ModelLoadFailed(format!("weights hash read failed: {error}"))
+        })?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!(
+        "minilm-candle:sha256:{}",
+        crate::diagnostics::crash_logger::hex_helper(&hasher.finalize())
+    ))
 }
 
 #[cfg(feature = "candle")]

@@ -362,24 +362,37 @@ impl AgentLoop {
         cancel_token: CancellationToken,
         token_sender: mpsc::Sender<String>,
         remaining: std::time::Duration,
+        max_tokens: u64,
     ) -> Result<SupervisedInferenceResult, MukeiError> {
         let terminal = InferenceTerminalGuard::new();
         self.record_inference_terminal("inference.start", OutcomeClass::Success, None);
 
-        if remaining.is_zero() {
+        if remaining.is_zero() || max_tokens == 0 {
             let _ = terminal.try_finish(InferenceTerminalOutcome::Failed);
             self.record_inference_terminal(
                 "inference.terminal",
                 OutcomeClass::Timeout,
                 Some(InferenceFailureCategory::Timeout),
             );
-            return Err(MukeiError::WatchdogExceeded { kind: "seconds" });
+            return Err(MukeiError::WatchdogExceeded {
+                kind: if remaining.is_zero() {
+                    "seconds"
+                } else {
+                    "tokens"
+                },
+            });
         }
 
-        let backend_future = AssertUnwindSafe(self.inference_backend.run(
+        // A child token gives this inference attempt its own cancellation
+        // authority. User cancellation propagates from the parent, while the
+        // watchdog timeout can stop native/background work without marking the
+        // whole request token as user-cancelled.
+        let inference_cancel = cancel_token.child_token();
+        let backend_future = AssertUnwindSafe(self.inference_backend.run_bounded(
             context_text,
-            cancel_token.clone(),
+            inference_cancel.clone(),
             token_sender,
+            max_tokens,
         ))
         .catch_unwind();
         tokio::pin!(backend_future);
@@ -387,6 +400,7 @@ impl AgentLoop {
         tokio::select! {
             biased;
             _ = cancel_token.cancelled() => {
+                inference_cancel.cancel();
                 if terminal.try_finish(InferenceTerminalOutcome::Cancelled) {
                     self.record_inference_terminal(
                         "inference.terminal",
@@ -397,6 +411,7 @@ impl AgentLoop {
                 Ok(SupervisedInferenceResult::Cancelled)
             }
             _ = tokio::time::sleep(remaining) => {
+                inference_cancel.cancel();
                 if terminal.try_finish(InferenceTerminalOutcome::Failed) {
                     self.record_inference_terminal(
                         "inference.terminal",
@@ -458,6 +473,17 @@ impl AgentLoop {
                         Err(error)
                     }
                     Ok(Ok(outcome)) => {
+                        if outcome.used_tokens > max_tokens {
+                            inference_cancel.cancel();
+                            if terminal.try_finish(InferenceTerminalOutcome::Failed) {
+                                self.record_inference_terminal(
+                                    "inference.terminal",
+                                    OutcomeClass::Timeout,
+                                    Some(InferenceFailureCategory::Timeout),
+                                );
+                            }
+                            return Err(MukeiError::WatchdogExceeded { kind: "tokens" });
+                        }
                         match outcome.stop_reason {
                             StopReason::Completed => {
                                 if terminal.try_finish(InferenceTerminalOutcome::Succeeded) {
@@ -689,12 +715,14 @@ impl AgentLoop {
             // backend failure, and panic converge on exactly one terminal
             // outcome. The helper never exposes panic payloads.
             let remaining = self.watchdog.remaining_wall_clock();
+            let remaining_tokens = self.watchdog.remaining_token_budget(tokens_so_far);
             let inference_outcome = match self
                 .run_inference_supervised(
                     &context_text,
                     cancel_token.clone(),
                     token_sender.clone(),
                     remaining,
+                    remaining_tokens,
                 )
                 .await?
             {
@@ -954,7 +982,7 @@ mod tests {
     use crate::engine::BackendIdentity;
     use crate::tools::ToolRegistry;
     use std::sync::atomic::AtomicUsize;
-    use std::sync::Barrier;
+    use std::sync::{Barrier, Mutex};
     use std::time::Duration;
     use tokio::sync::Notify;
 
@@ -1052,6 +1080,81 @@ mod tests {
                 used_tokens: 1,
                 stop_reason: StopReason::Completed,
             })
+        }
+    }
+
+    struct BudgetSequenceBackend {
+        calls: AtomicUsize,
+        observed_limits: Mutex<Vec<u64>>,
+    }
+
+    #[async_trait::async_trait]
+    impl InferenceBackend for BudgetSequenceBackend {
+        fn identity(&self) -> BackendIdentity {
+            BackendIdentity::production("budget_sequence_test_backend")
+        }
+
+        async fn run(
+            &self,
+            _prompt: &str,
+            _cancel: CancellationToken,
+            _token_sender: mpsc::Sender<String>,
+        ) -> Result<InferenceOutcome, MukeiError> {
+            Err(MukeiError::Invariant(
+                "agent loop bypassed bounded inference".to_string(),
+            ))
+        }
+
+        async fn run_bounded(
+            &self,
+            _prompt: &str,
+            _cancel: CancellationToken,
+            _token_sender: mpsc::Sender<String>,
+            max_tokens: u64,
+        ) -> Result<InferenceOutcome, MukeiError> {
+            self.observed_limits
+                .lock()
+                .expect("budget limits mutex poisoned")
+                .push(max_tokens);
+            let call = self.calls.fetch_add(1, Ordering::AcqRel);
+            if call == 0 {
+                Ok(InferenceOutcome {
+                    assistant_text: r#"[{"name":"not_registered","arguments":{}}]"#.to_string(),
+                    used_tokens: 2,
+                    stop_reason: StopReason::Completed,
+                })
+            } else {
+                Ok(InferenceOutcome {
+                    assistant_text: "done".to_string(),
+                    used_tokens: max_tokens,
+                    stop_reason: StopReason::Completed,
+                })
+            }
+        }
+    }
+
+    struct TimeoutCancellationProbe {
+        cancellation_observed: Arc<Notify>,
+    }
+
+    #[async_trait::async_trait]
+    impl InferenceBackend for TimeoutCancellationProbe {
+        fn identity(&self) -> BackendIdentity {
+            BackendIdentity::production("timeout_cancellation_probe")
+        }
+
+        async fn run(
+            &self,
+            _prompt: &str,
+            cancel: CancellationToken,
+            _token_sender: mpsc::Sender<String>,
+        ) -> Result<InferenceOutcome, MukeiError> {
+            let cancellation_observed = self.cancellation_observed.clone();
+            tokio::spawn(async move {
+                cancel.cancelled().await;
+                cancellation_observed.notify_one();
+            });
+            futures::future::pending::<Result<InferenceOutcome, MukeiError>>().await
         }
     }
 
@@ -1174,6 +1277,70 @@ mod tests {
             matches!(stale, Err(MukeiError::Internal(message)) if message == "stale agent completion ignored")
         );
         assert_eq!(agent.active_run_generation(), None);
+    }
+
+    #[tokio::test]
+    async fn cumulative_turn_token_budget_is_forwarded_per_iteration() {
+        let context = ContextBudgetManager::new(
+            Arc::new(StaticContextBackend),
+            Arc::new(FixedTokens),
+            100_000,
+        );
+        let tools = ToolExecutor::new(
+            Arc::new(ToolRegistry::new()),
+            Arc::new(FailureTracker::new()),
+        );
+        let watchdog = WatchdogHandle::new(Watchdog::new(4, 5, Duration::from_secs(30)));
+        let backend = Arc::new(BudgetSequenceBackend {
+            calls: AtomicUsize::new(0),
+            observed_limits: Mutex::new(Vec::new()),
+        });
+        let agent = AgentLoop::new_with_backend(context, tools, watchdog, backend.clone());
+
+        let outcome = agent.run(request()).await.unwrap();
+
+        assert_eq!(outcome.final_content.as_deref(), Some("done"));
+        assert_eq!(outcome.final_token_count, Some(3));
+        assert_eq!(
+            *backend
+                .observed_limits
+                .lock()
+                .expect("budget limits mutex poisoned"),
+            vec![5, 3]
+        );
+    }
+
+    #[tokio::test]
+    async fn watchdog_timeout_cancels_inference_child_work() {
+        let (context, tools, watchdog) = agent_parts();
+        let cancellation_observed = Arc::new(Notify::new());
+        let agent = AgentLoop::new_with_backend(
+            context,
+            tools,
+            watchdog,
+            Arc::new(TimeoutCancellationProbe {
+                cancellation_observed: cancellation_observed.clone(),
+            }),
+        );
+        let (token_sender, _token_receiver) = mpsc::channel(4);
+
+        let result = agent
+            .run_inference_supervised(
+                "context",
+                CancellationToken::new(),
+                token_sender,
+                Duration::from_millis(5),
+                10,
+            )
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(MukeiError::WatchdogExceeded { kind: "seconds" })
+        ));
+        tokio::time::timeout(Duration::from_millis(100), cancellation_observed.notified())
+            .await
+            .expect("timed-out inference did not observe cancellation");
     }
 
     #[test]

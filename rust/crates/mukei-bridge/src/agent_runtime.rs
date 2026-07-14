@@ -350,10 +350,12 @@ pub fn build_agent_loop_with_backend(
     audit_writer: Arc<mukei_core::storage::AuditLogWriter>,
     inference_backend: Arc<dyn InferenceBackend>,
 ) -> Arc<AgentLoop> {
+    let rag = application_runtime().rag_runtime();
+    rag.ensure_embedder_initialization(cfg.models_dir.clone());
     let backend = Arc::new(BridgeContextBackend::new(
         pool.clone(),
         cfg.agent.recovered_history_window as i64,
-        application_runtime().rag_runtime(),
+        rag,
     ));
     let tokenizer = Arc::new(CharHeuristicTokens::default());
     let context = ContextBudgetManager::new(backend, tokenizer, cfg.n_ctx);
@@ -391,9 +393,11 @@ pub fn build_agent_loop_with_backend(
     registry: Arc<ToolRegistry>,
     inference_backend: Arc<dyn InferenceBackend>,
 ) -> Arc<AgentLoop> {
+    let rag = application_runtime().rag_runtime();
+    rag.ensure_embedder_initialization(cfg.models_dir.clone());
     let backend = Arc::new(BridgeContextBackend::new(
         cfg.agent.recovered_history_window as i64,
-        application_runtime().rag_runtime(),
+        rag,
     ));
     let tokenizer = Arc::new(CharHeuristicTokens::default());
     let context = ContextBudgetManager::new(backend, tokenizer, cfg.n_ctx);

@@ -408,6 +408,29 @@ pub trait InferenceBackend: Send + Sync {
         cancel: CancellationToken,
         token_sender: mpsc::Sender<String>,
     ) -> Result<InferenceOutcome>;
+
+    /// Run one inference attempt with an explicit generation ceiling.
+    ///
+    /// Implementations that own a native/model generation parameter should
+    /// override this method and enforce the cap before generation starts. The
+    /// default remains a fail-closed compatibility adapter: it rejects an
+    /// over-budget outcome even when a legacy backend cannot pre-limit work.
+    async fn run_bounded(
+        &self,
+        prompt: &str,
+        cancel: CancellationToken,
+        token_sender: mpsc::Sender<String>,
+        max_tokens: u64,
+    ) -> Result<InferenceOutcome> {
+        if max_tokens == 0 {
+            return Err(MukeiError::WatchdogExceeded { kind: "tokens" });
+        }
+        let outcome = self.run(prompt, cancel, token_sender).await?;
+        if outcome.used_tokens > max_tokens {
+            return Err(MukeiError::WatchdogExceeded { kind: "tokens" });
+        }
+        Ok(outcome)
+    }
 }
 
 /// Explicit non-runnable backend used when production activation has not
@@ -497,11 +520,44 @@ impl InferenceBackend for MockInferenceBackend {
         cancel: CancellationToken,
         token_sender: mpsc::Sender<String>,
     ) -> Result<InferenceOutcome> {
+        self.run_with_limit(prompt, cancel, token_sender, u64::MAX)
+            .await
+    }
+
+    async fn run_bounded(
+        &self,
+        prompt: &str,
+        cancel: CancellationToken,
+        token_sender: mpsc::Sender<String>,
+        max_tokens: u64,
+    ) -> Result<InferenceOutcome> {
+        self.run_with_limit(prompt, cancel, token_sender, max_tokens)
+            .await
+    }
+}
+
+impl MockInferenceBackend {
+    async fn run_with_limit(
+        &self,
+        prompt: &str,
+        cancel: CancellationToken,
+        token_sender: mpsc::Sender<String>,
+        max_tokens: u64,
+    ) -> Result<InferenceOutcome> {
         if prompt.is_empty() {
             return Err(MukeiError::Invariant("empty prompt".into()));
         }
+        if max_tokens == 0 {
+            return Err(MukeiError::WatchdogExceeded { kind: "tokens" });
+        }
         let body = self.template.replace("{prompt}", prompt);
-        let bytes = body.as_bytes();
+        let mut output_end = body
+            .len()
+            .min(usize::try_from(max_tokens).unwrap_or(usize::MAX));
+        while output_end > 0 && !body.is_char_boundary(output_end) {
+            output_end -= 1;
+        }
+        let bytes = &body.as_bytes()[..output_end];
 
         let mut acc = String::new();
         let mut idx = 0usize;
@@ -515,7 +571,7 @@ impl InferenceBackend for MockInferenceBackend {
                     stop_reason: StopReason::UserStopped,
                 });
             }
-            let end = (idx + chunk).min(bytes.len());
+            let end = idx.saturating_add(chunk).min(bytes.len());
             // Walk back to a UTF-8 char boundary so we never split a
             // multi-byte char across chunks.
             let mut safe_end = end;
@@ -524,6 +580,9 @@ impl InferenceBackend for MockInferenceBackend {
             }
             if safe_end == idx {
                 safe_end = end;
+                while safe_end < bytes.len() && !is_utf8_boundary(bytes, safe_end) {
+                    safe_end += 1;
+                }
             }
             let piece = std::str::from_utf8(&bytes[idx..safe_end])
                 .map_err(|e| MukeiError::Invariant(format!("non-utf8 chunk: {e}")))?;

@@ -118,6 +118,84 @@ struct NativeLlamaBackend {
     max_new_tokens: u32,
 }
 
+impl NativeLlamaBackend {
+    async fn run_with_limit(
+        &self,
+        prompt: &str,
+        cancel: CancellationToken,
+        token_sender: mpsc::Sender<String>,
+        max_tokens: u64,
+    ) -> Result<InferenceOutcome> {
+        if prompt.is_empty() {
+            return Err(MukeiError::Invariant("empty prompt".to_string()));
+        }
+        if max_tokens == 0 {
+            return Err(MukeiError::WatchdogExceeded { kind: "tokens" });
+        }
+        let model = self.model.clone();
+        let prompt = prompt.as_bytes().to_vec();
+        let requested_limit = u32::try_from(max_tokens).unwrap_or(u32::MAX);
+        let max_new_tokens = self.max_new_tokens.min(requested_limit);
+        let generation = tokio::task::spawn_blocking(move || {
+            let mut state = CallbackState {
+                sender: token_sender,
+                cancel,
+                pending: Vec::new(),
+                assistant_text: String::new(),
+                callback_error: None,
+            };
+            let mut generated_tokens = 0u32;
+            let status = unsafe {
+                mukei_llama_generate(
+                    model.0.as_ptr(),
+                    prompt.as_ptr(),
+                    prompt.len(),
+                    max_new_tokens,
+                    Some(token_callback),
+                    Some(cancel_callback),
+                    (&mut state as *mut CallbackState).cast::<c_void>(),
+                    &mut generated_tokens,
+                )
+            };
+            state.drain_complete_utf8();
+            if state.callback_error.is_none() && !state.pending.is_empty() {
+                state.callback_error = Some(
+                    "native inference ended with an incomplete UTF-8 token sequence".to_string(),
+                );
+            }
+            (
+                status,
+                generated_tokens,
+                state.assistant_text,
+                state.callback_error,
+            )
+        })
+        .await
+        .map_err(|error| MukeiError::BlockingJoinFailed(error.to_string()))?;
+
+        let (status, generated_tokens, assistant_text, callback_error) = generation;
+        if let Some(error) = callback_error {
+            return Err(MukeiError::Internal(error));
+        }
+        if u64::from(generated_tokens) > max_tokens {
+            return Err(MukeiError::WatchdogExceeded { kind: "tokens" });
+        }
+        match status {
+            STATUS_OK => Ok(InferenceOutcome {
+                assistant_text,
+                used_tokens: u64::from(generated_tokens),
+                stop_reason: StopReason::Completed,
+            }),
+            STATUS_CANCELLED => Ok(InferenceOutcome {
+                assistant_text,
+                used_tokens: u64::from(generated_tokens),
+                stop_reason: StopReason::UserStopped,
+            }),
+            other => Err(MukeiError::ModelLoadFailed(status_message(other))),
+        }
+    }
+}
+
 #[async_trait]
 impl InferenceBackendFactory for NativeLlamaBackendFactory {
     async fn activate(
@@ -253,66 +331,19 @@ impl InferenceBackend for NativeLlamaBackend {
         cancel: CancellationToken,
         token_sender: mpsc::Sender<String>,
     ) -> Result<InferenceOutcome> {
-        if prompt.is_empty() {
-            return Err(MukeiError::Invariant("empty prompt".to_string()));
-        }
-        let model = self.model.clone();
-        let prompt = prompt.as_bytes().to_vec();
-        let max_new_tokens = self.max_new_tokens;
-        let generation = tokio::task::spawn_blocking(move || {
-            let mut state = CallbackState {
-                sender: token_sender,
-                cancel,
-                pending: Vec::new(),
-                assistant_text: String::new(),
-                callback_error: None,
-            };
-            let mut generated_tokens = 0u32;
-            let status = unsafe {
-                mukei_llama_generate(
-                    model.0.as_ptr(),
-                    prompt.as_ptr(),
-                    prompt.len(),
-                    max_new_tokens,
-                    Some(token_callback),
-                    Some(cancel_callback),
-                    (&mut state as *mut CallbackState).cast::<c_void>(),
-                    &mut generated_tokens,
-                )
-            };
-            state.drain_complete_utf8();
-            if state.callback_error.is_none() && !state.pending.is_empty() {
-                state.callback_error = Some(
-                    "native inference ended with an incomplete UTF-8 token sequence".to_string(),
-                );
-            }
-            (
-                status,
-                generated_tokens,
-                state.assistant_text,
-                state.callback_error,
-            )
-        })
-        .await
-        .map_err(|error| MukeiError::BlockingJoinFailed(error.to_string()))?;
+        self.run_with_limit(prompt, cancel, token_sender, u64::from(self.max_new_tokens))
+            .await
+    }
 
-        let (status, generated_tokens, assistant_text, callback_error) = generation;
-        if let Some(error) = callback_error {
-            return Err(MukeiError::Internal(error));
-        }
-        match status {
-            STATUS_OK => Ok(InferenceOutcome {
-                assistant_text,
-                used_tokens: u64::from(generated_tokens),
-                stop_reason: StopReason::Completed,
-            }),
-            STATUS_CANCELLED => Ok(InferenceOutcome {
-                assistant_text,
-                used_tokens: u64::from(generated_tokens),
-                stop_reason: StopReason::UserStopped,
-            }),
-            other => Err(MukeiError::ModelLoadFailed(status_message(other))),
-        }
+    async fn run_bounded(
+        &self,
+        prompt: &str,
+        cancel: CancellationToken,
+        token_sender: mpsc::Sender<String>,
+        max_tokens: u64,
+    ) -> Result<InferenceOutcome> {
+        self.run_with_limit(prompt, cancel, token_sender, max_tokens)
+            .await
     }
 }
 

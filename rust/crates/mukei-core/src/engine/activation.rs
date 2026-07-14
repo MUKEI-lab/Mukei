@@ -872,6 +872,27 @@ impl InferenceBackend for ModelActivationService {
         // switch can publish a new backend without changing this in-flight turn.
         backend.run(prompt, cancel, token_sender).await
     }
+
+    async fn run_bounded(
+        &self,
+        prompt: &str,
+        cancel: CancellationToken,
+        token_sender: mpsc::Sender<String>,
+        max_tokens: u64,
+    ) -> Result<InferenceOutcome> {
+        let backend = self
+            .inner
+            .read()
+            .active
+            .as_ref()
+            .map(|active| active.backend.clone())
+            .ok_or_else(|| {
+                MukeiError::ModelLoadFailed("active inference backend is not ready".to_string())
+            })?;
+        backend
+            .run_bounded(prompt, cancel, token_sender, max_tokens)
+            .await
+    }
 }
 
 fn classify_activation_error(error: &MukeiError) -> ActivationFailureCategory {
@@ -926,6 +947,18 @@ mod tests {
             token_sender: mpsc::Sender<String>,
         ) -> Result<InferenceOutcome> {
             self.inner.run(prompt, cancel, token_sender).await
+        }
+
+        async fn run_bounded(
+            &self,
+            prompt: &str,
+            cancel: CancellationToken,
+            token_sender: mpsc::Sender<String>,
+            max_tokens: u64,
+        ) -> Result<InferenceOutcome> {
+            self.inner
+                .run_bounded(prompt, cancel, token_sender, max_tokens)
+                .await
         }
     }
 
