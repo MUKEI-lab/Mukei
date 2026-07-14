@@ -28,14 +28,17 @@ network            = ["mukei-core/network"]
 llama_cpp          = []
 candle             = ["mukei-core/candle"]
 usearch_hnsw       = ["mukei-core/usearch_hnsw"]
+# Canonical native RAG capability composition. Environment mode remains a
+# separate axis; lab/test consumers may still select the capabilities directly.
+rag_native          = ["candle", "usearch_hnsw"]
 # Runtime deployment mode is explicit and separate from Cargo compiler profiles.
 runtime_development = []
 runtime_test        = []
 runtime_production  = ["llama_cpp"]
-# Canonical production composition for the native local-inference shipping path.
+# Canonical production composition for the complete native local-AI shipping path.
 # Keep mode and capabilities independently selectable; shipping consumers should
 # prefer this bundle over hand-writing the equivalent feature tuple.
-shipping_native     = ["runtime_production", "sqlcipher", "network"]
+shipping_native     = ["runtime_production", "sqlcipher", "network", "rag_native"]
 # Runtime hardening policy feature; distinct from Cargo compiler profile `release-hardening`.
 runtime_hardening   = ["mukei-core/runtime_hardening"]
 # Export is a policy capability and may be omitted from production builds.
