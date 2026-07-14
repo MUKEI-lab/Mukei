@@ -27,10 +27,7 @@ pub(crate) fn runtime_environment_mode() -> RuntimeEnvironmentMode {
     {
         RuntimeEnvironmentMode::Test
     }
-    #[cfg(all(
-        not(feature = "runtime_production"),
-        not(feature = "runtime_test")
-    ))]
+    #[cfg(all(not(feature = "runtime_production"), not(feature = "runtime_test")))]
     {
         RuntimeEnvironmentMode::Development
     }
