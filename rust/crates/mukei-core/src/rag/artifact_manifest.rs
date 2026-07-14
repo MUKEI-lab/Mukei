@@ -104,7 +104,10 @@ pub static ALL_MINILM_L6_V2_MANIFEST: EmbeddingArtifactManifest = EmbeddingArtif
 impl EmbeddingArtifactManifest {
     /// Verify filenames, regular-file identity, direct-child containment, exact
     /// size, and complete SHA-256 digests before returning a proof object.
-    pub fn verify_model_dir(&self, model_dir: impl AsRef<Path>) -> Result<VerifiedEmbeddingArtifacts> {
+    pub fn verify_model_dir(
+        &self,
+        model_dir: impl AsRef<Path>,
+    ) -> Result<VerifiedEmbeddingArtifacts> {
         self.validate_contract()?;
         let model_dir = model_dir.as_ref();
         let root_metadata = fs::symlink_metadata(model_dir).map_err(|_| {
