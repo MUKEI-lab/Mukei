@@ -36,6 +36,7 @@ Remote proof is now intended to stay split by surface:
 - `ci.yml` remains the narrow fast gate for `mukei-core` (`std,tokio`) plus static QML guards.
 - `full-rust-workspace.yml` covers non-Qt workspace check/test/clippy, explicit `mukei-core` feature checks, and `mukei-ffi-shim`.
 - `bridge-qt-validation.yml` is the release gate for `mukei-bridge` compilation and Qt/QML configure-build-test proof.
+- `native-inference-validation.yml` verifies the canonical `shipping_native` production composition from the pinned native capsule through final QML CTest.
 
 The bridge itself requires the CXX-Qt/Qt toolchain:
 
@@ -74,8 +75,16 @@ Relevant feature families include:
 - inference/RAG: `llama_cpp`, `candle`, `usearch_hnsw`;
 - platform: `android_keystore`, `desktop`;
 - environment: `runtime_development`, `runtime_test`, `runtime_production`;
+- shipping composition: `shipping_native`;
 - hardening policy: `runtime_hardening`;
 - diagnostics capability: `diagnostics_export`.
+
+`shipping_native` is the canonical local-inference production composition. It
+selects `runtime_production`, `sqlcipher`, and `network`; `runtime_production`
+continues to select the pinned `llama_cpp` backend. The underlying mode and
+capability features remain independently selectable for explicit lab/test
+variants, while shipping CI and release commands use the bundle to avoid tuple
+drift.
 
 A compiled capability is not automatically a policy grant. Remote use is also
 subject to the core `RemoteFeaturePolicy`.
