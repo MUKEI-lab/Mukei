@@ -21,13 +21,19 @@ pub(crate) struct RuntimeProvenanceSnapshot {
 pub(crate) fn runtime_environment_mode() -> RuntimeEnvironmentMode {
     #[cfg(feature = "runtime_production")]
     {
-        return RuntimeEnvironmentMode::Production;
+        RuntimeEnvironmentMode::Production
     }
     #[cfg(all(not(feature = "runtime_production"), feature = "runtime_test"))]
     {
-        return RuntimeEnvironmentMode::Test;
+        RuntimeEnvironmentMode::Test
     }
-    RuntimeEnvironmentMode::Development
+    #[cfg(all(
+        not(feature = "runtime_production"),
+        not(feature = "runtime_test")
+    ))]
+    {
+        RuntimeEnvironmentMode::Development
+    }
 }
 
 pub(crate) fn hardening_mode() -> HardeningMode {
