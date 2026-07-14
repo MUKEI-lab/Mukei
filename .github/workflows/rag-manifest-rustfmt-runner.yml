@@ -1,0 +1,90 @@
+name: rag-manifest-rustfmt-runner
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rag-manifest-rustfmt-${{ github.event.pull_request.head.ref }}
+  cancel-in-progress: true
+
+env:
+  EXPECTED_BASE: b111ed6eb0fcaf60b4953eb45931ba238b27d505
+  BRANCH_NAME: checkpoint/stabilization-2026-07-12
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  format-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - name: Gate exact formatter-only staging commit
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent="$(git rev-parse HEAD^)"
+          changed="$(git diff --name-only HEAD^ HEAD)"
+          if [[ "$parent" == "$EXPECTED_BASE" && "$changed" == ".github/workflows/rag-manifest-rustfmt-runner.yml" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install stable toolchain
+        if: steps.gate.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Apply canonical formatting and verify scope
+        if: steps.gate.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd rust
+          cargo fmt --all
+          cargo fmt --all --check
+          cd ..
+          git diff --check
+          mapfile -t changed < <(git diff --name-only | sort)
+          for path in "${changed[@]}"; do
+            case "$path" in
+              rust/crates/mukei-core/src/rag/artifact_manifest.rs|rust/crates/mukei-core/src/rag/mod.rs) ;;
+              *) echo "Unexpected formatter diff: $path" >&2; exit 1 ;;
+            esac
+          done
+          [[ ${#changed[@]} -ge 1 ]]
+
+      - name: Re-run focused manifest tests
+        if: steps.gate.outputs.run == 'true'
+        working-directory: rust
+        run: cargo test -p mukei-core artifact_manifest
+
+      - name: Commit formatter-only source repair
+        if: steps.gate.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust/crates/mukei-core/src/rag/artifact_manifest.rs rust/crates/mukei-core/src/rag/mod.rs
+          mapfile -t staged < <(git diff --cached --name-only | sort)
+          for path in "${staged[@]}"; do
+            case "$path" in
+              rust/crates/mukei-core/src/rag/artifact_manifest.rs|rust/crates/mukei-core/src/rag/mod.rs) ;;
+              *) echo "Unexpected staged file: $path" >&2; exit 1 ;;
+            esac
+          done
+          [[ ${#staged[@]} -ge 1 ]]
+          git commit -m "style: format pinned RAG artifact manifest"
+          remote_head="$(git ls-remote origin "refs/heads/$BRANCH_NAME" | cut -f1)"
+          [[ "$remote_head" == "$GITHUB_SHA" ]]
+          git push origin "HEAD:refs/heads/$BRANCH_NAME"
