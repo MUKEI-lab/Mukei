@@ -60,12 +60,12 @@ jobs:
       - name: Verify activation state-machine lifecycle
         working-directory: rust
         run: cargo test -p mukei-core --test activation_verification_lifecycle
-      - name: Verify native adapter identity and UTF-8 streaming
+      - name: Verify native adapter in shipping feature tuple
         working-directory: rust
         shell: bash
         run: |
           set -o pipefail
-          cargo test -p mukei-bridge --no-default-features --features runtime_production native_inference::tests 2>&1 | tee /tmp/mukei-native-adapter.log
+          cargo test -p mukei-bridge --no-default-features --features "sqlcipher,network,runtime_production" native_inference::tests 2>&1 | tee /tmp/mukei-native-adapter.log
       - name: Upload native adapter failure evidence
         if: failure()
         uses: actions/upload-artifact@v4
