@@ -71,3 +71,4 @@ cmake-build-*/
 
 # OS/tooling
 Thumbs.db
+rust/llama-cpp-prebuilt/prebuilt/

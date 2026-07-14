@@ -22,6 +22,16 @@ else()
     set(_MUKEI_REAL_BRIDGE_DEFAULT OFF)
 endif()
 option(MUKEI_USE_REAL_BRIDGE "Instantiate CXX-Qt bridge objects instead of local QML stubs" ${_MUKEI_REAL_BRIDGE_DEFAULT})
+option(MUKEI_USE_NATIVE_INFERENCE "Link and package the real Mukei llama native capsule" ${_MUKEI_REAL_BRIDGE_DEFAULT})
+
+if(ANDROID)
+    set(_MUKEI_LLAMA_ABI "${ANDROID_ABI}")
+else()
+    set(_MUKEI_LLAMA_ABI "host")
+endif()
+set(MUKEI_LLAMA_NATIVE_LIB
+    "${CMAKE_CURRENT_SOURCE_DIR}/../rust/llama-cpp-prebuilt/prebuilt/${_MUKEI_LLAMA_ABI}/${CMAKE_SHARED_LIBRARY_PREFIX}mukei_llama_native${CMAKE_SHARED_LIBRARY_SUFFIX}"
+    CACHE FILEPATH "Path to the Mukei llama native inference capsule")
 
 # QtQuick.Effects is a QML module consumed by QML imports, not a public CMake
 # link component. Keep the Qt 6.5 floor for MultiEffect while requiring only
@@ -227,6 +237,20 @@ elseif(MUKEI_USE_REAL_BRIDGE)
     message(FATAL_ERROR "MUKEI_USE_REAL_BRIDGE=ON but MUKEI_BRIDGE_LIB does not exist: ${MUKEI_BRIDGE_LIB}")
 endif()
 
+if(MUKEI_USE_NATIVE_INFERENCE)
+    if(NOT EXISTS "${MUKEI_LLAMA_NATIVE_LIB}")
+        message(FATAL_ERROR
+            "MUKEI_USE_NATIVE_INFERENCE=ON but the native capsule does not exist: ${MUKEI_LLAMA_NATIVE_LIB}")
+    endif()
+    add_library(mukei_llama_native_runtime SHARED IMPORTED GLOBAL)
+    set_target_properties(mukei_llama_native_runtime PROPERTIES
+        IMPORTED_LOCATION "${MUKEI_LLAMA_NATIVE_LIB}")
+    target_link_libraries(mukei PRIVATE mukei_llama_native_runtime)
+    if(ANDROID)
+        set_property(TARGET mukei APPEND PROPERTY QT_ANDROID_EXTRA_LIBS "${MUKEI_LLAMA_NATIVE_LIB}")
+    endif()
+endif()
+
 if(MUKEI_USE_REAL_BRIDGE)
     set(_MUKEI_CXX_QT_HEADER
         "${MUKEI_CXX_QT_INCLUDE_DIR}/mukei-bridge/src/lib.cxxqt.h"
@@ -319,6 +343,22 @@ target_link_libraries(tst_QmlArchitecture PRIVATE
     Qt6::QuickTest
 )
 
+qt_add_executable(tst_ModelStoreActivation
+    tests/tst_ModelStoreActivation.cpp
+)
+
+target_compile_definitions(tst_ModelStoreActivation PRIVATE
+    MODEL_STORE_ACTIVATION_QML_SOURCE_DIR="${_MUKEI_QML_TEST_SOURCE_ROOT}/tests"
+)
+
+target_link_libraries(tst_ModelStoreActivation PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Quick
+    Qt6::Qml
+    Qt6::QuickTest
+)
+
 qt_add_executable(tst_TimelineModel
     tests/tst_TimelineModel.cpp
     timeline_model.cpp
@@ -332,6 +372,9 @@ target_link_libraries(tst_TimelineModel PRIVATE
 
 add_test(NAME tst_QmlArchitecture COMMAND tst_QmlArchitecture -platform offscreen)
 set_tests_properties(tst_QmlArchitecture PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_test(NAME tst_ModelStoreActivation COMMAND tst_ModelStoreActivation -platform offscreen -input ${_MUKEI_QML_TEST_SOURCE_ROOT}/tests/tst_ModelStoreActivation.qml)
+set_tests_properties(tst_ModelStoreActivation PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_test(NAME tst_TimelineModel COMMAND tst_TimelineModel)
 

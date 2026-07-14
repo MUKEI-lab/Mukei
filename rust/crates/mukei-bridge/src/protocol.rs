@@ -764,8 +764,28 @@ fn preflight(
                 if mukei_core::engine::lookup_model_str(&value.model_id).is_none() {
                     return Some(RejectionReason::InvalidPayload);
                 }
-                if command.command_type == CommandType::ModelDelete
-                    && agent
+                let activation = runtime_state().model_activation_service();
+                if command.command_type == CommandType::ModelSelect
+                    && !activation
+                        .readiness_snapshot()
+                        .real_backend_implementation_available
+                {
+                    return Some(RejectionReason::BackendUnavailable);
+                }
+                if command.command_type == CommandType::ModelDelete {
+                    if activation
+                        .active_model_snapshot()
+                        .as_ref()
+                        .is_some_and(|active| active.model_id == value.model_id)
+                        || (activation.readiness_snapshot().activation_in_progress
+                            && activation
+                                .selected_model_snapshot()
+                                .as_ref()
+                                .is_some_and(|(selected, _)| selected == &value.model_id))
+                    {
+                        return Some(RejectionReason::BusyConflict);
+                    }
+                    if agent
                         .as_ref()
                         .rust()
                         .active_downloads
@@ -774,8 +794,9 @@ fn preflight(
                         .any(|download| {
                             download.model_id.as_deref() == Some(value.model_id.as_str())
                         })
-                {
-                    return Some(RejectionReason::BusyConflict);
+                    {
+                        return Some(RejectionReason::BusyConflict);
+                    }
                 }
             }
         }
@@ -845,10 +866,7 @@ fn dispatch_validated_command(
             );
         }
         (CommandType::ModelSelect, ValidatedCommandPayload::Model(value)) => {
-            let result = agent
-                .as_mut()
-                .select_installed_model_json(QString::from(&value.model_id));
-            emit_json_result_operation(agent.as_mut(), &context, result.to_string());
+            start_protocol_model_activation(agent.as_mut(), value.model_id, context);
         }
         (CommandType::ModelDelete, ValidatedCommandPayload::Model(value)) => {
             let result = agent
@@ -899,6 +917,75 @@ fn dispatch_validated_command(
             );
         }
     }
+}
+
+fn start_protocol_model_activation(
+    agent: Pin<&mut ffi::MukeiAgent>,
+    model_id: String,
+    context: CommandContext,
+) {
+    let qt = agent.as_ref().get_ref().qt_thread();
+    let generation = match crate::begin_model_activation(&model_id) {
+        Ok(generation) => generation,
+        Err(error) => {
+            let event = async_operation_event_json(
+                &context,
+                false,
+                None,
+                Some(crate::async_error_value(&error, "model.select")),
+            );
+            let _ = qt.queue(move |mut qobject| {
+                qobject.as_mut().event_emitted(event);
+            });
+            return;
+        }
+    };
+    let running = QString::from(
+        runtime_state()
+            .protocol_state()
+            .lock()
+            .operation_event_json(
+                &context,
+                "running",
+                Some(json!({"model_id": model_id.clone()})),
+                None,
+            )
+            .as_str(),
+    );
+    let _ = qt.queue(move |mut qobject| {
+        qobject.as_mut().event_emitted(running);
+    });
+
+    let qt = agent.as_ref().get_ref().qt_thread();
+    mukei_core::runtime::get().spawn(async move {
+        let (state, result, error) = match crate::complete_model_activation(model_id, generation)
+            .await
+        {
+            crate::ModelActivationTaskResult::Ready(payload) => ("completed", Some(payload), None),
+            crate::ModelActivationTaskResult::Superseded => {
+                ("cancelled", Some(json!({"reason": "superseded"})), None)
+            }
+            crate::ModelActivationTaskResult::Failed(error) => (
+                "failed",
+                None,
+                Some(crate::async_error_value(&error, "model.select")),
+            ),
+        };
+        let terminal = QString::from(
+            runtime_state()
+                .protocol_state()
+                .lock()
+                .operation_event_json(&context, state, result, error)
+                .as_str(),
+        );
+        let capability = crate::event_json(BridgeEvent::new(BridgeEventKind::CapabilitySnapshot {
+            capabilities: crate::current_ready_capabilities(),
+        }));
+        let _ = qt.queue(move |mut qobject| {
+            qobject.as_mut().event_emitted(terminal);
+            qobject.as_mut().event_emitted(capability);
+        });
+    });
 }
 
 fn emit_json_result_operation(

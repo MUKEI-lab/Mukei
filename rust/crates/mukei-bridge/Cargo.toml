@@ -25,13 +25,13 @@ desktop            = []
 rusqlite           = ["mukei-core/rusqlite"]
 sqlcipher          = ["rusqlite", "mukei-core/sqlcipher"]
 network            = ["mukei-core/network"]
-llama_cpp          = ["mukei-core/llama_cpp"]
+llama_cpp          = []
 candle             = ["mukei-core/candle"]
 usearch_hnsw       = ["mukei-core/usearch_hnsw"]
 # Runtime deployment mode is explicit and separate from Cargo compiler profiles.
 runtime_development = []
 runtime_test        = []
-runtime_production  = []
+runtime_production  = ["llama_cpp"]
 # Runtime hardening policy feature; distinct from Cargo compiler profile `release-hardening`.
 runtime_hardening   = ["mukei-core/runtime_hardening"]
 # Export is a policy capability and may be omitted from production builds.

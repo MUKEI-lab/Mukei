@@ -107,7 +107,9 @@ impl ApplicationRuntime {
             },
             agent: AgentServices {
                 agent_loop: ParkingMutex::new(None),
-                activation_service: ModelActivationService::new(false),
+                activation_service: ModelActivationService::new(
+                    crate::production_inference_implementation_available(),
+                ),
                 chat_session: ParkingMutex::new(None),
                 config: ParkingMutex::new(None),
                 tool_registry: ParkingMutex::new(Arc::new(

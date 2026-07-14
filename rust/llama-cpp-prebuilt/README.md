@@ -1,64 +1,60 @@
-# llama.cpp prebuilt artifacts
+# Mukei llama.cpp native capsule
 
-This directory hosts the **one-shot per-ABI** prebuilt `libllama.a` archive that
-`mukei-bridge` links against (TRD §8.2). Building llama.cpp on every PR is
-slow and brittle, so the workflow is:
+Mukei ships llama.cpp through one Mukei-owned shared ABI capsule rather than
+linking a lone `libllama.a` into downstream consumers. The capsule absorbs the
+pinned llama/GGML static dependency closure and exports only the stable C
+surface in `shim/mukei_llama_native.h`.
 
-1. Keep a self-contained llama.cpp snapshot under `vendor/llama.cpp/`.
-2. Run the one-shot CMake build per Android ABI (or per desktop target).
-3. Place the resulting archive at `prebuilt/<abi>/libllama.a`.
-4. Rust consumers (under `feature = "llama_cpp"`) link the static archive
-   directly. No per-PR recompilation.
+## Provenance contract
 
-## Vendored llama.cpp
+- Vendored llama.cpp commit: `7c082bc417bbe53210a83df4ba5b49e18ce6193c`
+- Mukei native ABI version: `1`
+- Runtime activation rejects a capsule whose ABI version or build ID differs.
+- GGUF artifacts are full-file SHA-256 verified in Rust before the native loader
+  is allowed to open/mmap them.
 
-The vendor tree is a checked-in source snapshot of
-[`https://github.com/ggerganov/llama.cpp`](https://github.com/ggerganov/llama.cpp),
-not a Git submodule. ZIP downloads and offline CI builds therefore contain the
-llama.cpp sources needed for the library fallback build.
-
-See [`VENDORED_SNAPSHOT.md`](VENDORED_SNAPSHOT.md) for the pinned upstream
-commit, the omitted upstream paths, and the update procedure. Do not reintroduce
-`.gitmodules` or a gitlink at `vendor/llama.cpp` when updating the snapshot.
-
-## Build (Android)
+## Build for Android
 
 ```bash
-# From the workspace root, for each target ABI:
 for ABI in arm64-v8a armeabi-v7a x86_64; do
   cmake -S rust/llama-cpp-prebuilt \
         -B build/llama-$ABI \
-        -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
-        -DANDROID_ABI=$ABI \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+        -DANDROID_ABI="$ABI" \
         -DANDROID_PLATFORM=android-29 \
-        -DMUKEI_LLAMA_BUILD_SHARED=OFF
-  cmake --build build/llama-$ABI --target llama
-done
+        -DMUKEI_LLAMA_FORCE_REBUILD=ON
+  cmake --build build/llama-$ABI --target mukei_llama_native_smoke
+  ctest --test-dir build/llama-$ABI --output-on-failure
+ done
 ```
 
-## Build (desktop host, for tests)
+The resulting capsule is written to:
+
+`rust/llama-cpp-prebuilt/prebuilt/<abi>/libmukei_llama_native.so`
+
+## Build for host validation
 
 ```bash
-cmake -S rust/llama-cpp-prebuilt -B build/llama-host
-cmake --build build/llama-host --target llama
+cmake -S rust/llama-cpp-prebuilt -B build/llama-host \
+      -G Ninja -DCMAKE_BUILD_TYPE=Release -DMUKEI_LLAMA_FORCE_REBUILD=ON
+cmake --build build/llama-host --target mukei_llama_native_smoke
+ctest --test-dir build/llama-host --output-on-failure
 ```
 
-## Layout
+## Rust production build
 
-```
-llama-cpp-prebuilt/
-├── CMakeLists.txt        ← orchestrates the one-shot build
-├── README.md             ← this file
-├── VENDORED_SNAPSHOT.md  ← pinned snapshot and update notes
-├── prebuilt/             ← .gitignored; holds the produced archives
-│   ├── arm64-v8a/libllama.a
-│   ├── armeabi-v7a/libllama.a
-│   ├── x86_64/libllama.a
-│   └── host/libllama.a
-└── vendor/
-    └── llama.cpp/        ← checked-in upstream source snapshot
+The `mukei-bridge/runtime_production` feature enables the real native inference
+adapter and therefore requires the capsule to exist. Point Cargo at the ABI
+output directory when it is not in the default `prebuilt/<abi>` location:
+
+```bash
+export MUKEI_LLAMA_NATIVE_LIB_DIR="$PWD/rust/llama-cpp-prebuilt/prebuilt/host"
+cargo build -p mukei-bridge --no-default-features \
+  --features "sqlcipher,network,runtime_production"
 ```
 
-The `prebuilt/` directory is intentionally **not** checked into git — the
-archives are large (~30 MB per ABI) and a clean rebuild is reproducible from
-the vendored snapshot. CI is expected to cache them out-of-band.
+The bridge build fails closed if the required capsule is missing. Android
+packaging additionally links and packages the same capsule through
+`QT_ANDROID_EXTRA_LIBS`; source/host CI does not replace a real Android ABI
+build and physical-device inference validation.

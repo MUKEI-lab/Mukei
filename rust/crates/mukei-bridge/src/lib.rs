@@ -25,6 +25,8 @@ mod bridge_state;
 mod database_bridge;
 mod document_bridge;
 mod download_bridge;
+#[cfg(feature = "llama_cpp")]
+mod native_inference;
 mod protocol;
 mod provenance;
 mod recovery_bridge;
@@ -145,6 +147,200 @@ fn async_error_value(
     })
 }
 
+#[derive(Debug)]
+pub(crate) enum ModelActivationTaskResult {
+    Ready(serde_json::Value),
+    Superseded,
+    Failed(mukei_core::error::MukeiError),
+}
+
+pub(crate) fn begin_model_activation(model_id: &str) -> Result<u64, mukei_core::error::MukeiError> {
+    let descriptor = mukei_core::engine::lookup_model_str(model_id).ok_or_else(|| {
+        mukei_core::error::MukeiError::ConfigInvalid {
+            field: "model_id".to_string(),
+            reason: "unknown model identifier".to_string(),
+        }
+    })?;
+    if !production_inference_implementation_available() {
+        return Err(mukei_core::error::MukeiError::ModelLoadFailed(
+            "production inference backend is unavailable in this runtime".to_string(),
+        ));
+    }
+    runtime_state()
+        .model_activation_service()
+        .set_real_backend_implementation_available(true);
+    Ok(runtime_state()
+        .model_activation_service()
+        .begin_verification(descriptor.id.as_str(), descriptor.expected_sha256))
+}
+
+fn verify_candidate_model_path(
+    model_root: std::path::PathBuf,
+    filename: &'static str,
+    expected_sha256: &'static str,
+) -> Result<std::path::PathBuf, mukei_core::error::MukeiError> {
+    let requested_path = model_root.join(filename);
+    let metadata = std::fs::symlink_metadata(&requested_path)
+        .map_err(|error| mukei_core::error::MukeiError::Io(error.to_string()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() == 0 {
+        return Err(mukei_core::error::MukeiError::ModelLoadFailed(
+            "selected model is not a regular installed file".to_string(),
+        ));
+    }
+    let canonical_root = std::fs::canonicalize(&model_root)
+        .map_err(|error| mukei_core::error::MukeiError::Io(error.to_string()))?;
+    let canonical_path = std::fs::canonicalize(&requested_path)
+        .map_err(|error| mukei_core::error::MukeiError::Io(error.to_string()))?;
+    if !canonical_path.starts_with(&canonical_root)
+        || canonical_path.parent() != Some(canonical_root.as_path())
+    {
+        return Err(mukei_core::error::MukeiError::ConfigInvalid {
+            field: "models_dir".to_string(),
+            reason: "model path escaped the app-private model directory".to_string(),
+        });
+    }
+    mukei_core::engine::LlamaEngine::verify_full_sha256_stream(&canonical_path, expected_sha256)?;
+    Ok(canonical_path)
+}
+
+pub(crate) async fn complete_model_activation(
+    model_id: String,
+    verification_generation: u64,
+) -> ModelActivationTaskResult {
+    let Some(catalogue) = mukei_core::engine::lookup_model_str(&model_id) else {
+        return ModelActivationTaskResult::Failed(mukei_core::error::MukeiError::ConfigInvalid {
+            field: "model_id".to_string(),
+            reason: "unknown model identifier".to_string(),
+        });
+    };
+    let activation = runtime_state().model_activation_service();
+    let expected_sha256 = catalogue.expected_sha256;
+    #[cfg(feature = "llama_cpp")]
+    let config = match runtime_state().config() {
+        Some(config) => config,
+        None => {
+            let error = mukei_core::error::MukeiError::ConfigInvalid {
+                field: "runtime".to_string(),
+                reason: "runtime configuration is unavailable during model activation".to_string(),
+            };
+            if !activation.mark_verification_failed(
+                verification_generation,
+                catalogue.id.as_str(),
+                expected_sha256,
+                expected_sha256,
+                mukei_core::engine::ActivationFailureCategory::ModelLoad,
+            ) {
+                return ModelActivationTaskResult::Superseded;
+            }
+            return ModelActivationTaskResult::Failed(error);
+        }
+    };
+    let model_root = runtime_state().model_dir();
+    let filename = catalogue.filename;
+    let verified_path = tokio::task::spawn_blocking(move || {
+        verify_candidate_model_path(model_root, filename, expected_sha256)
+    })
+    .await
+    .map_err(|error| mukei_core::error::MukeiError::BlockingJoinFailed(error.to_string()))
+    .and_then(|result| result);
+
+    let verified_path = match verified_path {
+        Ok(path) => path,
+        Err(error) => {
+            let category = if matches!(&error, mukei_core::error::MukeiError::ModelCorrupted) {
+                mukei_core::engine::ActivationFailureCategory::VerificationMismatch
+            } else {
+                mukei_core::engine::ActivationFailureCategory::ModelLoad
+            };
+            if !activation.mark_verification_failed(
+                verification_generation,
+                catalogue.id.as_str(),
+                expected_sha256,
+                expected_sha256,
+                category,
+            ) {
+                return ModelActivationTaskResult::Superseded;
+            }
+            return ModelActivationTaskResult::Failed(error);
+        }
+    };
+
+    let artifact =
+        match mukei_core::engine::VerifiedModelArtifact::new(expected_sha256, verified_path) {
+            Ok(artifact) => artifact,
+            Err(error) => {
+                if !activation.mark_verification_failed(
+                    verification_generation,
+                    catalogue.id.as_str(),
+                    expected_sha256,
+                    expected_sha256,
+                    mukei_core::engine::ActivationFailureCategory::Internal,
+                ) {
+                    return ModelActivationTaskResult::Superseded;
+                }
+                return ModelActivationTaskResult::Failed(error);
+            }
+        };
+    let descriptor = match mukei_core::engine::VerifiedModelDescriptor::new(
+        catalogue.id.as_str(),
+        expected_sha256,
+        artifact,
+    ) {
+        Ok(descriptor) => descriptor,
+        Err(error) => {
+            if !activation.mark_verification_failed(
+                verification_generation,
+                catalogue.id.as_str(),
+                expected_sha256,
+                expected_sha256,
+                mukei_core::engine::ActivationFailureCategory::Internal,
+            ) {
+                return ModelActivationTaskResult::Superseded;
+            }
+            return ModelActivationTaskResult::Failed(error);
+        }
+    };
+    if !activation.mark_verified(verification_generation, descriptor) {
+        return ModelActivationTaskResult::Superseded;
+    }
+
+    #[cfg(feature = "llama_cpp")]
+    {
+        let factory = native_inference::NativeLlamaBackendFactory::from_config(&config);
+        match activation.activate_verified(&factory).await {
+            mukei_core::engine::ActivationCommit::Ready => {
+                let readiness = activation.readiness_snapshot();
+                let active = activation.active_model_snapshot();
+                let identity = activation.identity();
+                ModelActivationTaskResult::Ready(serde_json::json!({
+                    "model_id": catalogue.id.as_str(),
+                    "active_model_id": active.as_ref().map(|value| value.model_id.clone()),
+                    "artifact_id": active.as_ref().map(|value| value.artifact_id.clone()),
+                    "inference_backend": identity.implementation,
+                    "backend_kind": identity.kind.as_tag(),
+                    "active_model_ready": readiness.active_backend_ready,
+                    "product_ready": readiness.product_ready,
+                }))
+            }
+            mukei_core::engine::ActivationCommit::StaleIgnored => {
+                ModelActivationTaskResult::Superseded
+            }
+            mukei_core::engine::ActivationCommit::Failed(category) => {
+                ModelActivationTaskResult::Failed(mukei_core::error::MukeiError::ModelLoadFailed(
+                    format!("model activation failed: {}", category.as_tag()),
+                ))
+            }
+        }
+    }
+    #[cfg(not(feature = "llama_cpp"))]
+    {
+        let _ = activation;
+        ModelActivationTaskResult::Failed(mukei_core::error::MukeiError::ModelLoadFailed(
+            "production inference backend is not compiled into this runtime".to_string(),
+        ))
+    }
+}
+
 fn lifecycle_state_for_secure_bootstrap(state: SecureBootstrapState) -> AppLifecycleState {
     match state {
         SecureBootstrapState::Uninitialized => AppLifecycleState::NeedsDatabaseKey,
@@ -179,6 +375,17 @@ fn database_open_failure_category(error: &mukei_core::error::MukeiError) -> &'st
         | MukeiError::SchemaTooNew { .. } => "schema_or_migration",
         MukeiError::DatabaseInitFailed(_) => "database_open",
         _ => "database_open_other",
+    }
+}
+
+fn production_inference_implementation_available() -> bool {
+    #[cfg(feature = "llama_cpp")]
+    {
+        return native_inference::implementation_available();
+    }
+    #[cfg(not(feature = "llama_cpp"))]
+    {
+        false
     }
 }
 
@@ -3716,49 +3923,46 @@ impl ffi::MukeiAgent {
 
     pub fn select_installed_model_json(self: Pin<&mut Self>, model_id: QString) -> QString {
         let model_id = model_id.to_string();
-        let Some(descriptor) = mukei_core::engine::lookup_model_str(&model_id) else {
-            let error = mukei_core::error::MukeiError::ConfigInvalid {
-                field: "model_id".into(),
-                reason: "unknown model identifier".into(),
+        let generation =
+            match begin_model_activation(&model_id) {
+                Ok(generation) => generation,
+                Err(error) => return QString::from(
+                    serde_json::json!({
+                        "ok": false,
+                        "error": UiError::from_mukei_error(&error, "select_installed_model_json")
+                    })
+                    .to_string()
+                    .as_str(),
+                ),
             };
-            return QString::from(
-                serde_json::json!({
-                    "ok": false,
-                    "error": UiError::from_mukei_error(&error, "select_installed_model_json")
-                })
-                .to_string()
-                .as_str(),
-            );
-        };
-        let model_root = runtime_state().model_dir();
-        let path = model_root.join(descriptor.filename);
-        let installed = std::fs::metadata(&path)
-            .map(|metadata| metadata.is_file() && metadata.len() > 0)
-            .unwrap_or(false);
-        if !installed {
-            let error = mukei_core::error::MukeiError::ModelLoadFailed(
-                "selected model is not installed".into(),
-            );
-            return QString::from(
-                serde_json::json!({
-                    "ok": false,
-                    "error": UiError::from_mukei_error(&error, "select_installed_model_json")
-                })
-                .to_string()
-                .as_str(),
-            );
-        }
-        QString::from(
-            serde_json::json!({
-                "ok": true,
-                "model_id": descriptor.id.as_str(),
-                "state": "selected",
-                "hot_loaded": false,
-                "message": "Model validated and selected for the next engine session."
-            })
-            .to_string()
-            .as_str(),
-        )
+        let qt = self.as_ref().get_ref().qt_thread();
+        let tracker = runtime_state().request_tracker();
+        let ticket = tracker.accept("model.activate");
+        let accepted = tracker.accepted_json(&ticket);
+        mukei_core::runtime::get().spawn(async move {
+            let result = match complete_model_activation(model_id, generation).await {
+                ModelActivationTaskResult::Ready(payload) => Ok(payload),
+                ModelActivationTaskResult::Superseded => Err(serde_json::json!({
+                    "code": "ERR_MODEL_ACTIVATION_SUPERSEDED",
+                    "safe_message": "A newer model selection replaced this activation request.",
+                    "recoverable": true,
+                })),
+                ModelActivationTaskResult::Failed(error) => {
+                    Err(async_error_value(&error, "select_installed_model_json"))
+                }
+            };
+            let completion = runtime_state()
+                .request_tracker()
+                .completion_json(&ticket, result);
+            let capability = event_json(BridgeEvent::new(BridgeEventKind::CapabilitySnapshot {
+                capabilities: current_ready_capabilities(),
+            }));
+            let _ = qt.queue(move |mut qobject| {
+                qobject.as_mut().async_result(QString::from(&completion));
+                qobject.as_mut().event_emitted(capability);
+            });
+        });
+        QString::from(&accepted)
     }
 
     pub fn delete_installed_model_json(self: Pin<&mut Self>, model_id: QString) -> QString {
@@ -3777,6 +3981,27 @@ impl ffi::MukeiAgent {
                 .as_str(),
             );
         };
+        let activation = runtime_state().model_activation_service();
+        if activation
+            .active_model_snapshot()
+            .as_ref()
+            .is_some_and(|active| active.model_id == model_id)
+            || (activation.readiness_snapshot().activation_in_progress
+                && activation
+                    .selected_model_snapshot()
+                    .as_ref()
+                    .is_some_and(|(selected, _)| selected == &model_id))
+        {
+            let error = mukei_core::error::MukeiError::BridgeBusy;
+            return QString::from(
+                serde_json::json!({
+                    "ok": false,
+                    "error": UiError::from_mukei_error(&error, "delete_installed_model_json")
+                })
+                .to_string()
+                .as_str(),
+            );
+        }
         if self.as_ref().rust().busy.load(Ordering::Acquire) {
             let error = mukei_core::error::MukeiError::BridgeBusy;
             return QString::from(
@@ -4312,7 +4537,7 @@ impl ffi::MukeiAgent {
     }
 
     pub fn engine_session_snapshot_json(self: Pin<&mut Self>) -> QString {
-        let selected_model_id = {
+        let persisted_selected_model_id = {
             #[cfg(feature = "rusqlite")]
             {
                 let pool = runtime_state().database_pool();
@@ -4336,19 +4561,29 @@ impl ffi::MukeiAgent {
         };
         let activation = runtime_state().model_activation_service();
         let readiness = activation.readiness_snapshot();
+        let selected_model_id = activation
+            .selected_model_snapshot()
+            .map(|(model_id, _)| model_id)
+            .or(persisted_selected_model_id);
         let active = activation.active_model_snapshot();
         let identity = activation.identity();
         let loaded_model_id = active.as_ref().map(|snapshot| snapshot.model_id.clone());
         let activation_required = selected_model_id.as_ref() != loaded_model_id.as_ref();
-        let safe_message = if readiness.active_backend_ready {
+        let safe_message = if readiness.activation_failed && readiness.active_backend_ready {
+            "The replacement model could not be activated; the previous model remains ready."
+        } else if readiness.activation_in_progress && readiness.active_backend_ready {
+            "A replacement model is being activated while the current model remains ready."
+        } else if readiness.activation_in_progress {
+            "The selected model is being verified and activated."
+        } else if readiness.active_backend_ready {
             "The active model is ready for local inference."
         } else if !readiness.real_backend_implementation_available {
-            "A production inference backend factory is not registered in this runtime."
+            "A production inference backend is unavailable in this runtime."
         } else {
             "Select and activate an installed model before starting chat."
         };
         QString::from(serde_json::json!({
-            "schema_version": 2,
+            "schema_version": 3,
             "selected_model_id": selected_model_id,
             "loaded_model_id": loaded_model_id,
             "inference_backend": identity.implementation,
@@ -4356,6 +4591,8 @@ impl ffi::MukeiAgent {
             "backend_unavailable_reason": identity.unavailable_reason.map(|reason| reason.as_tag()),
             "activation_supported": readiness.real_backend_implementation_available,
             "activation_required": activation_required,
+            "activation_in_progress": readiness.activation_in_progress,
+            "activation_failed": readiness.activation_failed,
             "active_model_ready": readiness.active_backend_ready,
             "product_ready": readiness.product_ready,
             "restart_required": false,

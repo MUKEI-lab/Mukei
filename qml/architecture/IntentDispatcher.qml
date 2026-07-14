@@ -275,8 +275,12 @@ QtObject {
                 var selectIndex = ModelStore.findIndex(selectModelId)
                 if (selectIndex < 0 || ModelStore.models.get(selectIndex).installed !== true)
                     return reject("ERR_UI_MODEL_UNAVAILABLE", qsTr("That installed model could not be selected."), intent)
-                if (!submitBackendCommand("model.select", ({ model_id: selectModelId }), ({ model_id: selectModelId })).accepted)
+                var selectSubmission = submitBackendCommand(
+                            "model.select", ({ model_id: selectModelId }), ({ model_id: selectModelId }))
+                if (!selectSubmission.accepted)
                     return false
+                ModelStore.beginActivation(selectModelId, "",
+                                           selectSubmission.acknowledgement.operation_id || "")
                 break
             }
             case "model.delete": {

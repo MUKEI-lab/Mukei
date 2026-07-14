@@ -50,9 +50,13 @@ Page {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: ModelStore.activeModelId.length > 0
-                          ? qsTr("Selected for the next engine session: %1").arg(ModelStore.activeModelId)
-                          : qsTr("Choose an installed model or download a catalogue model.")
+                    text: ModelStore.activationInProgress
+                          ? qsTr("Activating model: %1").arg(ModelStore.activationModelId || ModelStore.selectedModelId)
+                          : ModelStore.activeModelId.length > 0
+                            ? qsTr("Active model: %1").arg(ModelStore.activeModelId)
+                            : ModelStore.selectedModelId.length > 0
+                              ? qsTr("Selected model is not active yet: %1").arg(ModelStore.selectedModelId)
+                              : qsTr("Choose an installed model or download a catalogue model.")
                     color: Theme.p.inkSecondary
                     wrapMode: Text.Wrap
                     Component.onCompleted: Type.apply(this, Type.bodySmall)
@@ -68,7 +72,8 @@ Page {
 
         Rectangle {
             Layout.fillWidth: true
-            visible: ModelStore.restartRequired || ModelStore.sessionMessage.length > 0
+            visible: ModelStore.activationInProgress || ModelStore.activationFailed
+                     || ModelStore.restartRequired || ModelStore.sessionMessage.length > 0
             implicitHeight: sessionText.implicitHeight + Spacing.lg * 2
             radius: Theme.radiusLg
             color: Qt.rgba(Theme.p.accent.r, Theme.p.accent.g, Theme.p.accent.b, 0.10)
@@ -80,7 +85,11 @@ Page {
                 anchors.margins: Spacing.lg
                 text: ModelStore.sessionMessage.length > 0
                       ? ModelStore.sessionMessage
-                      : qsTr("The selected model will be used after a supported engine session starts.")
+                      : ModelStore.activationInProgress
+                        ? qsTr("The selected model is being verified and activated.")
+                        : ModelStore.activationFailed
+                          ? qsTr("The replacement model could not be activated; the previous ready model remains active when available.")
+                          : qsTr("No model backend is active yet.")
                 color: Theme.p.inkPrimary
                 wrapMode: Text.Wrap
                 Component.onCompleted: Type.apply(this, Type.bodyUI)
@@ -143,7 +152,7 @@ Page {
                             }
                         }
                         StatusPill {
-                            text: ModelStore.activeModelId === modelDelegate.modelId ? qsTr("Selected")
+                            text: ModelStore.activeModelId === modelDelegate.modelId ? qsTr("Active")
                                 : modelDelegate.installed ? qsTr("Installed")
                                 : modelDelegate.downloadState === "downloading" ? qsTr("Downloading")
                                 : qsTr("Available")
@@ -168,8 +177,10 @@ Page {
                         SecondaryButton {
                             visible: modelDelegate.installed && ModelStore.activeModelId !== modelDelegate.modelId
                             enabled: CapabilityStore.canSwitchModel && !CapabilityStore.isInferencing
-                            text: qsTr("Select")
-                            Accessible.description: qsTr("Validate and select this installed model for the next engine session")
+                                     && !ModelStore.activationInProgress
+                            text: ModelStore.activationInProgress && ModelStore.activationModelId === modelDelegate.modelId
+                                  ? qsTr("Activating…") : qsTr("Activate")
+                            Accessible.description: qsTr("Verify and activate this installed model")
                             onClicked: IntentDispatcher.dispatch({ type: "model.select", modelId: modelDelegate.modelId })
                         }
                         SecondaryButton {
@@ -187,6 +198,8 @@ Page {
                         DestructiveButton {
                             visible: modelDelegate.installed
                             enabled: CapabilityStore.canDeleteModel && !CapabilityStore.isInferencing
+                                     && !ModelStore.activationInProgress
+                                     && ModelStore.activeModelId !== modelDelegate.modelId
                             text: qsTr("Delete")
                             onCommitted: {
                                 root.pendingDeleteModelId = modelDelegate.modelId

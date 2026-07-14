@@ -1,61 +1,66 @@
 cmake_minimum_required(VERSION 3.22)
-project(mukei_llama_prebuilt C CXX)
+project(mukei_llama_native LANGUAGES C CXX)
 
-# TRD §8.2
-# One-shot prebuild strategy:
-#   1. Build libllama.a once per ABI outside per-PR CI.
-#   2. Place the archive under prebuilt/<abi>/libllama.a.
-#   3. Rust/CMake consumers import the static archive directly.
-
-set(CMAKE_C_STANDARD 11)
+include(CTest)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(ANDROID)
-  set(MUKEI_TARGET_ABI "${ANDROID_ABI}")
+    set(MUKEI_LLAMA_TARGET_ABI "${ANDROID_ABI}")
 else()
-  set(MUKEI_TARGET_ABI "host")
+    set(MUKEI_LLAMA_TARGET_ABI "host")
 endif()
 
-set(MUKEI_PREBUILT_ROOT "${CMAKE_CURRENT_LIST_DIR}/prebuilt")
-set(MUKEI_PREBUILT_LIB  "${MUKEI_PREBUILT_ROOT}/${MUKEI_TARGET_ABI}/libllama.a")
-set(MUKEI_VENDOR_DIR    "${CMAKE_CURRENT_LIST_DIR}/vendor/llama.cpp")
+set(MUKEI_LLAMA_PREBUILT_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/prebuilt/${MUKEI_LLAMA_TARGET_ABI}"
+    CACHE PATH "Output/cache directory for the Mukei llama native capsule")
+set(MUKEI_LLAMA_NATIVE_LIBRARY
+    "${MUKEI_LLAMA_PREBUILT_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}mukei_llama_native${CMAKE_SHARED_LIBRARY_SUFFIX}")
+option(MUKEI_LLAMA_FORCE_REBUILD "Ignore a cached native capsule and rebuild from the pinned source snapshot" OFF)
 
-if(EXISTS "${MUKEI_PREBUILT_LIB}")
-  add_library(mukei_llama STATIC IMPORTED GLOBAL)
-  set_target_properties(mukei_llama PROPERTIES
-    IMPORTED_LOCATION "${MUKEI_PREBUILT_LIB}"
-    INTERFACE_INCLUDE_DIRECTORIES "${MUKEI_VENDOR_DIR}/include"
-  )
-  message(STATUS "Using prebuilt llama archive: ${MUKEI_PREBUILT_LIB}")
-  return()
+if(EXISTS "${MUKEI_LLAMA_NATIVE_LIBRARY}" AND NOT MUKEI_LLAMA_FORCE_REBUILD)
+    add_library(mukei_llama_native SHARED IMPORTED GLOBAL)
+    set_target_properties(mukei_llama_native PROPERTIES
+        IMPORTED_LOCATION "${MUKEI_LLAMA_NATIVE_LIBRARY}")
+else()
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+    set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
+    set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+    set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+    set(GGML_METAL OFF CACHE BOOL "" FORCE)
+    set(GGML_CUDA OFF CACHE BOOL "" FORCE)
+
+    add_subdirectory(vendor/llama.cpp EXCLUDE_FROM_ALL)
+
+    add_library(mukei_llama_native SHARED
+        shim/mukei_llama_native.cpp
+        shim/mukei_llama_native.h)
+    target_compile_definitions(mukei_llama_native PRIVATE MUKEI_LLAMA_NATIVE_BUILD=1)
+    target_include_directories(mukei_llama_native
+        PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/shim"
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/llama.cpp/include")
+    target_link_libraries(mukei_llama_native PRIVATE llama)
+    set_target_properties(mukei_llama_native PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+        LIBRARY_OUTPUT_DIRECTORY "${MUKEI_LLAMA_PREBUILT_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY "${MUKEI_LLAMA_PREBUILT_DIR}")
+    if(UNIX AND NOT APPLE)
+        target_link_options(mukei_llama_native PRIVATE "-Wl,--exclude-libs,ALL")
+    endif()
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(mukei_llama_native PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
 endif()
 
-message(WARNING "Prebuilt libllama.a missing for ABI '${MUKEI_TARGET_ABI}'. Falling back to one-shot vendor build.")
-
-if(NOT EXISTS "${MUKEI_VENDOR_DIR}/CMakeLists.txt")
-  message(FATAL_ERROR "Missing vendor llama.cpp tree at ${MUKEI_VENDOR_DIR}")
+add_executable(mukei_llama_native_smoke shim/smoke.cpp)
+target_include_directories(mukei_llama_native_smoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/shim")
+target_link_libraries(mukei_llama_native_smoke PRIVATE mukei_llama_native)
+if(BUILD_TESTING)
+    add_test(NAME mukei_llama_native_smoke COMMAND mukei_llama_native_smoke)
 endif()
-
-file(MAKE_DIRECTORY "${MUKEI_PREBUILT_ROOT}/${MUKEI_TARGET_ABI}")
-
-# Keep the fallback self-contained and library-only.  The vendored snapshot
-# intentionally omits upstream apps, tools, examples, and tests, and the
-# prebuilt cache expects a static archive at prebuilt/<abi>/libllama.a.
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build llama.cpp as static libraries" FORCE)
-set(LLAMA_BUILD_COMMON OFF CACHE BOOL "Do not build upstream common utilities" FORCE)
-set(LLAMA_BUILD_TESTS OFF CACHE BOOL "Do not build upstream tests" FORCE)
-set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "Do not build upstream tools" FORCE)
-set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "Do not build upstream examples" FORCE)
-set(LLAMA_BUILD_SERVER OFF CACHE BOOL "Do not build upstream server" FORCE)
-set(LLAMA_BUILD_APP OFF CACHE BOOL "Do not build upstream app" FORCE)
-set(GGML_BUILD_TESTS OFF CACHE BOOL "Do not build upstream ggml tests" FORCE)
-set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "Do not build upstream ggml examples" FORCE)
-
-# Persist the static fallback directly at the prebuilt cache path.  CMake
-# does not allow attaching a POST_BUILD command to a target created by
-# add_subdirectory() from this parent directory.
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${MUKEI_PREBUILT_ROOT}/${MUKEI_TARGET_ABI}")
-
-add_subdirectory("${MUKEI_VENDOR_DIR}" "${CMAKE_BINARY_DIR}/llama-build")
-
-add_library(mukei_llama ALIAS llama)

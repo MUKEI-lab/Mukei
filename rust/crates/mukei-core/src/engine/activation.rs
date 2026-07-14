@@ -182,7 +182,10 @@ pub enum ModelActivationState {
 
 impl ModelActivationState {
     pub const fn is_activation_in_progress(&self) -> bool {
-        matches!(self, Self::Activating { .. } | Self::Deactivating { .. })
+        matches!(
+            self,
+            Self::ModelVerifying { .. } | Self::Activating { .. } | Self::Deactivating { .. }
+        )
     }
 
     pub const fn is_verified(&self) -> bool {
@@ -350,6 +353,13 @@ impl ModelActivationService {
             })
     }
 
+    /// Snapshot the currently selected candidate identity. This is distinct from
+    /// the active backend: a replacement may be verifying while the previous
+    /// backend continues serving turns.
+    pub fn selected_model_snapshot(&self) -> Option<(String, String)> {
+        self.inner.read().selected.clone()
+    }
+
     pub fn mark_model_missing(
         &self,
         model_id: impl Into<String>,
@@ -391,6 +401,53 @@ impl ModelActivationService {
         // Verification is a candidate-side transition. The active backend keeps
         // serving existing and new turns until a replacement commits successfully.
         generation
+    }
+
+    /// Commit a candidate-side verification failure only if it still belongs
+    /// to the current verification generation and selected model. A failed
+    /// replacement never retires the previously active backend.
+    pub fn mark_verification_failed(
+        &self,
+        generation: u64,
+        model_id: &str,
+        revision: &str,
+        artifact_id: &str,
+        category: ActivationFailureCategory,
+    ) -> bool {
+        if !self.is_current_generation(generation) {
+            return false;
+        }
+        let mut inner = self.inner.write();
+        if self.generation.load(Ordering::Acquire) != generation {
+            return false;
+        }
+        let selected_matches = inner
+            .selected
+            .as_ref()
+            .is_some_and(|(id, selected_revision)| id == model_id && selected_revision == revision);
+        let verifying_matches = matches!(
+            &inner.state,
+            ModelActivationState::ModelVerifying {
+                model_id: state_model_id,
+                revision: state_revision,
+                generation: state_generation,
+            } if state_model_id == model_id
+                && state_revision == revision
+                && *state_generation == generation
+        );
+        if !selected_matches || !verifying_matches {
+            return false;
+        }
+        inner.verified = None;
+        inner.state = ModelActivationState::ActivationFailed {
+            model_id: model_id.to_string(),
+            revision: revision.to_string(),
+            artifact_id: artifact_id.to_string(),
+            operation_id: generation,
+            category,
+        };
+        // Candidate verification failure is isolated from the serving backend.
+        true
     }
 
     /// Commit a verified descriptor only if it still belongs to the current
