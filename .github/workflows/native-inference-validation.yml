@@ -76,10 +76,21 @@ jobs:
           retention-days: 1
       - name: Build production bridge and export CXX-Qt headers
         working-directory: rust
+        shell: bash
         env:
           CXX_QT_EXPORT_DIR: ${{ github.workspace }}/rust/target/cxxqt-export
           CXX_QT_EXPORT_CRATE_mukei-bridge: "1"
-        run: cargo build --release -p mukei-bridge --no-default-features --features "sqlcipher,network,runtime_production"
+        run: |
+          set -o pipefail
+          cargo build --release -p mukei-bridge --no-default-features --features "sqlcipher,network,runtime_production" 2>&1 | tee /tmp/mukei-production-bridge-release.log
+      - name: Upload production bridge release-build failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-bridge-release-failure
+          path: /tmp/mukei-production-bridge-release.log
+          if-no-files-found: error
+          retention-days: 1
       - name: Configure final QML shipping composition
         working-directory: qml
         run: >-
