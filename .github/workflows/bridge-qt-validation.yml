@@ -46,7 +46,18 @@ jobs:
             ${{ runner.os }}-cargo-bridge-
       - name: cargo build -p mukei-bridge
         working-directory: rust
-        run: cargo build -p mukei-bridge --features "sqlcipher,network"
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo build -p mukei-bridge --features "sqlcipher,network" 2>&1 | tee /tmp/mukei-bridge-build.log
+      - name: Upload bridge compile failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-compile-failure
+          path: /tmp/mukei-bridge-build.log
+          if-no-files-found: error
+          retention-days: 1
 
   qml-runtime:
     name: qml configure-build-test gate
@@ -82,12 +93,22 @@ jobs:
             ${{ runner.os }}-cargo-qml-
       - name: Build bridge library and export CXX-Qt headers
         working-directory: rust
+        shell: bash
         run: |
+          set -o pipefail
           cargo clean -p mukei-bridge
           env \
             CXX_QT_EXPORT_DIR="$CXX_QT_EXPORT_DIR" \
             'CXX_QT_EXPORT_CRATE_mukei-bridge=1' \
-            cargo build -p mukei-bridge --features "sqlcipher,network"
+            cargo build -p mukei-bridge --features "sqlcipher,network" 2>&1 | tee /tmp/mukei-qml-bridge-build.log
+      - name: Upload QML bridge build failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qml-bridge-build-failure
+          path: /tmp/mukei-qml-bridge-build.log
+          if-no-files-found: error
+          retention-days: 1
       - name: Configure QML build
         working-directory: qml
         run: >-
