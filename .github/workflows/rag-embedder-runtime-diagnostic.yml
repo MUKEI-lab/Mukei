@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  EXPECTED_BASE: ab023fd1ac94b64ad7e8079e02922b9ed3763b97
+  EXPECTED_BASE: c879e9cc6f3e1f6d7a4fe1ff1c98db706de06e8f
 
 jobs:
   diagnose:
@@ -40,11 +40,10 @@ jobs:
           import traceback
           from pathlib import Path
 
-          source = Path('.github/workflows/rag-embedder-runtime-slice-runner.yml').read_text()
-          marker = '          PATCH_B64: >-\n'
-          start = source.index(marker) + len(marker)
-          end = source.index('        run: |\n', start)
-          payload = ''.join(line.strip() for line in source[start:end].splitlines())
+          lines = Path('.github/workflows/rag-embedder-runtime-slice-runner.yml').read_text().splitlines()
+          start = next(index for index, line in enumerate(lines) if line.strip() == 'PATCH_B64: >-') + 1
+          end = next(index for index in range(start, len(lines)) if lines[index].strip() == 'run: |')
+          payload = ''.join(line.strip() for line in lines[start:end])
           print(f'payload_chars={len(payload)}')
           script = base64.b64decode(payload, validate=True).decode('utf-8')
           print(f'script_chars={len(script)}')
