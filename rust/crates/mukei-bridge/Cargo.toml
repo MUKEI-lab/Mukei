@@ -32,6 +32,10 @@ usearch_hnsw       = ["mukei-core/usearch_hnsw"]
 runtime_development = []
 runtime_test        = []
 runtime_production  = ["llama_cpp"]
+# Canonical production composition for the native local-inference shipping path.
+# Keep mode and capabilities independently selectable; shipping consumers should
+# prefer this bundle over hand-writing the equivalent feature tuple.
+shipping_native     = ["runtime_production", "sqlcipher", "network"]
 # Runtime hardening policy feature; distinct from Cargo compiler profile `release-hardening`.
 runtime_hardening   = ["mukei-core/runtime_hardening"]
 # Export is a policy capability and may be omitted from production builds.
