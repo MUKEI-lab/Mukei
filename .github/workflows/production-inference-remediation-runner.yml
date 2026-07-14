@@ -195,21 +195,33 @@ jobs:
       - name: Commit verified source repair and remove runner
         shell: bash
         run: |
-          set -euo pipefail
-          git rm "$RUNNER_PATH" .github/remediation/native-inference-patch.*
-          git add -A
-          git diff --cached --check
-          if git diff --cached --quiet; then
-            echo "Patch produced no source changes." >&2
-            exit 1
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "feat: activate pinned native production inference"
-          git fetch origin checkpoint/stabilization-2026-07-12
-          remote_head=$(git rev-parse origin/checkpoint/stabilization-2026-07-12)
-          if [[ "$remote_head" != "$RUNNER_HEAD" ]]; then
-            echo "Branch moved during remediation; refusing to overwrite $remote_head" >&2
-            exit 1
-          fi
-          git push origin HEAD:checkpoint/stabilization-2026-07-12
+          set -o pipefail
+          {
+            set -euo pipefail
+            git rm "$RUNNER_PATH" .github/remediation/native-inference-patch.*
+            git add -A
+            git diff --cached --check
+            if git diff --cached --quiet; then
+              echo "Patch produced no source changes." >&2
+              exit 1
+            fi
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "feat: activate pinned native production inference"
+            git fetch origin checkpoint/stabilization-2026-07-12
+            remote_head=$(git rev-parse origin/checkpoint/stabilization-2026-07-12)
+            if [[ "$remote_head" != "$RUNNER_HEAD" ]]; then
+              echo "Branch moved during remediation; refusing to overwrite $remote_head" >&2
+              exit 1
+            fi
+            git push origin HEAD:checkpoint/stabilization-2026-07-12
+          } 2>&1 | tee /tmp/mukei-publication.log
+
+      - name: Upload publication failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-inference-publication-failure
+          path: /tmp/mukei-publication.log
+          if-no-files-found: error
+          retention-days: 1
