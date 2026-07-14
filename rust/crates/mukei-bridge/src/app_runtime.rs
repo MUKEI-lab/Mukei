@@ -38,6 +38,9 @@ use crate::bridge_state::RuntimeCoordinator;
 use crate::core_saf;
 use crate::protocol::ProtocolRuntimeState;
 
+mod rag_runtime;
+pub(crate) use rag_runtime::RagRuntime;
+
 pub(crate) struct ApplicationRuntime {
     lifecycle: LifecycleServices,
     persistence: PersistenceServices,
@@ -46,6 +49,7 @@ pub(crate) struct ApplicationRuntime {
     documents: DocumentServices,
     secrets: SecretServices,
     protocol: ProtocolServices,
+    rag: RagServices,
 }
 
 struct LifecycleServices {
@@ -82,6 +86,10 @@ struct DocumentServices {
 
 struct ProtocolServices {
     runtime: ParkingMutex<ProtocolRuntimeState>,
+}
+
+struct RagServices {
+    runtime: Arc<RagRuntime>,
 }
 
 struct SecretServices {
@@ -130,6 +138,9 @@ impl ApplicationRuntime {
             },
             protocol: ProtocolServices {
                 runtime: ParkingMutex::new(ProtocolRuntimeState::new()),
+            },
+            rag: RagServices {
+                runtime: Arc::new(RagRuntime::new()),
             },
             secrets: SecretServices {
                 brave_api_key: ParkingMutex::new(None),
@@ -252,6 +263,10 @@ impl ApplicationRuntime {
         *self.secrets.remote_feature_policy.lock() = policy;
     }
 
+    pub(crate) fn rag_runtime(&self) -> Arc<RagRuntime> {
+        self.rag.runtime.clone()
+    }
+
     pub(crate) fn protocol_state(&self) -> &ParkingMutex<ProtocolRuntimeState> {
         &self.protocol.runtime
     }
@@ -279,6 +294,9 @@ mod tests {
         let first_activation = application_runtime().model_activation_service();
         let second_activation = application_runtime().model_activation_service();
         assert!(Arc::ptr_eq(&first_activation, &second_activation));
+        let first_rag = application_runtime().rag_runtime();
+        let second_rag = application_runtime().rag_runtime();
+        assert!(Arc::ptr_eq(&first_rag, &second_rag));
     }
 
     #[test]

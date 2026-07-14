@@ -46,9 +46,11 @@ use mukei_core::agent::{
 use mukei_core::config::MukeiConfig;
 use mukei_core::engine::{InferenceBackend, ModelActivationService};
 use mukei_core::error::Result;
+use mukei_core::rag::{RetrievalRequest, RetrievalResponse, RetrieverResult, StructuredRetriever};
 use mukei_core::tools::ToolRegistry;
 use mukei_core::types::{BranchId, ChatMessage, ConversationId};
 
+use crate::app_runtime::{application_runtime, RagRuntime};
 use crate::core_saf;
 
 /// `TokenCount` implementation that approximates tokenisation from raw
@@ -166,12 +168,17 @@ impl AgentEventSink for BridgeTurnPersistence {
 pub struct BridgeContextBackend {
     pool: Arc<mukei_core::storage::DatabasePool>,
     limit: i64,
+    rag: Arc<RagRuntime>,
 }
 
 #[cfg(feature = "rusqlite")]
 impl BridgeContextBackend {
-    pub fn new(pool: Arc<mukei_core::storage::DatabasePool>, limit: i64) -> Self {
-        Self { pool, limit }
+    pub fn new(
+        pool: Arc<mukei_core::storage::DatabasePool>,
+        limit: i64,
+        rag: Arc<RagRuntime>,
+    ) -> Self {
+        Self { pool, limit, rag }
     }
 }
 
@@ -274,17 +281,22 @@ impl ContextBackend for BridgeContextBackend {
     async fn rag_lookup(&self, _q: &str, _k: usize) -> Result<Vec<String>> {
         Ok(Vec::new())
     }
+
+    async fn retrieve_rag(&self, request: &RetrievalRequest) -> RetrieverResult<RetrievalResponse> {
+        self.rag.retrieve_structured(request).await
+    }
 }
 
 #[cfg(not(feature = "rusqlite"))]
 pub struct BridgeContextBackend {
     limit: i64,
+    rag: Arc<RagRuntime>,
 }
 
 #[cfg(not(feature = "rusqlite"))]
 impl BridgeContextBackend {
-    pub fn new(limit: i64) -> Self {
-        Self { limit }
+    pub fn new(limit: i64, rag: Arc<RagRuntime>) -> Self {
+        Self { limit, rag }
     }
 }
 
@@ -303,6 +315,10 @@ impl ContextBackend for BridgeContextBackend {
 
     async fn rag_lookup(&self, _q: &str, _k: usize) -> Result<Vec<String>> {
         Ok(Vec::new())
+    }
+
+    async fn retrieve_rag(&self, request: &RetrievalRequest) -> RetrieverResult<RetrievalResponse> {
+        self.rag.retrieve_structured(request).await
     }
 }
 
@@ -337,6 +353,7 @@ pub fn build_agent_loop_with_backend(
     let backend = Arc::new(BridgeContextBackend::new(
         pool.clone(),
         cfg.agent.recovered_history_window as i64,
+        application_runtime().rag_runtime(),
     ));
     let tokenizer = Arc::new(CharHeuristicTokens::default());
     let context = ContextBudgetManager::new(backend, tokenizer, cfg.n_ctx);
@@ -376,6 +393,7 @@ pub fn build_agent_loop_with_backend(
 ) -> Arc<AgentLoop> {
     let backend = Arc::new(BridgeContextBackend::new(
         cfg.agent.recovered_history_window as i64,
+        application_runtime().rag_runtime(),
     ));
     let tokenizer = Arc::new(CharHeuristicTokens::default());
     let context = ContextBudgetManager::new(backend, tokenizer, cfg.n_ctx);
@@ -560,7 +578,8 @@ mod tests {
     #[tokio::test]
     async fn load_history_scopes_by_conversation_and_branch_without_duplicates() {
         let pool = migrated_pool().await;
-        let backend = BridgeContextBackend::new(pool.clone(), 32);
+        let backend =
+            BridgeContextBackend::new(pool.clone(), 32, std::sync::Arc::new(RagRuntime::new()));
 
         let conversation_a = ConversationId::new();
         let conversation_b = ConversationId::new();
@@ -647,7 +666,8 @@ mod tests {
     #[tokio::test]
     async fn load_history_requires_matching_conversation_for_branch() {
         let pool = migrated_pool().await;
-        let backend = BridgeContextBackend::new(pool.clone(), 32);
+        let backend =
+            BridgeContextBackend::new(pool.clone(), 32, std::sync::Arc::new(RagRuntime::new()));
 
         let conversation_a = ConversationId::new();
         let conversation_b = ConversationId::new();
