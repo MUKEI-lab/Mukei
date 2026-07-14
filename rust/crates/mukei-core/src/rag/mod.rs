@@ -1,6 +1,8 @@
 //! `mukei_core::rag` — TRD §4 / PRD §9.
 //!
 //! Modules:
+//! - [`artifact_manifest`] — pinned embedding-artifact provenance, path safety,
+//!   exact byte-size checks, and streaming SHA-256 verification.
 //! - [`embedder`] — Embedder trait + MockEmbedder + (feature `candle`)
 //!   real on-device MiniLM forward pass.
 //! - [`vector_store`] — atomic-rename persistence, optional usearch HNSW
@@ -12,12 +14,17 @@
 //! - [`retriever`] — query embedding, vector search, injected chunk resolution,
 //!   and structured ranked results.
 
+pub mod artifact_manifest;
 pub mod chunker;
 pub mod embedder;
 pub mod indexer;
 pub mod retriever;
 pub mod vector_store;
 
+pub use artifact_manifest::{
+    EmbeddingArtifactManifest, EmbeddingArtifactSpec, VerifiedEmbeddingArtifacts,
+    ALL_MINILM_L6_V2_FILES, ALL_MINILM_L6_V2_MANIFEST,
+};
 #[cfg(feature = "candle")]
 pub use embedder::{CandleConfig, CandleMiniLmEmbedder, Pooling};
 pub use embedder::{Embedder, Embedding, MockEmbedder};
