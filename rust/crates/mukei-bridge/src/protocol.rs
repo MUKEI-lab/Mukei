@@ -961,6 +961,7 @@ fn start_protocol_model_activation(
         let (state, result, error) = match crate::complete_model_activation(model_id, generation)
             .await
         {
+            #[cfg(feature = "llama_cpp")]
             crate::ModelActivationTaskResult::Ready(payload) => ("completed", Some(payload), None),
             crate::ModelActivationTaskResult::Superseded => {
                 ("cancelled", Some(json!({"reason": "superseded"})), None)

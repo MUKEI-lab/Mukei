@@ -149,6 +149,7 @@ fn async_error_value(
 
 #[derive(Debug)]
 pub(crate) enum ModelActivationTaskResult {
+    #[cfg(feature = "llama_cpp")]
     Ready(serde_json::Value),
     Superseded,
     Failed(mukei_core::error::MukeiError),
@@ -3940,17 +3941,19 @@ impl ffi::MukeiAgent {
         let ticket = tracker.accept("model.activate");
         let accepted = tracker.accepted_json(&ticket);
         mukei_core::runtime::get().spawn(async move {
-            let result = match complete_model_activation(model_id, generation).await {
-                ModelActivationTaskResult::Ready(payload) => Ok(payload),
-                ModelActivationTaskResult::Superseded => Err(serde_json::json!({
-                    "code": "ERR_MODEL_ACTIVATION_SUPERSEDED",
-                    "safe_message": "A newer model selection replaced this activation request.",
-                    "recoverable": true,
-                })),
-                ModelActivationTaskResult::Failed(error) => {
-                    Err(async_error_value(&error, "select_installed_model_json"))
-                }
-            };
+            let result: Result<serde_json::Value, serde_json::Value> =
+                match complete_model_activation(model_id, generation).await {
+                    #[cfg(feature = "llama_cpp")]
+                    ModelActivationTaskResult::Ready(payload) => Ok(payload),
+                    ModelActivationTaskResult::Superseded => Err(serde_json::json!({
+                        "code": "ERR_MODEL_ACTIVATION_SUPERSEDED",
+                        "safe_message": "A newer model selection replaced this activation request.",
+                        "recoverable": true,
+                    })),
+                    ModelActivationTaskResult::Failed(error) => {
+                        Err(async_error_value(&error, "select_installed_model_json"))
+                    }
+                };
             let completion = runtime_state()
                 .request_tracker()
                 .completion_json(&ticket, result);
