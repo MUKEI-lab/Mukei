@@ -15,7 +15,7 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
   QT_VERSION: 6.5.3
-  EXPECTED_BASE: 29042b34be9b92a59db54b20f686510c5fd1685a
+  EXPECTED_BASE: 6d72dac5227e3197c38d72d366d5a15452ae925d
   BRANCH_NAME: checkpoint/stabilization-2026-07-12
 
 jobs:
@@ -77,7 +77,79 @@ jobs:
           rag_path.parent.mkdir(parents=True, exist_ok=True)
           if rag_path.exists():
               raise SystemExit(f"refusing to overwrite existing {rag_path}")
-          rag_path.write_text('''//! Process-owned RAG retrieval authority.\n//!\n//! This first construction slice is intentionally conservative: the service is\n//! real and injectable, but reports `RetrieverUnavailable` until a verified\n//! embedder/vector-store generation is published by a later remediation slice.\n//! Returning a typed unavailable state lets context assembly degrade safely\n//! without misrepresenting an absent index as a successful empty retrieval.\n\nuse mukei_core::rag::{\n    IndexCompatibilityState, RagCapabilitySnapshot, RetrievalRequest, RetrievalResponse,\n    RetrievalStatus, RetrievalUnavailableReason, RetrieverError, RetrieverResult,\n    StructuredRetriever,\n};\n\n#[derive(Debug, Default)]\npub(crate) struct RagRuntime;\n\nimpl RagRuntime {\n    pub(crate) fn new() -> Self {\n        Self\n    }\n\n    fn unavailable_capability() -> RagCapabilitySnapshot {\n        let status =\n            RetrievalStatus::Unavailable(RetrievalUnavailableReason::RetrieverUnavailable);\n        RagCapabilitySnapshot {\n            code_present: true,\n            index_available: false,\n            embedding_backend_available: false,\n            index_compatibility: IndexCompatibilityState::Unknown,\n            retrieval_state: status,\n        }\n    }\n}\n\n#[async_trait::async_trait]\nimpl StructuredRetriever for RagRuntime {\n    async fn retrieve_structured(\n        &self,\n        _request: &RetrievalRequest,\n    ) -> RetrieverResult<RetrievalResponse> {\n        Err(RetrieverError::Unavailable)\n    }\n\n    fn capability_snapshot(&self) -> RagCapabilitySnapshot {\n        Self::unavailable_capability()\n    }\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[tokio::test]\n    async fn unavailable_runtime_is_typed_and_truthful() {\n        let runtime = RagRuntime::new();\n        let capability = runtime.capability_snapshot();\n        assert!(capability.code_present);\n        assert!(!capability.index_available);\n        assert!(!capability.embedding_backend_available);\n        assert!(matches!(\n            capability.retrieval_state,\n            RetrievalStatus::Unavailable(RetrievalUnavailableReason::RetrieverUnavailable)\n        ));\n        assert!(matches!(\n            runtime\n                .retrieve_structured(&RetrievalRequest::new("hello"))\n                .await,\n            Err(RetrieverError::Unavailable)\n        ));\n    }\n}\n''')
+          rag_path.write_text('''//! Process-owned RAG retrieval authority.
+//!
+//! This first construction slice is intentionally conservative: the service is
+//! real and injectable, but reports `RetrieverUnavailable` until a verified
+//! embedder/vector-store generation is published by a later remediation slice.
+//! Returning a typed unavailable state lets context assembly degrade safely
+//! without misrepresenting an absent index as a successful empty retrieval.
+
+use mukei_core::rag::{
+    IndexCompatibilityState, RagCapabilitySnapshot, RetrievalRequest, RetrievalResponse,
+    RetrievalStatus, RetrievalUnavailableReason, RetrieverError, RetrieverResult,
+    StructuredRetriever,
+};
+
+#[derive(Debug, Default)]
+pub(crate) struct RagRuntime;
+
+impl RagRuntime {
+    pub(crate) fn new() -> Self {
+        Self
+    }
+
+    fn unavailable_capability() -> RagCapabilitySnapshot {
+        let status =
+            RetrievalStatus::Unavailable(RetrievalUnavailableReason::RetrieverUnavailable);
+        RagCapabilitySnapshot {
+            code_present: true,
+            index_available: false,
+            embedding_backend_available: false,
+            index_compatibility: IndexCompatibilityState::Unknown,
+            retrieval_state: status,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl StructuredRetriever for RagRuntime {
+    async fn retrieve_structured(
+        &self,
+        _request: &RetrievalRequest,
+    ) -> RetrieverResult<RetrievalResponse> {
+        Err(RetrieverError::Unavailable)
+    }
+
+    fn capability_snapshot(&self) -> RagCapabilitySnapshot {
+        Self::unavailable_capability()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn unavailable_runtime_is_typed_and_truthful() {
+        let runtime = RagRuntime::new();
+        let capability = runtime.capability_snapshot();
+        assert!(capability.code_present);
+        assert!(!capability.index_available);
+        assert!(!capability.embedding_backend_available);
+        assert!(matches!(
+            capability.retrieval_state,
+            RetrievalStatus::Unavailable(RetrievalUnavailableReason::RetrieverUnavailable)
+        ));
+        assert!(matches!(
+            runtime
+                .retrieve_structured(&RetrievalRequest::new("hello"))
+                .await,
+            Err(RetrieverError::Unavailable)
+        ));
+    }
+}
+''')
 
           app = Path("rust/crates/mukei-bridge/src/app_runtime.rs")
           replace_once(
@@ -168,7 +240,7 @@ jobs:
           cargo fmt --all
           cd ..
           git diff --check
-          mapfile -t changed < <(git diff --name-only | sort)
+          mapfile -t changed < <({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u)
           expected=(
             rust/crates/mukei-bridge/src/agent_runtime.rs
             rust/crates/mukei-bridge/src/app_runtime.rs
