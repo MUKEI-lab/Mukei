@@ -60,12 +60,12 @@ jobs:
       - name: Verify activation state-machine lifecycle
         working-directory: rust
         run: cargo test -p mukei-core --test activation_verification_lifecycle
-      - name: Verify native adapter in shipping feature tuple
+      - name: Verify native adapter in canonical shipping profile
         working-directory: rust
         shell: bash
         run: |
           set -o pipefail
-          cargo test -p mukei-bridge --no-default-features --features "sqlcipher,network,runtime_production" native_inference::tests 2>&1 | tee /tmp/mukei-native-adapter.log
+          cargo test -p mukei-bridge --no-default-features --features "shipping_native" native_inference::tests 2>&1 | tee /tmp/mukei-native-adapter.log
       - name: Upload native adapter failure evidence
         if: failure()
         uses: actions/upload-artifact@v4
@@ -82,7 +82,7 @@ jobs:
           CXX_QT_EXPORT_CRATE_mukei-bridge: "1"
         run: |
           set -o pipefail
-          cargo build --release -p mukei-bridge --no-default-features --features "sqlcipher,network,runtime_production" 2>&1 | tee /tmp/mukei-production-bridge-release.log
+          cargo build --release -p mukei-bridge --no-default-features --features "shipping_native" 2>&1 | tee /tmp/mukei-production-bridge-release.log
       - name: Upload production bridge release-build failure evidence
         if: failure()
         uses: actions/upload-artifact@v4
