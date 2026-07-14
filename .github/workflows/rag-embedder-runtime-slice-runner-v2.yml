@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  EXPECTED_BASE: f93488b0c869178cd854ed9fed21e6c47acd9723
+  EXPECTED_BASE: 1ced583cbef4ca713638235bd3916bde284f9af3
   BRANCH_NAME: checkpoint/stabilization-2026-07-12
   RUSTFLAGS: "-D warnings"
   QT_VERSION: 6.5.3
@@ -65,11 +65,10 @@ jobs:
           import base64
           from pathlib import Path
 
-          source = Path('.github/workflows/rag-embedder-runtime-slice-runner.yml').read_text()
-          marker = '          PATCH_B64: >-\n'
-          start = source.index(marker) + len(marker)
-          end = source.index('        run: |\n', start)
-          payload = ''.join(line.strip() for line in source[start:end].splitlines())
+          lines = Path('.github/workflows/rag-embedder-runtime-slice-runner.yml').read_text().splitlines()
+          start = next(index for index, line in enumerate(lines) if line.strip() == 'PATCH_B64: >-') + 1
+          end = next(index for index in range(start, len(lines)) if lines[index].strip() == 'run: |')
+          payload = ''.join(line.strip() for line in lines[start:end])
           script = base64.b64decode(payload, validate=True).decode('utf-8')
           compile(script, '<rag-embedder-runtime-patch>', 'exec')
           exec(script, {'__name__': '__main__'})
