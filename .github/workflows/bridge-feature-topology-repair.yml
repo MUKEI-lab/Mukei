@@ -1,0 +1,132 @@
+name: bridge-feature-topology-repair
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - ".github/workflows/bridge-feature-topology-repair.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bridge-feature-topology-repair-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  EXPECTED_SOURCE_BASE: 13dead51bc01bad4cda256a67c514268955a5298
+  RUNNER_PATH: .github/workflows/bridge-feature-topology-repair.yml
+  QT_VERSION: 6.5.3
+
+jobs:
+  repair-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Prove exact repair base
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$EXPECTED_SOURCE_BASE" HEAD
+          mapfile -t changed < <(git diff --name-only "$EXPECTED_SOURCE_BASE"..HEAD | sort)
+          mapfile -t expected < <(printf '%s\n' "$RUNNER_PATH" | sort)
+          if [[ "${changed[*]}" != "${expected[*]}" ]]; then
+            printf 'Unexpected files changed since exact source base:\n' >&2
+            printf '  %s\n' "${changed[@]}" >&2
+            exit 1
+          fi
+          echo "RUNNER_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Install Qt 6.5
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+
+      - name: Export Qt toolchain paths
+        shell: bash
+        run: |
+          echo "$QT_ROOT_DIR/bin" >> "$GITHUB_PATH"
+          echo "QMAKE=$QT_ROOT_DIR/bin/qmake" >> "$GITHUB_ENV"
+
+      - name: Apply feature-topology repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          edits = {
+              Path("rust/crates/mukei-bridge/src/lib.rs"): [
+                  (
+                      "pub(crate) enum ModelActivationTaskResult {\n    Ready(serde_json::Value),\n",
+                      "pub(crate) enum ModelActivationTaskResult {\n    #[cfg(feature = \"llama_cpp\")]\n    Ready(serde_json::Value),\n",
+                  ),
+                  (
+                      "            let result = match complete_model_activation(model_id, generation).await {\n                ModelActivationTaskResult::Ready(payload) => Ok(payload),\n",
+                      "            let result = match complete_model_activation(model_id, generation).await {\n                #[cfg(feature = \"llama_cpp\")]\n                ModelActivationTaskResult::Ready(payload) => Ok(payload),\n",
+                  ),
+              ],
+              Path("rust/crates/mukei-bridge/src/protocol.rs"): [
+                  (
+                      "        {\n            crate::ModelActivationTaskResult::Ready(payload) => (\"completed\", Some(payload), None),\n",
+                      "        {\n            #[cfg(feature = \"llama_cpp\")]\n            crate::ModelActivationTaskResult::Ready(payload) => (\"completed\", Some(payload), None),\n",
+                  ),
+              ],
+          }
+
+          for path, replacements in edits.items():
+              content = path.read_text()
+              for old, new in replacements:
+                  count = content.count(old)
+                  if count != 1:
+                      raise RuntimeError(f"{path}: expected exactly one anchor, found {count}: {old!r}")
+                  content = content.replace(old, new, 1)
+              path.write_text(content)
+          PY
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff --check
+
+      - name: Reproduce exact failing default bridge build
+        working-directory: rust
+        env:
+          RUSTFLAGS: -D warnings
+          RUST_BACKTRACE: 1
+        run: cargo build -p mukei-bridge --features "sqlcipher,network"
+
+      - name: Commit verified source-only repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add rust/crates/mukei-bridge/src/lib.rs rust/crates/mukei-bridge/src/protocol.rs
+          git diff --cached --check
+          mapfile -t staged < <(git diff --cached --name-only | sort)
+          mapfile -t expected < <(printf '%s\n' \
+            rust/crates/mukei-bridge/src/lib.rs \
+            rust/crates/mukei-bridge/src/protocol.rs | sort)
+          if [[ "${staged[*]}" != "${expected[*]}" ]]; then
+            printf 'Unexpected staged paths:\n' >&2
+            printf '  %s\n' "${staged[@]}" >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix: align model activation result with backend feature"
+          git fetch origin checkpoint/stabilization-2026-07-12
+          remote_head=$(git rev-parse origin/checkpoint/stabilization-2026-07-12)
+          if [[ "$remote_head" != "$RUNNER_HEAD" ]]; then
+            echo "Branch moved during repair; refusing to overwrite $remote_head" >&2
+            exit 1
+          fi
+          git push origin HEAD:checkpoint/stabilization-2026-07-12
