@@ -1,0 +1,76 @@
+name: rag-no-persistence-baseline-diagnostic
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rag-no-persistence-baseline-${{ github.event.pull_request.head.ref }}
+  cancel-in-progress: true
+
+env:
+  BASELINE_SHA: fb9e82c9cbab761c5bd7df0cbdcf22db30203852
+  RUSTFLAGS: "-D warnings"
+  QT_VERSION: 6.5.3
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASELINE_SHA }}
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Qt 6.5
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+
+      - name: Export Qt toolchain paths
+        shell: bash
+        run: |
+          echo "$QT_ROOT_DIR/bin" >> "$GITHUB_PATH"
+          echo "QMAKE=$QT_ROOT_DIR/bin/qmake" >> "$GITHUB_ENV"
+
+      - name: Run stripped bridge tuple on accepted baseline
+        id: baseline
+        continue-on-error: true
+        working-directory: rust
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check -p mukei-bridge --no-default-features --features runtime_development \
+            2>&1 | tee /tmp/rag-no-persistence-baseline.log
+
+      - name: Record baseline verdict
+        if: always()
+        shell: bash
+        run: |
+          printf 'baseline_sha=%s\nstep_outcome=%s\n' \
+            "$BASELINE_SHA" "${{ steps.baseline.outcome }}" \
+            | tee /tmp/rag-no-persistence-verdict.txt
+
+      - name: Upload baseline evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-no-persistence-baseline-evidence
+          path: |
+            /tmp/rag-no-persistence-baseline.log
+            /tmp/rag-no-persistence-verdict.txt
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Fail only when baseline unexpectedly passes
+        if: always() && steps.baseline.outcome == 'success'
+        shell: bash
+        run: |
+          echo "The stripped baseline is a valid green tuple; keep it as a required gate." >&2
+          exit 1
