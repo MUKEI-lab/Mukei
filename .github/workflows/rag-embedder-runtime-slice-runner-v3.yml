@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  EXPECTED_BASE: c5e4fd3b1492f5e0f13cbde5e162cca955e49e13
+  EXPECTED_BASE: 328823b139a63e714fb8e20302ce7d15e94495a2
   BRANCH_NAME: checkpoint/stabilization-2026-07-12
   PATCH_SHA256: 1c2311e8686206f4006c2c3233ad6d690e9db7a5edef7d7159e32ae27f5b5a74
   RUSTFLAGS: "-D warnings"
@@ -88,61 +88,32 @@ jobs:
               text = text.replace(old, new, 1)
 
           replace_once(
-              '''use mukei_core::error::{MukeiError, Result};
-          use mukei_core::rag::{
-              Embedder, IndexCompatibilityState, RagCapabilitySnapshot, RetrievalRequest,
-              RetrievalResponse, RetrievalStatus, RetrievalUnavailableReason, RetrieverError,
-              RetrieverResult, StructuredRetriever, VerifiedEmbeddingArtifacts,
-          };
-          ''',
-              '''#[cfg(any(feature = "candle", test))]
-          use mukei_core::error::{MukeiError, Result};
-          use mukei_core::rag::{
-              IndexCompatibilityState, RagCapabilitySnapshot, RetrievalRequest, RetrievalResponse,
-              RetrievalStatus, RetrievalUnavailableReason, RetrieverError, RetrieverResult,
-              StructuredRetriever,
-          };
-          #[cfg(any(feature = "candle", test))]
-          use mukei_core::rag::{Embedder, VerifiedEmbeddingArtifacts};
-          ''',
+              'use mukei_core::error::{MukeiError, Result};',
+              '#[cfg(any(feature = "candle", test))]\nuse mukei_core::error::{MukeiError, Result};',
           )
           replace_once(
-              '''enum RuntimeState {
-              Unavailable(UnavailableState),
-              EmbedderReady {
-          ''',
-              '''enum RuntimeState {
-              Unavailable(UnavailableState),
-              #[cfg(any(feature = "candle", test))]
-              EmbedderReady {
-          ''',
+              '    Embedder, IndexCompatibilityState,',
+              '    IndexCompatibilityState,',
           )
           replace_once(
-              '''    fn install_verified_embedder(
-          ''',
-              '''    #[cfg(any(feature = "candle", test))]
-              fn install_verified_embedder(
-          ''',
+              '    RetrieverResult, StructuredRetriever, VerifiedEmbeddingArtifacts,\n};\n#[cfg(feature = "candle")]',
+              '    RetrieverResult, StructuredRetriever,\n};\n#[cfg(any(feature = "candle", test))]\nuse mukei_core::rag::{Embedder, VerifiedEmbeddingArtifacts};\n#[cfg(feature = "candle")]',
           )
           replace_once(
-              '''            RuntimeState::EmbedderReady { .. } => Err(RetrieverError::IndexUnavailable),
-          ''',
-              '''            #[cfg(any(feature = "candle", test))]
-              RuntimeState::EmbedderReady { .. } => Err(RetrieverError::IndexUnavailable),
-          ''',
+              '    Unavailable(UnavailableState),\n    EmbedderReady {',
+              '    Unavailable(UnavailableState),\n    #[cfg(any(feature = "candle", test))]\n    EmbedderReady {',
           )
           replace_once(
-              '''            RuntimeState::EmbedderReady {
-                  embedder,
-                  artifacts,
-              } => {
-          ''',
-              '''            #[cfg(any(feature = "candle", test))]
-              RuntimeState::EmbedderReady {
-                  embedder,
-                  artifacts,
-              } => {
-          ''',
+              '\n    fn install_verified_embedder(',
+              '\n    #[cfg(any(feature = "candle", test))]\n    fn install_verified_embedder(',
+          )
+          replace_once(
+              '            RuntimeState::EmbedderReady { .. } => Err(RetrieverError::IndexUnavailable),',
+              '            #[cfg(any(feature = "candle", test))]\n            RuntimeState::EmbedderReady { .. } => Err(RetrieverError::IndexUnavailable),',
+          )
+          replace_once(
+              '            RuntimeState::EmbedderReady {\n                embedder,\n                artifacts,\n            } => {',
+              '            #[cfg(any(feature = "candle", test))]\n            RuntimeState::EmbedderReady {\n                embedder,\n                artifacts,\n            } => {',
           )
           path.write_text(text)
           PY
@@ -169,6 +140,7 @@ jobs:
           }
 
       - name: Build bridge persistence tuple
+        id: persistence
         if: steps.gate.outputs.run == 'true'
         working-directory: rust
         shell: bash
@@ -178,7 +150,7 @@ jobs:
             2>&1 | tee /tmp/rag-embedder-persistence-build.log
 
       - name: Upload persistence build failure evidence
-        if: failure() && steps.gate.outputs.run == 'true'
+        if: steps.persistence.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: rag-embedder-persistence-build-failure
