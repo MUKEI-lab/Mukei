@@ -152,7 +152,7 @@ jobs:
           set -euo pipefail
           parent="$(git rev-parse HEAD^)"
           changed="$(git diff --name-only HEAD^ HEAD)"
-          if [[ "$parent" == "563a3605e1b6721caff8f742407e3e3a87e02c57" && "$changed" == ".github/workflows/bridge-qt-validation.yml" ]]; then
+          if [[ "$parent" == "7ed0d618e2250a1cc5a8770377f026db26de29f9" && "$changed" == ".github/workflows/bridge-qt-validation.yml" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -257,11 +257,14 @@ jobs:
         run: cargo test -p mukei-bridge --lib --features "sqlcipher,network" rag_runtime
       - name: Commit only verified source files
         if: steps.gate.outputs.run == 'true'
+        id: publish
         shell: bash
         env:
           BRANCH_NAME: checkpoint/stabilization-2026-07-12
         run: |
           set -euo pipefail
+          exec > >(tee /tmp/rag-authority-publication.log) 2>&1
+          publisher_head="$(git rev-parse HEAD)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add \
@@ -277,8 +280,16 @@ jobs:
           [[ "${staged[*]}" == "${expected[*]}" ]] || exit 1
           git commit -m "feat: establish process-owned RAG runtime authority"
           remote_head="$(git ls-remote origin "refs/heads/$BRANCH_NAME" | cut -f1)"
-          [[ "$remote_head" == "$GITHUB_SHA" ]] || {
-            echo "Remote branch moved: expected $GITHUB_SHA, found $remote_head" >&2
+          [[ "$remote_head" == "$publisher_head" ]] || {
+            echo "Remote branch moved: expected $publisher_head, found $remote_head" >&2
             exit 1
           }
           git push origin "HEAD:refs/heads/$BRANCH_NAME"
+      - name: Upload RAG publication failure evidence
+        if: failure() && steps.gate.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-authority-publication-failure
+          path: /tmp/rag-authority-publication.log
+          if-no-files-found: ignore
+          retention-days: 1
