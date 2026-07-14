@@ -1,0 +1,61 @@
+name: rag-embedding-provenance-capture
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rag-embedding-provenance-${{ github.event.pull_request.head.ref }}
+  cancel-in-progress: true
+
+env:
+  EXPECTED_BASE: 6c819589c28ffae1dd07b8a9fb2656f99c3287c7
+  MODEL_REPO: sentence-transformers/all-MiniLM-L6-v2
+  MODEL_REVISION: 1110a243fdf4706b3f48f1d95db1a4f5529b4d41
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - name: Gate exact observability-only staging commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent="$(git rev-parse HEAD^)"
+          changed="$(git diff --name-only HEAD^ HEAD)"
+          [[ "$parent" == "$EXPECTED_BASE" ]]
+          [[ "$changed" == ".github/workflows/rag-embedding-provenance-capture.yml" ]]
+
+      - name: Download immutable embedding artifacts and compute manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mukei-rag-model
+          : > /tmp/mukei-rag-embedding-manifest.txt
+          printf 'repository=%s\nrevision=%s\n' "$MODEL_REPO" "$MODEL_REVISION" \
+            >> /tmp/mukei-rag-embedding-manifest.txt
+          for file in config.json tokenizer.json model.safetensors; do
+            url="https://huggingface.co/${MODEL_REPO}/resolve/${MODEL_REVISION}/${file}?download=true"
+            curl --fail --location --retry 5 --retry-all-errors \
+              --output "/tmp/mukei-rag-model/${file}" "$url"
+            size="$(stat -c '%s' "/tmp/mukei-rag-model/${file}")"
+            sha="$(sha256sum "/tmp/mukei-rag-model/${file}" | cut -d' ' -f1)"
+            printf '%s size=%s sha256=%s\n' "$file" "$size" "$sha" \
+              | tee -a /tmp/mukei-rag-embedding-manifest.txt
+          done
+
+      - name: Upload provenance manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-embedding-provenance-manifest
+          path: /tmp/mukei-rag-embedding-manifest.txt
+          if-no-files-found: error
+          retention-days: 7
