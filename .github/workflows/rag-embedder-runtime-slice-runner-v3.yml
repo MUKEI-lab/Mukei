@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  EXPECTED_BASE: aeb277a3054609df62716c2cabbfeb3e092e3119
+  EXPECTED_BASE: 0bf78e96a15ed6b5bea18b5f90021dec1667f607
   BRANCH_NAME: checkpoint/stabilization-2026-07-12
   PATCH_SHA256: 1c2311e8686206f4006c2c3233ad6d690e9db7a5edef7d7159e32ae27f5b5a74
   RUSTFLAGS: "-D warnings"
@@ -94,7 +94,20 @@ jobs:
       - name: Build bridge persistence tuple
         if: steps.gate.outputs.run == 'true'
         working-directory: rust
-        run: cargo build -p mukei-bridge --features "sqlcipher,network"
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo build -p mukei-bridge --features "sqlcipher,network" \
+            2>&1 | tee /tmp/rag-embedder-persistence-build.log
+
+      - name: Upload persistence build failure evidence
+        if: failure() && steps.gate.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-embedder-persistence-build-failure
+          path: /tmp/rag-embedder-persistence-build.log
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Check no-persistence bridge tuple
         if: steps.gate.outputs.run == 'true'
