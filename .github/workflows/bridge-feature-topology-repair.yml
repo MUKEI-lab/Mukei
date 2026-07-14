@@ -100,10 +100,22 @@ jobs:
 
       - name: Reproduce exact failing default bridge build
         working-directory: rust
+        shell: bash
         env:
           RUSTFLAGS: -D warnings
           RUST_BACKTRACE: 1
-        run: cargo build -p mukei-bridge --features "sqlcipher,network"
+        run: |
+          set -o pipefail
+          cargo build -p mukei-bridge --features "sqlcipher,network" 2>&1 | tee /tmp/bridge-topology-build.log
+
+      - name: Upload repair build failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-feature-topology-build-failure
+          path: /tmp/bridge-topology-build.log
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Commit verified source-only repair
         shell: bash
