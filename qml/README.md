@@ -68,12 +68,17 @@ cd rust
 cargo build -p mukei-bridge --release
 ```
 
-Android production-oriented builds are expected to use SQLCipher and an explicit
-runtime deployment mode. A representative build shape is:
+The canonical native production composition is the `shipping_native` feature
+bundle. It keeps runtime mode and individual capabilities separately available
+while preventing CI and release commands from hand-writing the same feature
+tuple repeatedly.
+
+Android production-oriented builds add the platform and hardening capabilities
+to that canonical production composition:
 
 ```bash
 cd rust
-cargo build   -p mukei-bridge   --profile android-release   --target aarch64-linux-android   --no-default-features   --features "android_keystore,network,sqlcipher,runtime_production,runtime_hardening"
+cargo build   -p mukei-bridge   --profile android-release   --target aarch64-linux-android   --no-default-features   --features "shipping_native,android_keystore,runtime_hardening"
 ```
 
 Exact Android packaging still depends on the Qt/NDK/Gradle integration and is a
