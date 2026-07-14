@@ -192,15 +192,28 @@ jobs:
       - name: Run QML CTest suite
         run: ctest --test-dir "$QML_BUILD_DIR" --output-on-failure
 
-      - name: Commit verified source repair and remove runner
+      - name: Preserve verified permanent validation workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/workflows/native-inference-validation.yml /tmp/native-inference-validation.yml
+          sha256sum /tmp/native-inference-validation.yml > /tmp/native-inference-validation.sha256
+
+      - name: Commit and publish verified non-workflow source repair
         shell: bash
         run: |
           set -o pipefail
           {
             set -euo pipefail
-            git rm "$RUNNER_PATH" .github/remediation/native-inference-patch.*
+            git rm .github/remediation/native-inference-patch.*
+            rm -f .github/workflows/native-inference-validation.yml
             git add -A
             git diff --cached --check
+            if git diff --cached --name-only | grep -q '^.github/workflows/'; then
+              echo "Refusing bot publication containing workflow-file changes." >&2
+              git diff --cached --name-status -- .github/workflows/ >&2
+              exit 1
+            fi
             if git diff --cached --quiet; then
               echo "Patch produced no source changes." >&2
               exit 1
@@ -208,6 +221,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git commit -m "feat: activate pinned native production inference"
+            git rev-parse HEAD | tee /tmp/verified-source-commit.txt
             git fetch origin checkpoint/stabilization-2026-07-12
             remote_head=$(git rev-parse origin/checkpoint/stabilization-2026-07-12)
             if [[ "$remote_head" != "$RUNNER_HEAD" ]]; then
@@ -223,5 +237,17 @@ jobs:
         with:
           name: production-inference-publication-failure
           path: /tmp/mukei-publication.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload verified workflow handoff
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-inference-workflow-handoff
+          path: |
+            /tmp/native-inference-validation.yml
+            /tmp/native-inference-validation.sha256
+            /tmp/verified-source-commit.txt
           if-no-files-found: error
           retention-days: 1
