@@ -562,6 +562,7 @@ fn is_android_app_specific_files_path(path: &std::path::Path) -> bool {
     })
 }
 
+#[cfg(any(debug_assertions, test))]
 fn safe_model_filename(filename: &str) -> mukei_core::error::Result<&str> {
     let path = std::path::Path::new(filename);
     let is_plain_file = path.components().count() == 1
