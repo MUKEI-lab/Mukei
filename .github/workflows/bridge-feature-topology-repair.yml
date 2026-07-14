@@ -75,7 +75,7 @@ jobs:
                   ),
                   (
                       "            let result = match complete_model_activation(model_id, generation).await {\n                ModelActivationTaskResult::Ready(payload) => Ok(payload),\n",
-                      "            let result = match complete_model_activation(model_id, generation).await {\n                #[cfg(feature = \"llama_cpp\")]\n                ModelActivationTaskResult::Ready(payload) => Ok(payload),\n",
+                      "            let result: Result<serde_json::Value, serde_json::Value> =\n                match complete_model_activation(model_id, generation).await {\n                    #[cfg(feature = \"llama_cpp\")]\n                    ModelActivationTaskResult::Ready(payload) => Ok(payload),\n",
                   ),
               ],
               Path("rust/crates/mukei-bridge/src/protocol.rs"): [
