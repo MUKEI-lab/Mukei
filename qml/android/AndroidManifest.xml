@@ -2,44 +2,56 @@
 <!--
   Android manifest for the Mukei QML shell. `QT_ANDROID_PACKAGE_SOURCE_DIR`
   in qml/CMakeLists.txt points at this directory, so androiddeployqt uses
-  this file as the package-source manifest and overlays Qt's generated
-  attributes on top of it. Network-backed provider/search and model download
-  features require INTERNET to be declared here; Android does not grant that
-  permission at runtime.
-
-  minSdk 29 aligns with QT_ANDROID_MIN_SDK_VERSION in CMakeLists.txt;
-  targetSdk 35 aligns with QT_ANDROID_TARGET_SDK_VERSION. versionCode uses
-  major*10000 + minor*100 + patch and must increase for every APK release.
+  this file as the package-source manifest and replaces Qt insertion markers.
 
   Do not replace this manifest with the branding handoff: the handoff contains
-  resources only. Qt-generated metadata and placeholders remain owned by
-  androiddeployqt.
+  resources only. Mandatory Qt activity metadata and insertion markers must
+  remain present while launcher and splash branding is layered around them.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           package="app.mukei"
+          android:installLocation="auto"
           android:versionCode="705"
           android:versionName="0.7.5">
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="35"/>
 
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- %%INSERT_PERMISSIONS -->
+    <!-- %%INSERT_FEATURES -->
 
     <application
+        android:name="org.qtproject.qt.android.bindings.QtApplication"
         android:label="Mukei"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/MukeiAppTheme"
+        android:hardwareAccelerated="true"
         android:allowBackup="false"
         android:hasFragileUserData="true"
         android:supportsRtl="true">
         <activity
             android:name="org.qtproject.qt.android.bindings.QtActivity"
+            android:label="Mukei"
             android:exported="true"
+            android:launchMode="singleTop"
+            android:screenOrientation="unspecified"
             android:theme="@style/MukeiAppTheme"
-            android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|density|uiMode">
+            android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+
+            <!-- Mandatory Qt activity metadata. androiddeployqt substitutes the library name. -->
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="-- %%INSERT_APP_LIB_NAME%% --"/>
+            <meta-data
+                android:name="android.app.extract_android_style"
+                android:value="minimal"/>
+            <meta-data
+                android:name="android.app.splash_screen_drawable"
+                android:resource="@drawable/mukei_splash_background"/>
         </activity>
     </application>
 </manifest>
