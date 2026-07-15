@@ -19,6 +19,7 @@ readonly CXX_QT_EXPORT_DIR="${CXX_QT_EXPORT_DIR:-${REPO_ROOT}/rust/target/cxxqt-
 readonly BRIDGE_LIB="${REPO_ROOT}/rust/target/${RUST_TARGET}/android-release/libmukei_bridge.a"
 readonly LLAMA_LIB="${REPO_ROOT}/rust/llama-cpp-prebuilt/prebuilt/${ABI}/libmukei_llama_native.so"
 readonly ANDROID_INITIAL_CACHE="${REPO_ROOT}/qml/cmake/MukeiAndroidApkInitialCache.cmake"
+readonly BRANDING_STATE="${BUILD_ROOT}/branding-materialization.json"
 
 fail() {
     printf 'error: %s\n' "$*" >&2
@@ -36,6 +37,13 @@ require_directory() {
 require_executable() {
     [[ -x "$1" ]] || fail "required executable not found: $1"
 }
+
+cleanup_branding() {
+    python3 "${SCRIPT_DIR}/prepare-branding.py" cleanup \
+        --repo-root "${REPO_ROOT}" \
+        --state "${BRANDING_STATE}" || true
+}
+trap cleanup_branding EXIT
 
 : "${ANDROID_SDK_ROOT:=${ANDROID_HOME:-}}"
 : "${ANDROID_NDK_ROOT:=${ANDROID_NDK_HOME:-}}"
@@ -87,6 +95,12 @@ require_executable "${TARGET_CXX}"
 require_executable "${TARGET_AR}"
 
 mkdir -p "${BUILD_ROOT}" "${DIST_DIR}" "${CXX_QT_EXPORT_DIR}"
+
+printf '\n==> Verifying and materializing Mukei branding v3.2\n'
+python3 "${SCRIPT_DIR}/prepare-branding.py" verify
+python3 "${SCRIPT_DIR}/prepare-branding.py" materialize \
+    --repo-root "${REPO_ROOT}" \
+    --state "${BRANDING_STATE}"
 
 printf '\n==> Building llama.cpp capsule for %s\n' "${ABI}"
 cmake \
