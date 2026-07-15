@@ -9,16 +9,24 @@ on:
       - ".github/workflows/apply-production-frontend.yml"
       - "scripts/frontend/apply-production-frontend.py"
       - "scripts/frontend/normalize-production-frontend.py"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/apply-production-frontend.yml"
+      - "scripts/frontend/**"
+      - "qml/**"
+      - "scripts/android/**"
 
 permissions:
   contents: write
 
 concurrency:
-  group: apply-production-frontend-${{ github.ref_name }}
+  group: apply-production-frontend-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
-  MIGRATION_REVISION: "2"
+  MIGRATION_REVISION: "3"
 
 jobs:
   migrate:
