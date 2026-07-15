@@ -1,10 +1,10 @@
 package com.mukei.security;
 
-import android.app.Activity;
+import android.content.Context;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 
-import org.qtproject.qt.android.QtNative;
+import org.qtproject.qt.android.MukeiContext;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -32,9 +32,8 @@ public final class MukeiSecretStore {
     private MukeiSecretStore() {}
 
     private static File directory() throws Exception {
-        Activity activity = QtNative.activity();
-        if (activity == null) throw new IllegalStateException("Qt activity unavailable");
-        File directory = new File(activity.getFilesDir(), "secrets");
+        Context context = MukeiContext.requireContext();
+        File directory = new File(context.getFilesDir(), "secrets");
         if (!directory.exists() && !directory.mkdirs()) {
             throw new IllegalStateException("cannot create app-private secret directory");
         }
