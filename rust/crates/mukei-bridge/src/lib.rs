@@ -520,7 +520,10 @@ fn validate_model_dir_against_base(
         });
     }
 
-    if is_android_app_specific_files_path(&canonical_dir) {
+    if cfg!(target_os = "android")
+        && (is_android_app_specific_files_path(&canonical_dir)
+            || is_android_internal_app_files_path(&canonical_dir))
+    {
         return Ok(ValidatedModelDir {
             canonical_base: canonical_dir.clone(),
             canonical_dir,
@@ -560,6 +563,51 @@ fn is_android_app_specific_files_path(path: &std::path::Path) -> bool {
             && window[2].contains('.')
             && window[3] == "files"
     })
+}
+
+fn is_android_package_component(value: &str) -> bool {
+    let segments: Vec<&str> = value.split('.').collect();
+    segments.len() >= 2
+        && segments.iter().all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '_')
+        })
+}
+
+fn is_android_internal_app_files_path(path: &std::path::Path) -> bool {
+    let parts: Vec<String> = path
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(part) => Some(part.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect();
+
+    let standard_internal = parts.len() >= 5
+        && parts[0] == "data"
+        && matches!(parts[1].as_str(), "user" | "user_de")
+        && parts[2].parse::<u32>().is_ok()
+        && is_android_package_component(&parts[3])
+        && parts[4] == "files";
+
+    let legacy_internal = parts.len() >= 4
+        && parts[0] == "data"
+        && parts[1] == "data"
+        && is_android_package_component(&parts[2])
+        && parts[3] == "files";
+
+    let adopted_internal = parts.len() >= 7
+        && parts[0] == "mnt"
+        && parts[1] == "expand"
+        && !parts[2].is_empty()
+        && matches!(parts[3].as_str(), "user" | "user_de")
+        && parts[4].parse::<u32>().is_ok()
+        && is_android_package_component(&parts[5])
+        && parts[6] == "files";
+
+    standard_internal || legacy_internal || adopted_internal
 }
 
 #[cfg(any(debug_assertions, test))]
@@ -5041,8 +5089,8 @@ pub extern "C" fn Java_com_mukei_app_MukeiBridge_nativeOnSafGrantRevoked() {}
 #[cfg(test)]
 mod qml_contract_tests {
     use super::{
-        is_android_app_specific_files_path, safe_model_filename, validate_model_dir_against_base,
-        MukeiAgentRust,
+        is_android_app_specific_files_path, is_android_internal_app_files_path,
+        safe_model_filename, validate_model_dir_against_base, MukeiAgentRust,
     };
     use std::sync::atomic::Ordering;
 
@@ -5117,6 +5165,34 @@ mod qml_contract_tests {
         assert!(!is_android_app_specific_files_path(std::path::Path::new(
             "/storage/emulated/0/Download/models"
         )));
+    }
+
+    #[test]
+    fn android_model_dir_policy_accepts_internal_app_private_roots() {
+        for path in [
+            "/data/user/0/com.mukei.app/files/models",
+            "/data/user_de/10/com.mukei.app/files/models",
+            "/data/data/com.mukei.app/files/models",
+            "/mnt/expand/01234567-89ab-cdef-0123-456789abcdef/user/0/com.mukei.app/files/models",
+        ] {
+            assert!(
+                is_android_internal_app_files_path(std::path::Path::new(path)),
+                "expected Android private path to be accepted: {path}"
+            );
+        }
+
+        for path in [
+            "/storage/emulated/0/Download/models",
+            "/storage/emulated/0/data/com.mukei.app/files/models",
+            "/data/local/tmp/com.mukei.app/files/models",
+            "/data/user/not-a-user/com.mukei.app/files/models",
+            "/data/user/0/com_mukei_app/files/models",
+        ] {
+            assert!(
+                !is_android_internal_app_files_path(std::path::Path::new(path)),
+                "expected non-private Android path to be rejected: {path}"
+            );
+        }
     }
 
     #[test]
