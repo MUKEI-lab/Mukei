@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Android manifest for the Mukei QML shell. `QT_ANDROID_PACKAGE_SOURCE_DIR`
-  in qml/CMakeLists.txt points at this directory, so androiddeployqt uses
-  this file as the package-source manifest and replaces Qt insertion markers.
+  Qt 6.5.3-compatible Android manifest for the Mukei QML shell.
+  `QT_ANDROID_PACKAGE_SOURCE_DIR` points at this directory, so androiddeployqt
+  replaces Qt insertion markers and copies these branded resources into the
+  generated Gradle project.
 
-  Do not replace this manifest with the branding handoff: the handoff contains
-  resources only. Mandatory Qt activity metadata and insertion markers must
-  remain present while launcher and splash branding is layered around them.
+  Do not replace this manifest with a branding-only overlay. Mandatory Qt
+  activity metadata and insertion markers must remain present while launcher
+  and splash branding is layered around them.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           package="app.mukei"
@@ -19,6 +20,12 @@
     <!-- %%INSERT_PERMISSIONS -->
     <!-- %%INSERT_FEATURES -->
 
+    <supports-screens
+        android:anyDensity="true"
+        android:largeScreens="true"
+        android:normalScreens="true"
+        android:smallScreens="true"/>
+
     <application
         android:name="org.qtproject.qt.android.bindings.QtApplication"
         android:label="Mukei"
@@ -26,7 +33,10 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/MukeiAppTheme"
         android:hardwareAccelerated="true"
+        android:requestLegacyExternalStorage="false"
+        android:allowNativeHeapPointerTagging="false"
         android:allowBackup="false"
+        android:fullBackupOnly="false"
         android:hasFragileUserData="true"
         android:supportsRtl="true">
         <activity
@@ -42,10 +52,12 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
 
-            <!-- Mandatory Qt activity metadata. androiddeployqt substitutes the library name. -->
             <meta-data
                 android:name="android.app.lib_name"
                 android:value="-- %%INSERT_APP_LIB_NAME%% --"/>
+            <meta-data
+                android:name="android.app.arguments"
+                android:value="-- %%INSERT_APP_ARGUMENTS%% --"/>
             <meta-data
                 android:name="android.app.extract_android_style"
                 android:value="minimal"/>
