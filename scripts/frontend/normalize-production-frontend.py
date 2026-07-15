@@ -76,7 +76,8 @@ def validate() -> None:
         ROOT / "qml/main.cpp": ["qrc:/com/mukei/app/MainWindow.qml", "QSGRendererInterface::OpenGL", "#include <QQmlError>"],
         ROOT / "qml/events/EventDispatcher.qml": ["function onEventEmitted", "function onEvent_emitted"],
         ROOT / "qml/MainWindow.qml": ["readonly property real safeTop", "AppCoordinator.configure"],
-        ROOT / "qml/screens/ChatScreen.qml": ["Mukei is ready", "Choose a verified local model"],
+        ROOT / "qml/screens/EmptyChatScreen.qml": ["Mukei is ready", "Everything runs on your device"],
+        ROOT / "qml/screens/ChatScreen.qml": ["Choose a verified local model", "EmptyChatScreen"],
         ROOT / "qml/screens/SettingsScreen.qml": ["All data lives on this device", "Inference defaults"],
     }
     for path, needles in checks.items():
