@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static Android packaging and branding contract checks for the APK-first path."""
+"""Static Android packaging and approved-branding checks for the APK-first path."""
 
 from __future__ import annotations
 
@@ -119,19 +119,34 @@ def check_adaptive_icon(path: Path) -> None:
 
 def style_items(path: Path) -> dict[str, str]:
     resources = parse_xml(path)
-    style = next((node for node in resources.findall("style") if node.get("name") == "MukeiAppTheme"), None)
+    style = next(
+        (node for node in resources.findall("style") if node.get("name") == "MukeiAppTheme"),
+        None,
+    )
     if style is None:
         fail(f"{path.relative_to(ROOT)} does not declare MukeiAppTheme")
     return {node.get("name", ""): (node.text or "").strip() for node in style.findall("item")}
 
 
 def check_manifest_launcher_and_splash() -> None:
-    manifest = parse_xml(ANDROID / "AndroidManifest.xml")
+    manifest_path = ANDROID / "AndroidManifest.xml"
+    require_text(
+        manifest_path,
+        (
+            "<!-- %%INSERT_PERMISSIONS -->",
+            "<!-- %%INSERT_FEATURES -->",
+            "-- %%INSERT_APP_LIB_NAME%% --",
+            "-- %%INSERT_APP_ARGUMENTS%% --",
+        ),
+    )
+    manifest = parse_xml(manifest_path)
     version_name, version_code = workspace_version()
     if manifest.get(A + "versionName") != version_name:
         fail("Android versionName must match rust/Cargo.toml workspace version")
     if manifest.get(A + "versionCode") != str(version_code):
         fail("Android versionCode must use major*10000 + minor*100 + patch")
+    if manifest.get(A + "installLocation") != "auto":
+        fail("Qt-compatible manifest installLocation must remain auto")
 
     uses_sdk = manifest.find("uses-sdk")
     if uses_sdk is None:
@@ -141,27 +156,68 @@ def check_manifest_launcher_and_splash() -> None:
     if uses_sdk.get(A + "targetSdkVersion") != "35":
         fail("targetSdkVersion must remain 35")
 
+    supports = manifest.find("supports-screens")
+    if supports is None or any(
+        supports.get(A + attribute) != "true"
+        for attribute in ("anyDensity", "largeScreens", "normalScreens", "smallScreens")
+    ):
+        fail("Qt-compatible supports-screens contract is incomplete")
+
     application = manifest.find("application")
     if application is None:
         fail("AndroidManifest.xml has no application element")
     expected_application = {
+        "name": "org.qtproject.qt.android.bindings.QtApplication",
         "icon": "@mipmap/ic_launcher",
         "roundIcon": "@mipmap/ic_launcher_round",
         "theme": "@style/MukeiAppTheme",
+        "hardwareAccelerated": "true",
+        "requestLegacyExternalStorage": "false",
+        "allowNativeHeapPointerTagging": "false",
+        "allowBackup": "false",
+        "fullBackupOnly": "false",
     }
     for attribute, expected in expected_application.items():
         if application.get(A + attribute) != expected:
-            fail(f"application {attribute} must reference {expected}")
+            fail(f"application {attribute} must equal {expected}")
 
     activity = application.find("activity")
-    if activity is None or activity.get(A + "name") != "org.qtproject.qt.android.bindings.QtActivity":
+    expected_activity = {
+        "name": "org.qtproject.qt.android.bindings.QtActivity",
+        "theme": "@style/MukeiAppTheme",
+        "launchMode": "singleTop",
+        "screenOrientation": "unspecified",
+        "exported": "true",
+    }
+    if activity is None:
         fail("QtActivity launcher declaration is missing")
-    if activity.get(A + "theme") != "@style/MukeiAppTheme":
-        fail("QtActivity must use @style/MukeiAppTheme")
+    for attribute, expected in expected_activity.items():
+        if activity.get(A + attribute) != expected:
+            fail(f"QtActivity {attribute} must equal {expected}")
+    required_config_changes = {
+        "orientation", "uiMode", "screenLayout", "screenSize", "smallestScreenSize",
+        "layoutDirection", "locale", "fontScale", "keyboard", "keyboardHidden",
+        "navigation", "mcc", "mnc", "density",
+    }
+    if set((activity.get(A + "configChanges") or "").split("|")) != required_config_changes:
+        fail("QtActivity configChanges do not match the Qt 6.5.3 template contract")
+
+    metadata = {node.get(A + "name"): node for node in activity.findall("meta-data")}
+    expected_values = {
+        "android.app.lib_name": "-- %%INSERT_APP_LIB_NAME%% --",
+        "android.app.arguments": "-- %%INSERT_APP_ARGUMENTS%% --",
+        "android.app.extract_android_style": "minimal",
+    }
+    for name, value in expected_values.items():
+        node = metadata.get(name)
+        if node is None or node.get(A + "value") != value:
+            fail(f"mandatory Qt metadata is missing or invalid: {name}")
+    splash = metadata.get("android.app.splash_screen_drawable")
+    if splash is None or splash.get(A + "resource") != "@drawable/mukei_splash_background":
+        fail("Qt splash metadata must reference the approved Mukei splash background")
 
     for resource_name in ("ic_launcher", "ic_launcher_round"):
         check_adaptive_icon(ANDROID / "res" / "mipmap-anydpi-v26" / f"{resource_name}.xml")
-
     for drawable in (
         "ic_launcher_foreground.xml",
         "ic_launcher_monochrome.xml",
@@ -171,38 +227,39 @@ def check_manifest_launcher_and_splash() -> None:
         parse_xml(ANDROID / "res" / "drawable" / drawable)
 
     colors = parse_xml(ANDROID / "res" / "values" / "mukei_brand_colors.xml")
-    colors_by_name = {node.get("name"): (node.text or "").strip().upper() for node in colors.findall("color")}
+    colors_by_name = {
+        node.get("name"): (node.text or "").strip().upper() for node in colors.findall("color")
+    }
     if colors_by_name.get("ic_launcher_background") != "#2B211A":
         fail("approved espresso launcher background changed")
     if colors_by_name.get("mukei_splash_background") != "#F1E8DC":
         fail("approved paper splash background changed")
 
-    base_items = style_items(ANDROID / "res" / "values" / "styles.xml")
     required_base = {
         "android:windowBackground": "@drawable/mukei_splash_background",
         "android:windowLightStatusBar": "true",
         "android:statusBarColor": "@color/mukei_splash_background",
         "android:navigationBarColor": "@color/mukei_splash_background",
     }
+    base_items = style_items(ANDROID / "res" / "values" / "styles.xml")
     for name, value in required_base.items():
         if base_items.get(name) != value:
             fail(f"base MukeiAppTheme has invalid {name}")
 
-    v31_items = style_items(ANDROID / "res" / "values-v31" / "styles.xml")
     required_v31 = {
         **required_base,
         "android:windowSplashScreenBackground": "@color/mukei_splash_background",
         "android:windowSplashScreenAnimatedIcon": "@drawable/mukei_splash_icon",
         "android:windowSplashScreenIconBackgroundColor": "@android:color/transparent",
     }
+    v31_items = style_items(ANDROID / "res" / "values-v31" / "styles.xml")
     for name, value in required_v31.items():
         if v31_items.get(name) != value:
             fail(f"Android 12+ MukeiAppTheme has invalid {name}")
 
 
 def check_qml_assets() -> None:
-    qrc_path = ROOT / "qml" / "qml.qrc"
-    qrc = parse_xml(qrc_path)
+    qrc = parse_xml(ROOT / "qml" / "qml.qrc")
     declared_files = qrc.findall(".//file")
     if len(declared_files) < 35:
         fail("qml.qrc unexpectedly lost registered fonts or UI icons")
@@ -220,9 +277,9 @@ def check_build_contract() -> None:
         (
             'readonly ABI="arm64-v8a"',
             'readonly RUST_TARGET="aarch64-linux-android"',
-            "prepare-branding.py\" verify",
-            "prepare-branding.py\" materialize",
-            "prepare-branding.py\" cleanup",
+            'prepare-branding.py" verify',
+            'prepare-branding.py" materialize',
+            'prepare-branding.py" cleanup',
             "--profile android-release",
             '--features "shipping_native,android_keystore,runtime_hardening"',
             "MukeiAndroidApkInitialCache.cmake",
@@ -259,6 +316,7 @@ def main() -> int:
     print("Android APK preflight passed")
     print("  Mukei branding v3.2: exact payload verified")
     print("  launcher and splash resources: complete")
+    print("  Qt 6.5.3 manifest contract: complete")
     print("  version metadata: synchronized")
     print("  QML asset references: complete")
     print("  ABI contract: arm64-v8a only")
