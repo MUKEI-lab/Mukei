@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: release-gate-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
@@ -68,6 +71,32 @@ jobs:
       CXX_QT_EXPORT_DIR: ${{ github.workspace }}/rust/target/cxxqt-export
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Finalize canonical production source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/frontend/finalize-production-source.py
+
+      - name: Commit finalized source
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "MUKEI Source Finalizer"
+          git config user.email "actions@users.noreply.github.com"
+          git add qml/main.cpp
+          if git diff --cached --quiet; then
+            echo "Canonical source already finalized."
+            exit 0
+          fi
+          git commit -m "fix(frontend): finalize bridge event contract"
+          git fetch origin "${GITHUB_REF_NAME}"
+          git rebase "origin/${GITHUB_REF_NAME}"
+          git push --force-with-lease origin HEAD:"${GITHUB_REF_NAME}"
+
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Install Qt 6.5
