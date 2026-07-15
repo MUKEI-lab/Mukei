@@ -95,10 +95,13 @@ jobs:
 
           test -f "${SDK_ROOT}/platforms/android-35/android.jar"
           test -x "${SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}/aapt2"
+          test -x "${SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}/zipalign"
+          test -x "${SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}/apksigner"
           test -d "${SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
           echo "ANDROID_HOME=${SDK_ROOT}" >> "${GITHUB_ENV}"
           echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "${GITHUB_ENV}"
           echo "ANDROID_NDK_ROOT=${SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "${GITHUB_ENV}"
+          echo "${SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}" >> "${GITHUB_PATH}"
 
       - name: Install Qt Android and host kits
         shell: bash
@@ -159,7 +162,7 @@ jobs:
             -i numkong \
             > dist/android/diagnostics/numkong-reverse-tree.txt 2>&1 || true
 
-      - name: Build and validate APK
+      - name: Build and validate unsigned APK
         shell: bash
         env:
           CARGO_TERM_COLOR: always
@@ -169,18 +172,67 @@ jobs:
           set -o pipefail
           bash scripts/android/build-apk.sh 2>&1 | tee dist/android/build.log
 
+      - name: Create installable CI test-signed APK
+        shell: bash
+        run: |
+          UNSIGNED_SOURCE="dist/android/mukei-0.7.5-arm64-v8a.apk"
+          UNSIGNED_APK="dist/android/mukei-0.7.5-arm64-v8a-unsigned.apk"
+          SIGNED_APK="dist/android/mukei-0.7.5-arm64-v8a-test-signed.apk"
+          ALIGNED_APK="${RUNNER_TEMP}/mukei-0.7.5-arm64-v8a-aligned.apk"
+          TEST_KEYSTORE="${RUNNER_TEMP}/mukei-ci-test.p12"
+
+          test -f "${UNSIGNED_SOURCE}"
+          mv "${UNSIGNED_SOURCE}" "${UNSIGNED_APK}"
+
+          keytool -genkeypair -noprompt \
+            -storetype PKCS12 \
+            -keystore "${TEST_KEYSTORE}" \
+            -storepass android \
+            -keypass android \
+            -alias mukei-ci-test \
+            -keyalg RSA \
+            -keysize 3072 \
+            -sigalg SHA256withRSA \
+            -validity 3650 \
+            -dname "CN=Mukei CI Test,O=MUKEI-lab,C=IN"
+
+          zipalign -p -f 4 "${UNSIGNED_APK}" "${ALIGNED_APK}"
+          apksigner sign \
+            --ks "${TEST_KEYSTORE}" \
+            --ks-type PKCS12 \
+            --ks-key-alias mukei-ci-test \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --v4-signing-enabled false \
+            --out "${SIGNED_APK}" \
+            "${ALIGNED_APK}"
+
+          apksigner verify --verbose --print-certs "${SIGNED_APK}"
+          bash scripts/android/validate-apk.sh "${SIGNED_APK}"
+
       - name: Record APK checksums
         shell: bash
         run: |
-          sha256sum dist/android/*.apk | tee dist/android/SHA256SUMS
+          sha256sum \
+            dist/android/mukei-0.7.5-arm64-v8a-test-signed.apk \
+            dist/android/mukei-0.7.5-arm64-v8a-unsigned.apk \
+            | tee dist/android/SHA256SUMS
 
-      - name: Upload APK artifact
+      - name: Upload installable test-signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: mukei-0.7.5-arm64-v8a-apk
+          name: mukei-0.7.5-arm64-v8a-test-signed-apk
           path: |
-            dist/android/*.apk
+            dist/android/mukei-0.7.5-arm64-v8a-test-signed.apk
             dist/android/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload unsigned APK for production signing
+        uses: actions/upload-artifact@v4
+        with:
+          name: mukei-0.7.5-arm64-v8a-unsigned-apk
+          path: dist/android/mukei-0.7.5-arm64-v8a-unsigned.apk
           if-no-files-found: error
           retention-days: 14
 
