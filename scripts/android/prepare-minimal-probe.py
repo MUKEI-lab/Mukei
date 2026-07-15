@@ -12,12 +12,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MAIN = ROOT / "qml/main.cpp"
+CMAKE = ROOT / "qml/CMakeLists.txt"
 MANIFEST = ROOT / "qml/android/AndroidManifest.xml"
 
 WIDGETS_SOURCE = r'''#include <QApplication>
 #include <QLabel>
-#include <QLoggingCategory>
-#include <QScreen>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -68,7 +67,6 @@ INLINE_QML_SOURCE = r'''#include <QGuiApplication>
 #include <QQmlError>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
-#include <QTimer>
 
 int main(int argc, char *argv[])
 {
@@ -101,7 +99,6 @@ import QtQuick
 import QtQuick.Window
 
 Window {
-    id: root
     visible: true
     width: 720
     height: 1280
@@ -148,6 +145,37 @@ Window {
 }
 '''
 
+ANDROID_PROPERTIES = r'''
+if(ANDROID)
+    set_property(TARGET mukei PROPERTY QT_ANDROID_MIN_SDK_VERSION 29)
+    set_property(TARGET mukei PROPERTY QT_ANDROID_TARGET_SDK_VERSION 35)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/android/AndroidManifest.xml)
+        set_property(TARGET mukei PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
+            ${CMAKE_CURRENT_SOURCE_DIR}/android
+        )
+    endif()
+endif()
+'''
+
+
+def prepare_cmake() -> None:
+    text = CMAKE.read_text(encoding="utf-8")
+    old = "add_executable(mukei\n"
+    if old not in text:
+        raise SystemExit("minimal probe preparation failed: main executable declaration not found")
+    text = text.replace(old, "qt_add_executable(mukei\n", 1)
+
+    marker = "# QuickTest executes QML directly from the filesystem."
+    if marker not in text:
+        raise SystemExit("minimal probe preparation failed: test-section marker not found")
+
+    # The production CMake file defines several Android test executables in the
+    # same directory. The global `apk` target then attempts to package every
+    # test and mixes their deployment artifacts. A probe needs exactly one
+    # Android executable, so retain the application and remove the test section.
+    application_only = text.split(marker, 1)[0].rstrip()
+    CMAKE.write_text(application_only + "\n\n" + ANDROID_PROPERTIES.lstrip(), encoding="utf-8")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -156,6 +184,7 @@ def main() -> int:
 
     source = WIDGETS_SOURCE if args.variant == "qt-widgets-raster" else INLINE_QML_SOURCE
     MAIN.write_text(source, encoding="utf-8")
+    prepare_cmake()
 
     manifest = MANIFEST.read_text(encoding="utf-8")
     label = "Mukei Qt Probe" if args.variant == "qt-widgets-raster" else "Mukei QML Probe"
