@@ -419,22 +419,6 @@ public:
                     {QStringLiteral("initialized"), true},
                     {QStringLiteral("runtime"), QStringLiteral("stub")}
                 });
-                emitOperationLifecycle(context, true, QJsonObject{
-                    {QStringLiteral("initialized"), true},
-                    {QStringLiteral("runtime"), QStringLiteral("stub")}
-                });
-                emitOperationLifecycle(context, true, QJsonObject{
-                    {QStringLiteral("initialized"), true},
-                    {QStringLiteral("runtime"), QStringLiteral("stub")}
-                });
-                emitOperationLifecycle(context, true, QJsonObject{
-                    {QStringLiteral("initialized"), true},
-                    {QStringLiteral("runtime"), QStringLiteral("stub")}
-                });
-                emitOperationLifecycle(context, true, QJsonObject{
-                    {QStringLiteral("initialized"), true},
-                    {QStringLiteral("runtime"), QStringLiteral("stub")}
-                });
             } else if (commandType == QStringLiteral("chat.send_message")) {
                 m_chatContext = context;
                 send_message(payload.value(QStringLiteral("text")).toString());
@@ -905,6 +889,7 @@ signals:
     void saf_grant_revoked(const QString &token);
     void error_occurred(const QString &errorCode, const QString &message);
     void event_emitted(const QString &eventJson);
+    void eventEmitted(const QString &eventJson);
 private:
     void emitEvent(const QJsonObject &event)
     {
