@@ -92,12 +92,14 @@ readonly TARGET_CC="${NDK_TOOLCHAIN_BIN}/aarch64-linux-android${ANDROID_API}-cla
 readonly TARGET_CXX="${NDK_TOOLCHAIN_BIN}/aarch64-linux-android${ANDROID_API}-clang++"
 readonly TARGET_AR="${NDK_TOOLCHAIN_BIN}/llvm-ar"
 readonly TARGET_RANLIB="${NDK_TOOLCHAIN_BIN}/llvm-ranlib"
+readonly TARGET_LD_LLD="${NDK_TOOLCHAIN_BIN}/ld.lld"
 readonly TOOLCHAIN_COMPAT_BIN="${BUILD_ROOT}/toolchain-compat-${RUST_TARGET}"
 
 require_executable "${TARGET_CC}"
 require_executable "${TARGET_CXX}"
 require_executable "${TARGET_AR}"
 require_executable "${TARGET_RANLIB}"
+require_executable "${TARGET_LD_LLD}"
 
 mkdir -p \
     "${BUILD_ROOT}" \
@@ -110,6 +112,18 @@ mkdir -p \
 # deterministic compatibility links while also passing explicit Cargo env.
 ln -sfn "${TARGET_AR}" "${TOOLCHAIN_COMPAT_BIN}/aarch64-linux-android-ar"
 ln -sfn "${TARGET_RANLIB}" "${TOOLCHAIN_COMPAT_BIN}/aarch64-linux-android-ranlib"
+
+# Qt 6.5 builds may expose `-fuse-ld=gold` through qmake metadata consumed by
+# CXX-Qt. NDK r25 ships LLD, while falling back to host /usr/bin/ld.gold tries
+# to link Android AArch64 objects with an x86_64 host linker. Keep the legacy
+# executable name as a compatibility shim but execute the NDK linker.
+cat > "${TOOLCHAIN_COMPAT_BIN}/ld.gold" <<EOF
+#!/usr/bin/env sh
+exec "${TARGET_LD_LLD}" "\$@"
+EOF
+chmod 0755 "${TOOLCHAIN_COMPAT_BIN}/ld.gold"
+ln -sfn "${TOOLCHAIN_COMPAT_BIN}/ld.gold" \
+    "${TOOLCHAIN_COMPAT_BIN}/aarch64-linux-android-ld.gold"
 
 printf '\n==> Verifying and materializing Mukei branding v3.2\n'
 python3 "${SCRIPT_DIR}/prepare-branding.py" verify
