@@ -123,7 +123,10 @@ jobs:
         env:
           CARGO_TERM_COLOR: always
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
-        run: bash scripts/android/build-apk.sh
+        run: |
+          mkdir -p dist/android
+          set -o pipefail
+          bash scripts/android/build-apk.sh 2>&1 | tee dist/android/build.log
 
       - name: Record APK checksums
         shell: bash
@@ -139,3 +142,12 @@ jobs:
             dist/android/SHA256SUMS
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload Android build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mukei-android-build-diagnostics
+          path: dist/android/build.log
+          if-no-files-found: warn
+          retention-days: 7
