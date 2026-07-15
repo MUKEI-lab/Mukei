@@ -26,7 +26,7 @@ ApplicationWindow {
         ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
     }
 
-    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft // qmllint disable missing-property
     LayoutMirroring.childrenInherit: true
 
     signal accessibilityAnnouncementRequested(string text)
@@ -52,7 +52,7 @@ ApplicationWindow {
     Component.onCompleted: {
         ResponsiveStore.updateViewport(width - safeLeft - safeRight,
                                        height - safeTop - safeBottom)
-        AppCoordinator.configure(mukeiAgent, mukeiBridge, mukeiRuntime)
+        AppCoordinator.configure(mukeiAgent, mukeiBridge, mukeiRuntime) // qmllint disable unqualified
         AppCoordinator.start()
     }
 

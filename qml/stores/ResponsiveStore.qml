@@ -1,5 +1,6 @@
 pragma Singleton
 import QtQuick
+import "../theme"
 
 QtObject {
     enum Mode { Compact, Medium, Expanded }
