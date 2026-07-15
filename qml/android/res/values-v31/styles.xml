@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ system splash attributes layered onto the same Qt theme. -->
+    <style name="MukeiAppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">@drawable/mukei_splash_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">@color/mukei_splash_background</item>
+        <item name="android:navigationBarColor">@color/mukei_splash_background</item>
+        <item name="android:windowSplashScreenBackground">@color/mukei_splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/mukei_splash_icon</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+    </style>
+</resources>
