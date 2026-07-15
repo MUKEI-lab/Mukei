@@ -1,0 +1,171 @@
+name: android-minimal-probe-apks
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ "checkpoint/stabilization-2026-07-12" ]
+    paths:
+      - ".github/workflows/android-minimal-probe-apks.yml"
+      - "scripts/android/prepare-minimal-probe.py"
+      - "scripts/android/build-minimal-probe.sh"
+      - "scripts/android/prepare-branding.py"
+      - "qml/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-minimal-probes-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: "6.8.3"
+  ANDROID_NDK_VERSION: "26.1.10909125"
+  ANDROID_BUILD_TOOLS_VERSION: "35.0.1"
+
+jobs:
+  build-probe:
+    name: Build ${{ matrix.variant }} probe APK
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - qt-widgets-raster
+          - inline-qml-software
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install host tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            p7zip-full \
+            libegl1 \
+            libgl1 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0
+          python -m pip install --upgrade pip
+          python -m pip install "aqtinstall==3.3.*" "py7zr==1.1.*"
+
+      - name: Install Android SDK and NDK components
+        shell: bash
+        run: |
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "${SDK_ROOT}"
+          SDKMANAGER="${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "${SDKMANAGER}" ]]; then
+            SDKMANAGER="$(find "${SDK_ROOT}/cmdline-tools" -type f -path '*/bin/sdkmanager' -perm -u+x -print 2>/dev/null | sort -V | tail -n 1)"
+          fi
+          test -x "${SDKMANAGER}"
+          yes | "${SDKMANAGER}" --licenses >/dev/null 2>&1 || true
+          "${SDKMANAGER}" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
+            "ndk;${ANDROID_NDK_VERSION}"
+          echo "ANDROID_HOME=${SDK_ROOT}" >> "${GITHUB_ENV}"
+          echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "${GITHUB_ENV}"
+          echo "ANDROID_NDK_ROOT=${SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "${GITHUB_ENV}"
+          echo "${SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}" >> "${GITHUB_PATH}"
+
+      - name: Install Qt Android and host kits
+        shell: bash
+        run: |
+          QT_INSTALL_ROOT="${RUNNER_TEMP}/Qt"
+          aqt install-qt \
+            linux android "${QT_VERSION}" android_arm64_v8a \
+            --autodesktop \
+            --outputdir "${QT_INSTALL_ROOT}" \
+            --external 7z
+          QT_ANDROID_ROOT="${QT_INSTALL_ROOT}/${QT_VERSION}/android_arm64_v8a"
+          QT_HOST_ROOT="${QT_INSTALL_ROOT}/${QT_VERSION}/gcc_64"
+          test -x "${QT_ANDROID_ROOT}/bin/qt-cmake"
+          test -d "${QT_HOST_ROOT}"
+          echo "QT_ANDROID_ROOT=${QT_ANDROID_ROOT}" >> "${GITHUB_ENV}"
+          echo "QT_HOST_ROOT=${QT_HOST_ROOT}" >> "${GITHUB_ENV}"
+
+      - name: Prepare minimal source probe
+        shell: bash
+        run: |
+          python3 scripts/android/prepare-minimal-probe.py "${{ matrix.variant }}"
+          grep -q "MukeiProbe" qml/main.cpp
+
+      - name: Build unsigned probe APK
+        shell: bash
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
+        run: |
+          mkdir -p dist/android-probes
+          set -o pipefail
+          bash scripts/android/build-minimal-probe.sh "${{ matrix.variant }}" \
+            2>&1 | tee "dist/android-probes/${{ matrix.variant }}-build.log"
+
+      - name: Sign and verify probe APK
+        shell: bash
+        run: |
+          VARIANT="${{ matrix.variant }}"
+          UNSIGNED="dist/android-probes/mukei-0.7.5-${VARIANT}-unsigned.apk"
+          ALIGNED="${RUNNER_TEMP}/mukei-${VARIANT}-aligned.apk"
+          SIGNED="dist/android-probes/mukei-0.7.5-${VARIANT}-test-signed.apk"
+          KEYSTORE="${RUNNER_TEMP}/mukei-${VARIANT}.p12"
+          test -f "${UNSIGNED}"
+          keytool -genkeypair -noprompt \
+            -storetype PKCS12 \
+            -keystore "${KEYSTORE}" \
+            -storepass android \
+            -keypass android \
+            -alias mukei-probe \
+            -keyalg RSA \
+            -keysize 3072 \
+            -sigalg SHA256withRSA \
+            -validity 3650 \
+            -dname "CN=Mukei ${VARIANT} Probe,O=MUKEI-lab,C=IN"
+          zipalign -p -f 4 "${UNSIGNED}" "${ALIGNED}"
+          apksigner sign \
+            --ks "${KEYSTORE}" \
+            --ks-type PKCS12 \
+            --ks-key-alias mukei-probe \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --v4-signing-enabled false \
+            --out "${SIGNED}" \
+            "${ALIGNED}"
+          apksigner verify --verbose --print-certs "${SIGNED}"
+          sha256sum "${SIGNED}" > "dist/android-probes/${VARIANT}-SHA256SUMS"
+
+      - name: Upload probe APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mukei-0.7.5-${{ matrix.variant }}-probe-apk
+          path: |
+            dist/android-probes/mukei-0.7.5-${{ matrix.variant }}-test-signed.apk
+            dist/android-probes/${{ matrix.variant }}-SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload probe diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mukei-${{ matrix.variant }}-probe-diagnostics
+          path: dist/android-probes/${{ matrix.variant }}-build.log
+          if-no-files-found: warn
+          retention-days: 7
