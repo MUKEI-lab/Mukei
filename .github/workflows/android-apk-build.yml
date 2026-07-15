@@ -288,4 +288,6 @@ jobs:
             exit 0
           fi
           git commit -m "ci: record Android APK build ${GITHUB_RUN_NUMBER}"
-          git push origin HEAD:${GITHUB_REF_NAME}
+          git fetch origin "${GITHUB_REF_NAME}"
+          git rebase "origin/${GITHUB_REF_NAME}"
+          git push --force-with-lease origin HEAD:"${GITHUB_REF_NAME}"
