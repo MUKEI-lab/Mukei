@@ -26,7 +26,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  MIGRATION_REVISION: "5"
+  MIGRATION_REVISION: "6"
 
 jobs:
   migrate:
@@ -83,8 +83,10 @@ jobs:
           fi
 
           git commit -m "feat(frontend): apply UXB v2.1 production frontend"
+          git restore .github/workflows/android-apk-build.yml
           git fetch origin agent/full-qml-fixed-build-2026-07-15
           git rebase origin/agent/full-qml-fixed-build-2026-07-15
+          git status --short | tee dist/frontend-migration/status.log
           git push --force-with-lease \
             origin HEAD:agent/full-qml-fixed-build-2026-07-15 \
             2>&1 | tee dist/frontend-migration/push.log
