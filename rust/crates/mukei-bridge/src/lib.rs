@@ -997,7 +997,7 @@ fn persist_provider_secret(alias: &str, secret: &Zeroizing<String>) -> Result<()
     }
 }
 
-async fn hydrate_provider_secrets_from_platform() -> Result<(), String> {
+fn hydrate_provider_secrets_from_platform() -> Result<(), String> {
     if let Some(bytes) = android_secret_store::load(BRAVE_SECRET_ALIAS)? {
         let value = String::from_utf8(bytes.to_vec())
             .map_err(|_| "stored Brave credential is not valid UTF-8".to_string())?;
