@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Minimal Android manifest for the Mukei QML shell. `QT_ANDROID_PACKAGE_SOURCE_DIR`
+  Android manifest for the Mukei QML shell. `QT_ANDROID_PACKAGE_SOURCE_DIR`
   in qml/CMakeLists.txt points at this directory, so androiddeployqt uses
-  this file as the base manifest and overlays Qt's generated attributes on
-  top of it. Network-backed provider/search and model download features
-  require INTERNET to be declared here; Android does not grant that
+  this file as the package-source manifest and overlays Qt's generated
+  attributes on top of it. Network-backed provider/search and model download
+  features require INTERNET to be declared here; Android does not grant that
   permission at runtime.
 
   minSdk 29 aligns with QT_ANDROID_MIN_SDK_VERSION in CMakeLists.txt;
@@ -19,8 +19,10 @@
     <application
         android:label="Mukei"
         android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="false"
-        android:hasFragileUserData="true">
+        android:hasFragileUserData="true"
+        android:supportsRtl="true">
         <activity
             android:name="org.qtproject.qt.android.bindings.QtActivity"
             android:exported="true"
