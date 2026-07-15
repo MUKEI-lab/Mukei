@@ -105,6 +105,7 @@ jobs:
           python3 scripts/android/prepare-full-qml-fixed.py
           python3 scripts/android/patch-startup-event-pipeline.py
           python3 scripts/android/prepare-mobile-ui-fixes.py
+          python3 scripts/android/prepare-android-insets-navigation.py
           grep -q 'qrc:/com/mukei/app/MainWindow.qml' qml/main.cpp
           grep -q 'QFile::exists(canonicalResource)' qml/main.cpp
           grep -q 'eventEmitted(eventJson)' qml/main.cpp
@@ -112,6 +113,8 @@ jobs:
           grep -q 'stubStartupWatchdog' qml/architecture/AppCoordinator.qml
           grep -q 'Navigation is a local presentation concern' qml/architecture/IntentDispatcher.qml
           grep -q 'height: parent ? parent.height' qml/components/LeftDrawer.qml
+          grep -q 'androidTopInset' qml/MainWindow.qml
+          grep -q 'NavigationStore.navigate("settings"' qml/screens/ChatScreen.qml
           grep -q 'Keep the fallback window hidden' qml/main.cpp
           grep -q 'qt_add_executable(mukei' qml/CMakeLists.txt
 
@@ -144,7 +147,7 @@ jobs:
             -keysize 3072 \
             -sigalg SHA256withRSA \
             -validity 3650 \
-            -dname "CN=Mukei Mobile UI Fix,O=MUKEI-lab,C=IN"
+            -dname "CN=Mukei Insets Navigation Fix,O=MUKEI-lab,C=IN"
           zipalign -p -f 4 "${UNSIGNED}" "${ALIGNED}"
           apksigner sign \
             --ks "${KEYSTORE}" \
