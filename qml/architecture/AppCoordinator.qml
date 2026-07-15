@@ -13,6 +13,22 @@ Item {
     signal architectureReady
     signal readyStateHydrated
 
+    Timer {
+        id: startupWatchdog
+        interval: 45000
+        repeat: false
+        onTriggered: {
+            if (LifecycleStore.ready || LifecycleStore.quarantined)
+                return
+            var detail = qsTr("Secure startup did not complete within 45 seconds. Restart Mukei; if it repeats, collect diagnostics.")
+            LifecycleStore.setLocalState("fatal_error", detail)
+            NavigationStore.syncWithLifecycle(LifecycleStore.state)
+            ErrorStore.push({ code: "ERR_STARTUP_TIMEOUT", severity: "fatal",
+                              recoverable: true, user_message: detail,
+                              suggested_action: "restart" }, "ERR_STARTUP_TIMEOUT")
+        }
+    }
+
     function configure(agent, bridge, runtime) {
         ContractStore.configure(agent)
         EventDispatcher.agentSource = agent
@@ -36,6 +52,7 @@ Item {
     function continueStartupAfterContract() {
         LifecycleStore.setLocalState("bootstrapping", "")
         NavigationStore.syncWithLifecycle(LifecycleStore.state)
+        startupWatchdog.restart()
         if (runtimeSource && runtimeSource.autoInitialize === true) {
             IntentDispatcher.dispatch({
                 type: "app.initialize",
@@ -152,6 +169,17 @@ Item {
         DownloadStore.applyEvent(event)
         ModelStore.applyEvent(event)
         ErrorStore.applyEvent(event)
+
+        if (event.category === "error" && !LifecycleStore.ready) {
+            var source = event.error && event.error.source ? String(event.error.source) : ""
+            if (["initialize", "secure_bootstrap", "database_open", "production_safety"].indexOf(source) >= 0) {
+                var detail = event.error.user_message || event.error.safe_message
+                        || qsTr("Secure startup could not complete safely.")
+                startupWatchdog.stop()
+                LifecycleStore.setLocalState("fatal_error", detail)
+                NavigationStore.syncWithLifecycle(LifecycleStore.state)
+            }
+        }
 
         if ((event.command_type === "recovery.resume" || event.command_type === "recovery.regenerate")
                 && event.category === "chat_state" && event.state === "submitting"

@@ -1011,6 +1011,16 @@ async fn hydrate_provider_secrets_from_platform() -> Result<(), String> {
     Ok(())
 }
 
+async fn hydrate_provider_secrets_bounded() -> Result<(), String> {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        tokio::task::spawn_blocking(hydrate_provider_secrets_from_platform),
+    ).await {
+        Ok(joined) => joined.map_err(|error| format!("provider secret worker failed: {error}"))?,
+        Err(_) => Err("provider secret hydration timed out".to_string()),
+    }
+}
+
 #[cfg(feature = "rusqlite")]
 async fn persist_provider_secret_refs(
     pool: &mukei_core::storage::DatabasePool,
@@ -1970,7 +1980,7 @@ impl ffi::MukeiAgent {
                 max_iterations = cfg.watchdog.max_iterations,
                 "config loaded"
             );
-            if let Err(error) = hydrate_provider_secrets_from_platform().await {
+            if let Err(error) = hydrate_provider_secrets_bounded().await {
                 let err = mukei_core::error::MukeiError::SafeStorageUnavailable(
                     format!("provider secret hydration failed: {error}"),
                 );
@@ -2045,8 +2055,17 @@ impl ffi::MukeiAgent {
                             }
                         }
 
+                        let _ = qt.queue(|mut qobject| {
+                            qobject.as_mut().event_emitted(event_json(BridgeEvent::new(
+                                BridgeEventKind::AppLifecycle {
+                                    state: AppLifecycleState::CreatingWrappingKey,
+                                    capabilities: CapabilitySnapshot::uninitialized(),
+                                    android_storage: Some(AndroidStorageState::Unknown),
+                                },
+                            )));
+                        });
                         let qt_for_state = qt.clone();
-                        let prepared = prepare_database_key_with_observer(
+                        let prepared = tokio::task::block_in_place(|| prepare_database_key_with_observer(
                             runtime_state().secure_bootstrap(),
                             &PlatformSecureKeyProvider,
                             move |secure_state| {
@@ -2066,7 +2085,7 @@ impl ffi::MukeiAgent {
                                     )));
                                 });
                             },
-                        );
+                        ));
                         match prepared {
                             Ok(prepared) => {
                                 tracing::info!(

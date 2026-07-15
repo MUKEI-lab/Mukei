@@ -39,6 +39,9 @@ QtObject {
 
     function titleForState(value) {
         switch (value) {
+        case "bootstrapping": return qsTr("Starting Mukei")
+        case "booting": return qsTr("Starting local runtime")
+        case "loading_config": return qsTr("Loading private configuration")
         case "needs_database_key": return qsTr("Preparing secure storage")
         case "creating_wrapping_key": return qsTr("Creating device protection")
         case "creating_database_key": return qsTr("Creating private storage key")
@@ -68,6 +71,9 @@ QtObject {
         if (safeDetail.length > 0)
             return safeDetail
         switch (value) {
+        case "bootstrapping": return qsTr("Connecting the production frontend to the local runtime.")
+        case "booting": return qsTr("The native runtime is starting on this device.")
+        case "loading_config": return qsTr("Mukei is validating app-private paths and local configuration.")
         case "needs_database_key": return qsTr("Waiting for the native secure-key provider. No private data is opened yet.")
         case "creating_wrapping_key": return qsTr("Mukei is establishing device-bound protection for the encrypted database key.")
         case "creating_database_key": return qsTr("A new random database key is being created in memory for first-time setup.")
