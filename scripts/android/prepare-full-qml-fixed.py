@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MAIN = ROOT / "qml/main.cpp"
+MAIN_WINDOW = ROOT / "qml/MainWindow.qml"
 CMAKE = ROOT / "qml/CMakeLists.txt"
 MANIFEST = ROOT / "qml/android/AndroidManifest.xml"
 
@@ -49,6 +50,17 @@ def patch_main() -> None:
         raise SystemExit("Android Vulkan selection not found")
     text = text.replace("QSGRendererInterface::Vulkan", "QSGRendererInterface::OpenGL", 1)
 
+    # The local stub contract had drifted behind ContractStore: versions matched,
+    # but the scoped command capability required by commandProtocolPresent was
+    # missing from both the required-feature and protocol-capability lists.
+    capability_anchor = '"operation_lifecycle_events","legacy_event_v1_compatibility"'
+    if text.count(capability_anchor) != 2:
+        raise SystemExit("expected two stub contract capability anchors")
+    text = text.replace(
+        capability_anchor,
+        '"operation_lifecycle_events","scoped_chat_operations","legacy_event_v1_compatibility"',
+    )
+
     engine_anchor = "    QQmlApplicationEngine engine;\n"
     diagnostics_setup = '''    QWidget diagnosticsWindow;
     diagnosticsWindow.setWindowTitle(QStringLiteral("Mukei Full QML Diagnostics"));
@@ -68,7 +80,7 @@ def patch_main() -> None:
     diagnosticsText->setPlainText(QStringLiteral(
         "PASS  Android + Qt Widgets fallback window\\n"
         "PASS  Qt Quick + OpenGL verified on this device\\n"
-        "WAIT  Checking packaged MainWindow resources..."));
+        "WAIT  Checking packaged MainWindow and asset resources..."));
     diagnosticsLayout->addWidget(diagnosticsText, 1);
     diagnosticsWindow.showFullScreen();
 
@@ -88,6 +100,8 @@ def patch_main() -> None:
 '''
     diagnostics_connections = '''    const QString canonicalResource = QStringLiteral(":/com/mukei/app/MainWindow.qml");
     const QString legacyResource = QStringLiteral(":/qt/qml/com/mukei/app/MainWindow.qml");
+    const QString iconResource = QStringLiteral(":/icons/chat.svg");
+    const QString fontResource = QStringLiteral(":/fonts/Inter-Variable.ttf");
     const QUrl canonicalUrl(QStringLiteral("qrc:/com/mukei/app/MainWindow.qml"));
 
     diagnosticsText->appendPlainText(QStringLiteral("%1  %2")
@@ -96,11 +110,16 @@ def patch_main() -> None:
     diagnosticsText->appendPlainText(QStringLiteral("%1  %2")
         .arg(QFile::exists(legacyResource) ? QStringLiteral("PASS") : QStringLiteral("FAIL"),
              legacyResource));
+    diagnosticsText->appendPlainText(QStringLiteral("%1  %2")
+        .arg(QFile::exists(iconResource) ? QStringLiteral("PASS") : QStringLiteral("FAIL"),
+             iconResource));
+    diagnosticsText->appendPlainText(QStringLiteral("%1  %2")
+        .arg(QFile::exists(fontResource) ? QStringLiteral("PASS") : QStringLiteral("FAIL"),
+             fontResource));
     diagnosticsText->appendPlainText(QStringLiteral("WAIT  Direct-loading %1...").arg(canonicalUrl.toString()));
 
     QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app,
-                     [diagnosticsText, &diagnosticsWindow](const QList<QQmlError> &warnings) {
-        diagnosticsWindow.showFullScreen();
+                     [diagnosticsText](const QList<QQmlError> &warnings) {
         for (const QQmlError &warning : warnings) {
             const QString message = warning.toString();
             diagnosticsText->appendPlainText(QStringLiteral("QML  ") + message);
@@ -145,12 +164,30 @@ def patch_main() -> None:
     MAIN.write_text(text, encoding="utf-8")
 
 
+def patch_main_window() -> None:
+    text = MAIN_WINDOW.read_text(encoding="utf-8")
+    replacements = {
+        "        sequence: StandardKey.Preferences": "        sequences: [ StandardKey.Preferences ]",
+        "        sequence: StandardKey.Back": "        sequences: [ StandardKey.Back ]",
+    }
+    for old, new in replacements.items():
+        if old not in text:
+            raise SystemExit(f"shortcut anchor not found: {old.strip()}")
+        text = text.replace(old, new, 1)
+    MAIN_WINDOW.write_text(text, encoding="utf-8")
+
+
 def patch_cmake() -> None:
     text = CMAKE.read_text(encoding="utf-8")
     old = "add_executable(mukei\n"
     if old not in text:
         raise SystemExit("main executable declaration not found")
     text = text.replace(old, "qt_add_executable(mukei\n", 1)
+
+    autorcc_anchor = "set(CMAKE_AUTOMOC ON)\n"
+    if autorcc_anchor not in text:
+        raise SystemExit("CMAKE_AUTOMOC anchor not found")
+    text = text.replace(autorcc_anchor, autorcc_anchor + "set(CMAKE_AUTORCC ON)\n", 1)
 
     marker = "# QuickTest executes QML directly from the filesystem."
     if marker not in text:
@@ -161,15 +198,16 @@ def patch_cmake() -> None:
 
 def patch_manifest() -> None:
     text = MANIFEST.read_text(encoding="utf-8")
-    text = text.replace('android:label="Mukei"', 'android:label="Mukei Direct QRC Diagnostics"')
+    text = text.replace('android:label="Mukei"', 'android:label="Mukei UI Runtime Fix"')
     MANIFEST.write_text(text, encoding="utf-8")
 
 
 def main() -> int:
     patch_main()
+    patch_main_window()
     patch_cmake()
     patch_manifest()
-    print("Prepared full Mukei QML tree with canonical direct-QRC loading")
+    print("Prepared Mukei UI with compatible stub contract and compiled QRC assets")
     return 0
 
 
