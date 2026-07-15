@@ -26,7 +26,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  MIGRATION_REVISION: "3"
+  MIGRATION_REVISION: "4"
 
 jobs:
   migrate:
@@ -49,20 +49,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "Migration revision ${MIGRATION_REVISION}"
-          python3 -m py_compile \
-            scripts/frontend/apply-production-frontend.py \
-            scripts/frontend/normalize-production-frontend.py
-          python3 scripts/frontend/apply-production-frontend.py
-          python3 scripts/frontend/normalize-production-frontend.py
+          mkdir -p dist/frontend-migration
+          echo "Migration revision ${MIGRATION_REVISION}" | tee dist/frontend-migration/migration.log
+          {
+            python3 -m py_compile \
+              scripts/frontend/apply-production-frontend.py \
+              scripts/frontend/normalize-production-frontend.py
+            python3 scripts/frontend/apply-production-frontend.py
+            python3 scripts/frontend/normalize-production-frontend.py
 
-          grep -Fq 'qt_add_executable(mukei' qml/CMakeLists.txt
-          grep -Fq 'set(CMAKE_AUTORCC ON)' qml/CMakeLists.txt
-          grep -Fq 'qrc:/com/mukei/app/MainWindow.qml' qml/main.cpp
-          grep -Fq 'QSGRendererInterface::OpenGL' qml/main.cpp
-          grep -Fq 'function onEventEmitted' qml/events/EventDispatcher.qml
-          grep -Fq 'All data lives on this device' qml/screens/SettingsScreen.qml
-          grep -Fq 'Choose a verified local model' qml/screens/ChatScreen.qml
+            grep -Fq 'qt_add_executable(mukei' qml/CMakeLists.txt
+            grep -Fq 'set(CMAKE_AUTORCC ON)' qml/CMakeLists.txt
+            grep -Fq 'qrc:/com/mukei/app/MainWindow.qml' qml/main.cpp
+            grep -Fq 'QSGRendererInterface::OpenGL' qml/main.cpp
+            grep -Fq 'function onEventEmitted' qml/events/EventDispatcher.qml
+            grep -Fq 'All data lives on this device' qml/screens/SettingsScreen.qml
+            grep -Fq 'Choose a verified local model' qml/screens/ChatScreen.qml
+          } 2>&1 | tee -a dist/frontend-migration/migration.log
 
       - name: Commit canonical production source
         shell: bash
@@ -76,9 +79,22 @@ jobs:
             .github/workflows/android-apk-build.yml
 
           if git diff --cached --quiet; then
-            echo "Canonical production frontend is already applied."
+            echo "Canonical production frontend is already applied." | tee dist/frontend-migration/push.log
             exit 0
           fi
 
           git commit -m "feat(frontend): apply UXB v2.1 production frontend"
-          git push origin HEAD:agent/full-qml-fixed-build-2026-07-15
+          git fetch origin agent/full-qml-fixed-build-2026-07-15
+          git rebase origin/agent/full-qml-fixed-build-2026-07-15
+          git push --force-with-lease \
+            origin HEAD:agent/full-qml-fixed-build-2026-07-15 \
+            2>&1 | tee dist/frontend-migration/push.log
+
+      - name: Upload migration transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-frontend-migration-${{ github.run_id }}
+          path: dist/frontend-migration/**
+          if-no-files-found: warn
+          retention-days: 7
