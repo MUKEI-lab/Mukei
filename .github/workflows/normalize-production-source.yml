@@ -1,0 +1,55 @@
+name: normalize-production-source
+
+on:
+  push:
+    branches:
+      - "agent/full-qml-fixed-build-2026-07-15"
+    paths:
+      - ".github/workflows/normalize-production-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/full-qml-fixed-build-2026-07-15
+          fetch-depth: 0
+
+      - name: Collapse duplicate stub initialization completions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("qml/main.cpp")
+          text = path.read_text(encoding="utf-8")
+          block = '''                emitOperationLifecycle(context, true, QJsonObject{
+                      {QStringLiteral("initialized"), true},
+                      {QStringLiteral("runtime"), QStringLiteral("stub")}
+                  });'''
+          while text.count(block) > 1:
+              text = text.replace(block + "\n" + block, block, 1)
+          if text.count(block) != 1:
+              raise SystemExit(f"expected exactly one stub completion block, found {text.count(block)}")
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Commit normalized source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "MUKEI Source Normalizer"
+          git config user.email "actions@users.noreply.github.com"
+          git add qml/main.cpp
+          if git diff --cached --quiet; then
+            echo "Source already normalized."
+            exit 0
+          fi
+          git commit -m "fix(frontend): normalize stub initialization completion"
+          git push origin HEAD:agent/full-qml-fixed-build-2026-07-15
