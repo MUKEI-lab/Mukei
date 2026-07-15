@@ -129,6 +129,14 @@ jobs:
           set -e
           python3 qml/scripts/qmllint_allowlist_guard.py /tmp/mukei-qmllint.log
           exit "$lint_status"
+      - name: Upload qmllint failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qml-lint-failure
+          path: /tmp/mukei-qmllint.log
+          if-no-files-found: error
+          retention-days: 3
       - name: Build QML and test targets
         run: cmake --build "$CMAKE_BUILD_DIR" -j2
       - name: Run CTest
