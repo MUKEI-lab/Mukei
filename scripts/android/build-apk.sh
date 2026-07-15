@@ -5,8 +5,10 @@ set -Eeuo pipefail
 # Scope is intentionally arm64-v8a only. Multi-ABI packaging belongs to the
 # later AAB phase and must not silently reuse an aarch64 Rust static library.
 
-readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-readonly REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+readonly REPO_ROOT
 readonly ABI="arm64-v8a"
 readonly RUST_TARGET="aarch64-linux-android"
 readonly ANDROID_API="${ANDROID_API:-29}"
@@ -41,9 +43,9 @@ require_executable() {
 cleanup_branding() {
     python3 "${SCRIPT_DIR}/prepare-branding.py" cleanup \
         --repo-root "${REPO_ROOT}" \
-        --state "${BRANDING_STATE}" || true
+        --state "${BRANDING_STATE}"
 }
-trap cleanup_branding EXIT
+trap 'cleanup_branding || true' EXIT
 
 : "${ANDROID_SDK_ROOT:=${ANDROID_HOME:-}}"
 : "${ANDROID_NDK_ROOT:=${ANDROID_NDK_HOME:-}}"
@@ -179,4 +181,6 @@ final_apk="${DIST_DIR}/mukei-${product_version}-${ABI}.apk"
 cp -f "${apk_path}" "${final_apk}"
 bash "${SCRIPT_DIR}/validate-apk.sh" "${final_apk}"
 
+cleanup_branding
+trap - EXIT
 printf '\nAPK ready: %s\n' "${final_apk}"
