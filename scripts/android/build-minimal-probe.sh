@@ -10,6 +10,7 @@ readonly ABI="arm64-v8a"
 readonly ANDROID_API="${ANDROID_API:-29}"
 readonly BUILD_TYPE="${BUILD_TYPE:-Release}"
 readonly BUILD_ROOT="${BUILD_ROOT:-${REPO_ROOT}/build/android-probe-${VARIANT}}"
+readonly PACKAGE_ROOT="${BUILD_ROOT}/android-build-mukei"
 readonly DIST_DIR="${DIST_DIR:-${REPO_ROOT}/dist/android-probes}"
 readonly BRANDING_STATE="${BUILD_ROOT}/branding-materialization.json"
 
@@ -43,13 +44,14 @@ trap cleanup_branding EXIT
 require_dir "${ANDROID_SDK_ROOT}"
 require_dir "${ANDROID_NDK_ROOT}"
 require_exe "${QT_ANDROID_ROOT}/bin/qt-cmake"
+require_exe "${QT_HOST_ROOT}/bin/androiddeployqt"
 require_dir "${QT_HOST_ROOT}"
 require_cmd cmake
 require_cmd ninja
 require_cmd python3
 require_cmd unzip
 
-mkdir -p "${BUILD_ROOT}" "${DIST_DIR}"
+mkdir -p "${BUILD_ROOT}" "${PACKAGE_ROOT}" "${DIST_DIR}"
 
 printf '\n==> Materializing verified launcher resources\n'
 python3 "${SCRIPT_DIR}/prepare-branding.py" verify
@@ -72,16 +74,27 @@ printf '\n==> Configuring minimal probe: %s\n' "${VARIANT}"
     -DMUKEI_USE_REAL_BRIDGE=OFF \
     -DMUKEI_USE_NATIVE_INFERENCE=OFF
 
-cmake --build "${BUILD_ROOT}" --target apk --parallel
+printf '\n==> Building only the mukei application target\n'
+cmake --build "${BUILD_ROOT}" --target mukei --parallel
 
-mapfile -t candidates < <(find "${BUILD_ROOT}" -type f -name '*.apk' -print | sort)
-((${#candidates[@]} > 0)) || fail "Qt build produced no APK"
-source_apk="${candidates[-1]}"
+deployment_settings="${BUILD_ROOT}/android-mukei-deployment-settings.json"
+[[ -f "${deployment_settings}" ]] || fail "missing deployment settings: ${deployment_settings}"
+
+packaged_apk="${PACKAGE_ROOT}/mukei-${VARIANT}.apk"
+printf '\n==> Packaging only the mukei application target\n'
+"${QT_HOST_ROOT}/bin/androiddeployqt" \
+    --input "${deployment_settings}" \
+    --output "${PACKAGE_ROOT}" \
+    --apk "${packaged_apk}" \
+    --builddir "${BUILD_ROOT}" \
+    --release
+
+[[ -f "${packaged_apk}" ]] || fail "androiddeployqt produced no APK"
 output_apk="${DIST_DIR}/mukei-0.7.5-${VARIANT}-unsigned.apk"
-cp -f "${source_apk}" "${output_apk}"
+cp -f "${packaged_apk}" "${output_apk}"
 
 unzip -tq "${output_apk}" >/dev/null
-unzip -l "${output_apk}" | grep -q 'lib/arm64-v8a/libmukei_arm64-v8a.so' 
+unzip -l "${output_apk}" | grep -q 'lib/arm64-v8a/libmukei_arm64-v8a.so'
 unzip -l "${output_apk}" | grep -q 'AndroidManifest.xml'
 if unzip -l "${output_apk}" | grep -q 'libmukei_llama_native.so'; then
     fail "minimal probe unexpectedly packaged llama native runtime"
