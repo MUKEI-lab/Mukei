@@ -33,23 +33,28 @@ export DIST_DIR=/custom/output/directory
 
 ## Branding integrity
 
-The approved Mukei Android branding v3.2 handoff is preserved at
-`qml/assets/branding/v3.2/` as a SHA-pinned, lossless payload containing every
-production PNG. Runtime vector resources are committed byte-for-byte from that
-handoff. Density PNGs are decoded without recompression immediately before the
-Qt/Gradle build and removed afterwards.
+The approved Mukei Android branding v3.2 resources are preserved under
+`qml/assets/branding/v3.2/` with their original handoff manifest and validation
+report. Launcher vectors, splash vectors, and colors are committed byte-for-byte
+from the handoff. The ten build-required density PNGs are stored in a SHA-pinned,
+lossless payload and decoded without recompression immediately before the
+Qt/Gradle build.
 
-Verify the complete production payload independently:
+The remaining Play Store and standalone master PNGs stay unchanged in the
+original v3.2 handoff and are not duplicated in the APK source tree. They belong
+to the later store-release phase and are not runtime APK resources.
+
+Verify the APK branding payload independently:
 
 ```bash
 python3 scripts/android/prepare-branding.py verify
 ```
 
-Export the standalone Play Store, launcher, splash, and surface assets:
+Export the exact launcher density PNGs:
 
 ```bash
 python3 scripts/android/prepare-branding.py export \
-  --output-dir dist/android/branding-v3.2
+  --output-dir dist/android/branding-v3.2-launcher
 ```
 
 ## Build
@@ -62,7 +67,7 @@ bash scripts/android/build-apk.sh
 
 The script performs these stages in order:
 
-1. verifies the approved branding payload and every manifest SHA-256;
+1. verifies the approved launcher payload and every manifest SHA-256;
 2. materializes exact density PNGs into the Android package source;
 3. builds the pinned llama.cpp capsule for `arm64-v8a`;
 4. cross-compiles `mukei-bridge` with the `android-release` Cargo profile;
