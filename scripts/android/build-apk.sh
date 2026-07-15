@@ -18,6 +18,7 @@ readonly DIST_DIR="${DIST_DIR:-${REPO_ROOT}/dist/android}"
 readonly CXX_QT_EXPORT_DIR="${CXX_QT_EXPORT_DIR:-${REPO_ROOT}/rust/target/cxxqt-export}"
 readonly BRIDGE_LIB="${REPO_ROOT}/rust/target/${RUST_TARGET}/android-release/libmukei_bridge.a"
 readonly LLAMA_LIB="${REPO_ROOT}/rust/llama-cpp-prebuilt/prebuilt/${ABI}/libmukei_llama_native.so"
+readonly ANDROID_INITIAL_CACHE="${REPO_ROOT}/qml/cmake/MukeiAndroidApkInitialCache.cmake"
 
 fail() {
     printf 'error: %s\n' "$*" >&2
@@ -56,6 +57,7 @@ require_command cmake
 require_command ninja
 require_command python3
 require_command unzip
+[[ -f "${ANDROID_INITIAL_CACHE}" ]] || fail "Android CMake initial cache is missing"
 
 if command -v rustup >/dev/null 2>&1; then
     rustup target add "${RUST_TARGET}"
@@ -124,18 +126,17 @@ printf '\n==> Cross-compiling Rust/CXX-Qt bridge for %s\n' "${RUST_TARGET}"
 
 printf '\n==> Configuring Qt Android application\n'
 "${QT_ANDROID_ROOT}/bin/qt-cmake" \
+    -DANDROID_ABI="${ABI}" \
+    -C "${ANDROID_INITIAL_CACHE}" \
     -S "${REPO_ROOT}/qml" \
     -B "${QML_BUILD_DIR}" \
     -G Ninja \
     -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-    -DANDROID_ABI="${ABI}" \
     -DANDROID_PLATFORM="android-${ANDROID_API}" \
     -DANDROID_SDK_ROOT="${ANDROID_SDK_ROOT}" \
     -DANDROID_NDK_ROOT="${ANDROID_NDK_ROOT}" \
     -DQT_HOST_PATH="${QT_HOST_ROOT}" \
     -DQT_ANDROID_BUILD_ALL_ABIS=OFF \
-    -DMUKEI_USE_REAL_BRIDGE=ON \
-    -DMUKEI_USE_NATIVE_INFERENCE=ON \
     -DMUKEI_BRIDGE_LIB="${BRIDGE_LIB}" \
     -DMUKEI_LLAMA_NATIVE_LIB="${LLAMA_LIB}" \
     -DMUKEI_CXX_QT_EXPORT_DIR="${CXX_QT_EXPORT_DIR}"
@@ -162,6 +163,6 @@ PY
 
 final_apk="${DIST_DIR}/mukei-${product_version}-${ABI}.apk"
 cp -f "${apk_path}" "${final_apk}"
-"${SCRIPT_DIR}/validate-apk.sh" "${final_apk}"
+bash "${SCRIPT_DIR}/validate-apk.sh" "${final_apk}"
 
 printf '\nAPK ready: %s\n' "${final_apk}"
