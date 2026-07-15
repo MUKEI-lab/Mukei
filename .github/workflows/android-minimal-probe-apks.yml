@@ -103,8 +103,12 @@ jobs:
         shell: bash
         run: |
           python3 scripts/android/prepare-full-qml-fixed.py
+          python3 scripts/android/patch-startup-event-pipeline.py
           grep -q 'qrc:/com/mukei/app/MainWindow.qml' qml/main.cpp
           grep -q 'QFile::exists(canonicalResource)' qml/main.cpp
+          grep -q 'eventEmitted(eventJson)' qml/main.cpp
+          grep -q 'onEventEmitted' qml/events/EventDispatcher.qml
+          grep -q 'stubStartupWatchdog' qml/architecture/AppCoordinator.qml
           grep -q 'qt_add_executable(mukei' qml/CMakeLists.txt
 
       - name: Build unsigned full UI APK
