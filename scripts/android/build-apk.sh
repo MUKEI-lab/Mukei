@@ -91,12 +91,25 @@ readonly NDK_TOOLCHAIN_BIN="${ndk_prebuilt_root}/${ndk_host_tag}/bin"
 readonly TARGET_CC="${NDK_TOOLCHAIN_BIN}/aarch64-linux-android${ANDROID_API}-clang"
 readonly TARGET_CXX="${NDK_TOOLCHAIN_BIN}/aarch64-linux-android${ANDROID_API}-clang++"
 readonly TARGET_AR="${NDK_TOOLCHAIN_BIN}/llvm-ar"
+readonly TARGET_RANLIB="${NDK_TOOLCHAIN_BIN}/llvm-ranlib"
+readonly TOOLCHAIN_COMPAT_BIN="${BUILD_ROOT}/toolchain-compat-${RUST_TARGET}"
 
 require_executable "${TARGET_CC}"
 require_executable "${TARGET_CXX}"
 require_executable "${TARGET_AR}"
+require_executable "${TARGET_RANLIB}"
 
-mkdir -p "${BUILD_ROOT}" "${DIST_DIR}" "${CXX_QT_EXPORT_DIR}"
+mkdir -p \
+    "${BUILD_ROOT}" \
+    "${DIST_DIR}" \
+    "${CXX_QT_EXPORT_DIR}" \
+    "${TOOLCHAIN_COMPAT_BIN}"
+
+# openssl-src derives prefixed binutil names from the Android target triple.
+# Modern NDKs ship LLVM binutils without those prefixed aliases, so expose
+# deterministic compatibility links while also passing explicit Cargo env.
+ln -sfn "${TARGET_AR}" "${TOOLCHAIN_COMPAT_BIN}/aarch64-linux-android-ar"
+ln -sfn "${TARGET_RANLIB}" "${TOOLCHAIN_COMPAT_BIN}/aarch64-linux-android-ranlib"
 
 printf '\n==> Verifying and materializing Mukei branding v3.2\n'
 python3 "${SCRIPT_DIR}/prepare-branding.py" verify
@@ -121,14 +134,18 @@ printf '\n==> Cross-compiling Rust/CXX-Qt bridge for %s\n' "${RUST_TARGET}"
 (
     cd "${REPO_ROOT}/rust"
     env \
+        PATH="${TOOLCHAIN_COMPAT_BIN}:${PATH}" \
         QMAKE="${QT_ANDROID_ROOT}/bin/qmake" \
         QT_HOST_PATH="${QT_HOST_ROOT}" \
         CXX_QT_EXPORT_DIR="${CXX_QT_EXPORT_DIR}" \
         'CXX_QT_EXPORT_CRATE_mukei-bridge=1' \
         CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="${TARGET_CC}" \
+        CARGO_TARGET_AARCH64_LINUX_ANDROID_AR="${TARGET_AR}" \
         CC_aarch64_linux_android="${TARGET_CC}" \
         CXX_aarch64_linux_android="${TARGET_CXX}" \
         AR_aarch64_linux_android="${TARGET_AR}" \
+        RANLIB_aarch64_linux_android="${TARGET_RANLIB}" \
+        RANLIB="${TARGET_RANLIB}" \
         cargo build \
             -p mukei-bridge \
             --profile android-release \
