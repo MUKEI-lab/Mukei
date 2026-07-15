@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls.Basic
-import QtQuick.Layouts
 import "architecture"
 import "stores"
 import "shell"
@@ -17,26 +16,43 @@ ApplicationWindow {
     color: Theme.p.background
     title: qsTr("Mukei")
 
+    readonly property real safeTop: Qt.platform.os === "android" ? 28 : 0
+    readonly property real safeBottom: Qt.platform.os === "android" ? 32 : 0
+    readonly property real safeLeft: 0
+    readonly property real safeRight: 0
+
     Behavior on color {
         enabled: !Theme.reduceMotion
         ColorAnimation { duration: Motion.themeCrossFade; easing.type: Easing.OutCubic }
     }
 
-    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft // qmllint disable missing-property
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
     LayoutMirroring.childrenInherit: true
 
     signal accessibilityAnnouncementRequested(string text)
 
-    AppShell {
+    Rectangle {
         anchors.fill: parent
+        color: Theme.p.background
     }
 
-    onWidthChanged: ResponsiveStore.updateViewport(width, height)
-    onHeightChanged: ResponsiveStore.updateViewport(width, height)
+    AppShell {
+        anchors.fill: parent
+        anchors.topMargin: root.safeTop
+        anchors.bottomMargin: root.safeBottom
+        anchors.leftMargin: root.safeLeft
+        anchors.rightMargin: root.safeRight
+    }
+
+    onWidthChanged: ResponsiveStore.updateViewport(width - safeLeft - safeRight,
+                                                    height - safeTop - safeBottom)
+    onHeightChanged: ResponsiveStore.updateViewport(width - safeLeft - safeRight,
+                                                     height - safeTop - safeBottom)
 
     Component.onCompleted: {
-        ResponsiveStore.updateViewport(width, height)
-        AppCoordinator.configure(mukeiAgent, mukeiBridge, mukeiRuntime) // qmllint disable unqualified
+        ResponsiveStore.updateViewport(width - safeLeft - safeRight,
+                                       height - safeTop - safeBottom)
+        AppCoordinator.configure(mukeiAgent, mukeiBridge, mukeiRuntime)
         AppCoordinator.start()
     }
 
@@ -55,7 +71,7 @@ ApplicationWindow {
     }
 
     Shortcut {
-        sequence: StandardKey.Preferences
+        sequences: [ StandardKey.Preferences ]
         enabled: CapabilityStore.canOpenSettings
         onActivated: IntentDispatcher.dispatch({
             type: "navigation.open",
@@ -64,7 +80,7 @@ ApplicationWindow {
     }
 
     Shortcut {
-        sequence: StandardKey.Back
+        sequences: [ StandardKey.Back ]
         onActivated: IntentDispatcher.dispatch({ type: "navigation.back" })
     }
 }

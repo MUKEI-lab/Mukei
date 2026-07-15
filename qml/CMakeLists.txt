@@ -13,6 +13,7 @@ project(MukeiQml VERSION ${MUKEI_PRODUCT_VERSION} LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 set(QT_QUICK_CONTROLS_STYLE "Basic")
 include(CTest)
 
@@ -74,7 +75,7 @@ set(MUKEI_CXX_QT_INCLUDE_DIR
     CACHE PATH "Include root containing generated mukei_bridge CXX-Qt headers"
 )
 
-add_executable(mukei
+qt_add_executable(mukei
     main.cpp
     timeline_model.cpp
     timeline_model.h

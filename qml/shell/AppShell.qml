@@ -2,6 +2,7 @@ import QtQuick
 
 Item {
     id: root
+    clip: true
 
     AdaptiveNavigation {
         id: adaptiveNavigation

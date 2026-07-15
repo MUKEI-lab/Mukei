@@ -516,11 +516,15 @@ Item {
 
     Connections {
         target: root.agentSource === null ? null : root.agentSource
+        ignoreUnknownSignals: true
         function onEvent_emitted(eventJson) { root.ingest(eventJson, "agent") }
+        function onEventEmitted(eventJson) { root.ingest(eventJson, "agent") }
     }
 
     Connections {
         target: root.bridgeSource === null ? null : root.bridgeSource
+        ignoreUnknownSignals: true
         function onEvent_emitted(eventJson) { root.ingest(eventJson, "bridge") }
+        function onEventEmitted(eventJson) { root.ingest(eventJson, "bridge") }
     }
 }

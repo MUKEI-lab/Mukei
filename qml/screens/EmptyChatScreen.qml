@@ -1,64 +1,58 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import "../stores"
 import "../theme"
 import "../components"
 
-Page {
+Item {
     id: root
+
     signal promptFilled(string prompt)
+
     Accessible.role: Accessible.Pane
-    Accessible.name: qsTr("Empty chat screen")
+    Accessible.name: qsTr("Empty chat")
     Accessible.description: qsTr("Start a private on-device conversation")
-    background: Rectangle {
-        color: Theme.p.background
-    }
 
     ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: Spacing.md
+        anchors.centerIn: parent
+        width: Math.min(parent.width, 640)
         spacing: Spacing.md
-        RowLayout {
-            Layout.fillWidth: true
-            IconButton {
-                iconSource: "qrc:/icons/chat.svg"
-                Accessible.name: qsTr("Open drawer")
-            }
-            Text {
-                Layout.fillWidth: true
-                text: qsTr("Mukei")
-                color: Theme.p.inkPrimary
-                Component.onCompleted: Type.apply(this, Type.h3)
-            }
-            IconButton {
-                iconSource: "qrc:/icons/settings.svg"
-                Accessible.name: qsTr("Open settings")
-            }
-        }
-        Item {
-            Layout.preferredHeight: Spacing.xl
-        }
+
         Text {
+            Layout.fillWidth: true
             text: qsTr("Mukei is ready.")
             color: Theme.p.inkPrimary
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
             Component.onCompleted: Type.apply(this, Type.display)
         }
+
         Text {
+            Layout.fillWidth: true
             text: qsTr("Everything runs on your device.")
             color: Theme.p.inkSecondary
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
             Component.onCompleted: Type.apply(this, Type.bodyUI)
         }
+
         StatusPill {
+            Layout.alignment: Qt.AlignHCenter
             text: qsTr("Encrypted locally")
             subtype: "Network-Offline"
             iconSource: "qrc:/icons/lock.svg"
         }
+
+        Item { Layout.preferredHeight: Spacing.lg }
+
         Text {
-            text: qsTr("Try one of these to start:")
+            Layout.fillWidth: true
+            text: qsTr("Try one of these to start")
             color: Theme.p.inkSecondary
+            horizontalAlignment: Text.AlignHCenter
             Component.onCompleted: Type.apply(this, Type.caption)
         }
+
         PromptCard {
             Layout.fillWidth: true
             prompt: qsTr("Summarize the concept of entropy.")
@@ -73,16 +67,6 @@ Page {
             Layout.fillWidth: true
             prompt: qsTr("Explain this note in plain language.")
             onFillRequested: root.promptFilled(prompt)
-        }
-        Item {
-            Layout.fillHeight: true
-        }
-        NetworkBanner {
-            Layout.fillWidth: true
-            remoteAllowed: SettingsStore.remotePolicy === "remote_allowed"
-        }
-        ChatComposer {
-            Layout.fillWidth: true
         }
     }
 }

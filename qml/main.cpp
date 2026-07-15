@@ -7,6 +7,7 @@
 #endif
 #include "timeline_model.h"
 #include <QQmlApplicationEngine>
+#include <QQmlError>
 #include <QQmlContext>
 #include <QOperatingSystemVersion>
 #include <QStandardPaths>
@@ -414,6 +415,10 @@ public:
             if (commandType == QStringLiteral("app.initialize")) {
                 m_appContext = context;
                 initialize(payload.value(QStringLiteral("config_path")).toString());
+                emitOperationLifecycle(context, true, QJsonObject{
+                    {QStringLiteral("initialized"), true},
+                    {QStringLiteral("runtime"), QStringLiteral("stub")}
+                });
             } else if (commandType == QStringLiteral("chat.send_message")) {
                 m_chatContext = context;
                 send_message(payload.value(QStringLiteral("text")).toString());
@@ -677,7 +682,7 @@ public:
     }
     Q_INVOKABLE QString ui_contract_snapshot_json() const
     {
-        return QStringLiteral(R"json({"schema_version":1,"contract_version":1,"min_qml_contract_version":1,"max_qml_contract_version":1,"command_schema_version":2,"event_schema_version":1,"snapshot_schema_version":1,"required_features":["typed_commands","typed_events","snapshot_delta_sync","persistent_ui_session","capability_gating","command_envelope_v2","command_acknowledgement","operation_lifecycle_events","legacy_event_v1_compatibility"],"protocol":{"current_version":{"major":2,"minor":0},"minimum_supported_peer_major":2,"capabilities":["command_envelope_v2","command_acknowledgement","operation_lifecycle_events","legacy_event_v1_compatibility"]}})json");
+        return QStringLiteral(R"json({"schema_version":1,"contract_version":1,"min_qml_contract_version":1,"max_qml_contract_version":1,"command_schema_version":2,"event_schema_version":1,"snapshot_schema_version":1,"required_features":["typed_commands","typed_events","snapshot_delta_sync","persistent_ui_session","capability_gating","command_envelope_v2","command_acknowledgement","operation_lifecycle_events","scoped_chat_operations","legacy_event_v1_compatibility"],"protocol":{"current_version":{"major":2,"minor":0},"minimum_supported_peer_major":2,"capabilities":["command_envelope_v2","command_acknowledgement","operation_lifecycle_events","scoped_chat_operations","legacy_event_v1_compatibility"]}})json");
     }
     Q_INVOKABLE QString operation_snapshot_json() const
     {
@@ -764,6 +769,7 @@ signals:
     void thinking_started();
     void thinking_completed();
     void event_emitted(const QString &eventJson);
+    void eventEmitted(const QString &eventJson);
     void async_result(const QString &resultJson);
 private slots:
     void emitNextChunk()
@@ -821,7 +827,9 @@ private:
         for (auto it = context.begin(); it != context.end(); ++it)
             if (!event.contains(it.key()))
                 event.insert(it.key(), it.value());
-        emit event_emitted(QString::fromUtf8(QJsonDocument(event).toJson(QJsonDocument::Compact)));
+        const QString eventJson = QString::fromUtf8(
+            QJsonDocument(event).toJson(QJsonDocument::Compact));
+        emit eventEmitted(eventJson);
 
         if (category == QStringLiteral("app_lifecycle")) {
             const QString state = event.value(QStringLiteral("state")).toString();
@@ -933,9 +941,13 @@ static void loadBundledFonts()
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+    QCoreApplication::setOrganizationName(QStringLiteral("MUKEI-lab"));
+    QCoreApplication::setOrganizationDomain(QStringLiteral("mukei.app"));
+    QCoreApplication::setApplicationName(QStringLiteral("Mukei"));
+    QCoreApplication::setApplicationVersion(QString::fromLatin1(MUKEI_PRODUCT_VERSION));
 #ifdef Q_OS_ANDROID
     if (QOperatingSystemVersion::current() >= QOperatingSystemVersion(QOperatingSystemVersion::Android, 31)) {
-        QQuickWindow::setGraphicsApi(QSGRendererInterface::Vulkan);
+        QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
     } else {
         QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
     }
@@ -957,6 +969,10 @@ int main(int argc, char *argv[])
     SafRegistryStub safRegistry;
 #endif
 
+    const QString modelsPath = QDir(runtimeInfo.appDataPath()).filePath(QStringLiteral("models"));
+    QDir().mkpath(modelsPath);
+    bridge.set_model_dir(modelsPath);
+
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("mukeiClipboard"), &clipboard);
     engine.rootContext()->setContextProperty(QStringLiteral("mukeiAccessibility"), &accessibilityBridge);
@@ -966,13 +982,21 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("mukeiBridge"), &bridge);
     engine.rootContext()->setContextProperty(QStringLiteral("safRegistry"), &safRegistry);
 
-    QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] {
-        QCoreApplication::exit(-1);
-    }, Qt::QueuedConnection);
-
-    QTimer::singleShot(100, &engine, [&engine] {
-        engine.load(QUrl(QStringLiteral("qrc:/qt/qml/com/mukei/app/MainWindow.qml")));
+    const QUrl mainWindowUrl(QStringLiteral("qrc:/com/mukei/app/MainWindow.qml"));
+    QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app,
+                     [](const QList<QQmlError> &warnings) {
+        for (const QQmlError &warning : warnings)
+            qCritical().noquote() << "MukeiQml" << warning.toString();
     });
+    QObject::connect(&engine, &QQmlApplicationEngine::objectCreated, &app,
+                     [mainWindowUrl](QObject *object, const QUrl &url) {
+        qInfo().noquote() << "MukeiStartup root_object"
+                          << (object ? "ready" : "failed")
+                          << url.toString();
+        if (!object && url == mainWindowUrl)
+            QCoreApplication::exit(EXIT_FAILURE);
+    }, Qt::QueuedConnection);
+    engine.load(mainWindowUrl);
 
     return app.exec();
 }

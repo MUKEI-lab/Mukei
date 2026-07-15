@@ -8,81 +8,122 @@ import "../components"
 
 Rectangle {
     id: root
+
     visible: LifecycleStore.interactive && !ResponsiveStore.compact
-    width: ResponsiveStore.expanded ? 216 : 72
+    width: ResponsiveStore.expanded ? 264 : 80
     color: Theme.p.surface
-    border.width: 1
-    border.color: Theme.p.divider
+
+    readonly property var destinations: [
+        { route: "chat", label: qsTr("Chat"), icon: "chat" },
+        { route: "models", label: qsTr("Models"), icon: "chip" },
+        { route: "documents", label: qsTr("Documents"), icon: "file" },
+        { route: "downloads", label: qsTr("Downloads"), icon: "done-target" },
+        { route: "settings", label: qsTr("Settings"), icon: "settings" }
+    ]
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: Spacing.sm
+        anchors.leftMargin: Spacing.sm
+        anchors.rightMargin: Spacing.sm
+        anchors.topMargin: Spacing.lg
+        anchors.bottomMargin: Spacing.lg
         spacing: Spacing.xs
 
         Text {
             Layout.fillWidth: true
+            Layout.leftMargin: Spacing.sm
             visible: ResponsiveStore.expanded
             text: qsTr("Mukei")
             color: Theme.p.inkPrimary
-            leftPadding: Spacing.sm
             Component.onCompleted: Type.apply(this, Type.h2)
         }
 
+        Text {
+            Layout.fillWidth: true
+            Layout.leftMargin: Spacing.sm
+            Layout.bottomMargin: Spacing.md
+            visible: ResponsiveStore.expanded
+            text: qsTr("Private by construction")
+            color: Theme.p.inkSecondary
+            Component.onCompleted: Type.apply(this, Type.caption)
+        }
+
         Repeater {
-            model: [
-                { route: "chat", label: qsTr("Chat"), icon: "qrc:/icons/chat.svg" },
-                { route: "models", label: qsTr("Models"), icon: "qrc:/icons/chip.svg" },
-                { route: "downloads", label: qsTr("Downloads"), icon: "qrc:/icons/done-target.svg" },
-                { route: "documents", label: qsTr("Documents"), icon: "qrc:/icons/file.svg" },
-                { route: "settings", label: qsTr("Settings"), icon: "qrc:/icons/settings.svg" }
-            ]
+            model: root.destinations
             delegate: Button {
                 id: navigationButton
                 required property var modelData
+
                 Layout.fillWidth: true
                 implicitHeight: 52
-                text: ResponsiveStore.expanded ? navigationButton.modelData.label : ""
-                icon.source: navigationButton.modelData.icon
-                icon.width: 22
-                icon.height: 22
-                display: ResponsiveStore.expanded ? AbstractButton.TextBesideIcon : AbstractButton.IconOnly
-                Accessible.name: navigationButton.modelData.label
-                checked: NavigationStore.currentRoute === navigationButton.modelData.route
                 checkable: true
-                autoExclusive: true
-                onClicked: IntentDispatcher.dispatch({ type: "navigation.open", route: navigationButton.modelData.route })
+                checked: NavigationStore.currentRoute === navigationButton.modelData.route
+                Accessible.name: navigationButton.modelData.label
+                onClicked: IntentDispatcher.dispatch({
+                    type: "navigation.open",
+                    route: navigationButton.modelData.route
+                })
+
                 background: Rectangle {
                     radius: Theme.radiusLg
-                    color: navigationButton.checked || navigationButton.hovered ? Theme.p.surfaceFaint : "transparent"
-                    border.width: navigationButton.visualFocus ? 1 : 0
+                    color: navigationButton.checked
+                           ? Theme.p.surfaceFaint
+                           : navigationButton.down || navigationButton.hovered
+                             ? Theme.p.surfaceVariant
+                             : "transparent"
+                    border.width: navigationButton.visualFocus ? 2 : 0
                     border.color: Theme.p.accent
+
+                    Rectangle {
+                        visible: navigationButton.checked
+                        width: 3
+                        height: parent.height - Spacing.md
+                        radius: 2
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: Theme.p.accent
+                    }
                 }
+
                 contentItem: RowLayout {
                     spacing: Spacing.sm
-                    Image {
-                        source: navigationButton.modelData.icon
-                        sourceSize.width: 22
-                        sourceSize.height: 22
+
+                    MukeiIcon {
+                        name: navigationButton.modelData.icon
+                        tone: navigationButton.checked ? Theme.p.accent : Theme.p.inkSecondary
+                        Layout.preferredWidth: Spacing.lg
+                        Layout.preferredHeight: Spacing.lg
                         Layout.alignment: Qt.AlignHCenter
                     }
+
                     Text {
                         visible: ResponsiveStore.expanded
                         Layout.fillWidth: true
                         text: navigationButton.modelData.label
-                        color: Theme.p.inkPrimary
+                        color: navigationButton.checked ? Theme.p.inkPrimary : Theme.p.inkSecondary
                         Component.onCompleted: Type.apply(this, Type.bodyUI)
                     }
                 }
             }
         }
+
         Item { Layout.fillHeight: true }
+
+        StatusPill {
+            Layout.alignment: Qt.AlignHCenter
+            visible: ResponsiveStore.expanded
+            text: qsTr("Local-only")
+            subtype: "Network-Offline"
+            iconSource: "qrc:/icons/lock.svg"
+        }
+
         Text {
             Layout.fillWidth: true
             visible: ResponsiveStore.expanded && StorageStore.warning
             text: qsTr("Storage %1% full").arg(Math.round(StorageStore.usageRatio * 100))
             color: StorageStore.critical ? Theme.error : Theme.warning
             wrapMode: Text.Wrap
-            leftPadding: Spacing.sm
+            horizontalAlignment: Text.AlignHCenter
             Component.onCompleted: Type.apply(this, Type.caption)
         }
     }

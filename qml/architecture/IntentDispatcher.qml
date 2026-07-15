@@ -160,6 +160,22 @@ QtObject {
     function dispatch(intent) {
         if (!intent || typeof intent !== "object" || typeof intent.type !== "string")
             return reject("ERR_UI_INVALID_INTENT", qsTr("That action was not valid."), intent)
+
+        // Navigation is local presentation state and never depends on the
+        // native command protocol being available.
+        if (intent.type === "navigation.open") {
+            if (!NavigationStore.navigate(intent.route, intent.parameters || ({}), intent.replace === true))
+                return false
+            intentAccepted(intent.type)
+            return true
+        }
+        if (intent.type === "navigation.back") {
+            if (!NavigationStore.goBack())
+                return false
+            intentAccepted(intent.type)
+            return true
+        }
+
         if (contractStoreRef === null || capabilityStoreRef === null || chatStoreRef === null || operationStoreRef === null)
             return reject("ERR_UI_DISPATCH_DEPENDENCY", qsTr("The local UI state machine is not ready."), intent)
 
@@ -182,14 +198,6 @@ QtObject {
                     return false
                 break
             }
-            case "navigation.open":
-                if (!NavigationStore.navigate(intent.route, intent.parameters || ({}), intent.replace === true))
-                    return false
-                break
-            case "navigation.back":
-                if (!NavigationStore.goBack())
-                    return false
-                break
             case "conversation.open":
                 if (!ConversationStore.openConversation(intent.conversationId || "", intent.branchId || ""))
                     return reject("ERR_UI_INVALID_SCOPE", qsTr("This conversation could not be opened."), intent)

@@ -10,8 +10,10 @@ import "../components"
 
 Page {
     id: root
+
     property bool followTail: true
     property bool unseenTailUpdate: false
+    property string queuedPrompt: ""
     signal accessibilityAnnouncementRequested(string text)
 
     background: Rectangle { color: Theme.p.background }
@@ -23,6 +25,19 @@ Page {
             IntentDispatcher.dispatch({ type: "chat.stopGeneration" })
     }
 
+    Timer {
+        id: promptSendTimer
+        interval: 600
+        repeat: false
+        onTriggered: {
+            if (root.queuedPrompt.length > 0 && composer.text === root.queuedPrompt
+                    && composer.canSend && !composer.isStreaming) {
+                IntentDispatcher.dispatch({ type: "chat.sendMessage", text: root.queuedPrompt })
+                root.queuedPrompt = ""
+            }
+        }
+    }
+
     LeftDrawer { id: drawer }
 
     RowLayout {
@@ -30,16 +45,14 @@ Page {
         spacing: 0
 
         Rectangle {
-            Layout.preferredWidth: 300
+            Layout.preferredWidth: 320
             Layout.fillHeight: true
             visible: ResponsiveStore.expanded
             color: Theme.p.surface
-            border.width: 1
-            border.color: Theme.p.divider
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: Spacing.md
+                anchors.margins: Spacing.lg
                 spacing: Spacing.md
 
                 RowLayout {
@@ -78,17 +91,25 @@ Page {
             id: chatPane
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.margins: Spacing.md
+            Layout.leftMargin: ResponsiveStore.edgePadding
+            Layout.rightMargin: ResponsiveStore.edgePadding
+            Layout.topMargin: Spacing.md
+            Layout.bottomMargin: Spacing.md
             spacing: Spacing.sm
 
             RowLayout {
                 Layout.fillWidth: true
+                Layout.maximumWidth: ResponsiveStore.contentMaxWidth
+                Layout.alignment: Qt.AlignHCenter
+                spacing: Spacing.xs
+
                 IconButton {
                     visible: !ResponsiveStore.expanded
                     iconSource: "qrc:/icons/chat.svg"
-                    Accessible.name: qsTr("Open drawer")
+                    text: qsTr("Open conversations")
                     onClicked: drawer.open()
                 }
+
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 0
@@ -100,106 +121,127 @@ Page {
                     }
                     Text {
                         Layout.fillWidth: true
-                        visible: ChatStore.activeConversationId.length > 0
-                        text: ChatStore.streaming ? qsTr("Responding privately on device") : qsTr("Private local conversation")
-                        color: Theme.p.inkFaint
+                        text: ChatStore.streaming
+                              ? qsTr("Responding privately on device")
+                              : qsTr("Private local conversation")
+                        color: Theme.p.inkSecondary
                         elide: Text.ElideRight
                         Component.onCompleted: Type.apply(this, Type.caption)
                     }
                 }
+
+                StatusPill {
+                    visible: !Type.compact
+                    text: qsTr("Local-only")
+                    subtype: "Network-Offline"
+                    iconSource: "qrc:/icons/lock.svg"
+                }
+
                 IconButton {
                     iconSource: "qrc:/icons/settings.svg"
+                    text: qsTr("Open settings")
                     enabled: CapabilityStore.canOpenSettings
-                    Accessible.name: qsTr("Open settings")
                     onClicked: IntentDispatcher.dispatch({ type: "navigation.open", route: "settings" })
                 }
             }
 
-            ListView {
-                id: timelineView
-                objectName: "chatTimelineView"
-                property real contentHeightBeforePrepend: -1
+            Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                clip: true
-                spacing: Spacing.lg
-                model: ChatStore.timeline
-                cacheBuffer: Math.max(height, Spacing.huge * 6)
-                boundsBehavior: Flickable.StopAtBounds
-                reuseItems: true
+                Layout.maximumWidth: ResponsiveStore.contentMaxWidth
+                Layout.alignment: Qt.AlignHCenter
 
-                header: Item {
-                    width: ListView.view ? ListView.view.width : 0
-                    height: ChatStore.hasOlderMessages ? loadOlderButton.implicitHeight + Spacing.md : 0
-                    visible: ChatStore.hasOlderMessages
-                    GhostButton {
-                        id: loadOlderButton
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: ChatStore.olderPageLoading ? qsTr("Loading…") : qsTr("Load earlier messages")
-                        enabled: !ChatStore.olderPageLoading
-                        onClicked: {
-                            if (ListView.view)
-                                ListView.view.contentHeightBeforePrepend = ListView.view.contentHeight
-                            IntentDispatcher.dispatch({ type: "chat.loadOlder" })
+                ListView {
+                    id: timelineView
+                    objectName: "chatTimelineView"
+                    property real contentHeightBeforePrepend: -1
+                    anchors.fill: parent
+                    clip: true
+                    spacing: Spacing.lg
+                    model: ChatStore.timeline
+                    cacheBuffer: Math.max(height, Spacing.huge * 6)
+                    boundsBehavior: Flickable.StopAtBounds
+                    reuseItems: true
+
+                    header: Item {
+                        width: ListView.view ? ListView.view.width : 0
+                        height: ChatStore.hasOlderMessages
+                                ? loadOlderButton.implicitHeight + Spacing.md
+                                : 0
+                        visible: ChatStore.hasOlderMessages
+                        GhostButton {
+                            id: loadOlderButton
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: ChatStore.olderPageLoading ? qsTr("Loading…") : qsTr("Load earlier messages")
+                            enabled: !ChatStore.olderPageLoading
+                            onClicked: {
+                                if (ListView.view)
+                                    ListView.view.contentHeightBeforePrepend = ListView.view.contentHeight
+                                IntentDispatcher.dispatch({ type: "chat.loadOlder" })
+                            }
+                        }
+                    }
+
+                    onMovementEnded: {
+                        root.followTail = atYEnd
+                        if (root.followTail)
+                            root.unseenTailUpdate = false
+                    }
+                    onCountChanged: {
+                        if (root.followTail)
+                            Qt.callLater(positionViewAtEnd)
+                        else
+                            root.unseenTailUpdate = true
+                    }
+
+                    delegate: DelegateChooser {
+                        role: "type"
+                        DelegateChoice {
+                            roleValue: "user_message"
+                            delegate: UserMessageBubble {
+                                id: userMessageDelegate
+                                required property var model
+                                width: ListView.view ? ListView.view.width : 0
+                                text: userMessageDelegate.model.text
+                                timestamp: userMessageDelegate.model.timestamp
+                            }
+                        }
+                        DelegateChoice {
+                            roleValue: "assistant_message"
+                            delegate: AIMessageBubble {
+                                id: assistantMessageDelegate
+                                required property var model
+                                width: ListView.view ? ListView.view.width : 0
+                                text: assistantMessageDelegate.model.text
+                                timestamp: assistantMessageDelegate.model.timestamp
+                            }
+                        }
+                        DelegateChoice {
+                            roleValue: "timeline_event"
+                            delegate: ChatTimelineEvent {
+                                id: timelineEventDelegate
+                                required property var model
+                                width: ListView.view ? ListView.view.width : 0
+                                label: timelineEventDelegate.model.text
+                                phase: timelineEventDelegate.model.phase
+                                kind: timelineEventDelegate.model.kind
+                                iconSource: timelineEventDelegate.model.kind === "tool"
+                                            ? "qrc:/icons/search.svg" : ""
+                            }
                         }
                     }
                 }
 
-                onMovementEnded: {
-                    root.followTail = atYEnd
-                    if (root.followTail)
-                        root.unseenTailUpdate = false
-                }
-                onCountChanged: {
-                    if (root.followTail)
-                        Qt.callLater(positionViewAtEnd)
-                    else
-                        root.unseenTailUpdate = true
-                }
-
-                delegate: DelegateChooser {
-                    role: "type"
-                    DelegateChoice {
-                        roleValue: "user_message"
-                        delegate: UserMessageBubble {
-                            id: userMessageDelegate
-                            required property var model
-                            width: ListView.view ? ListView.view.width : 0
-                            text: userMessageDelegate.model.text
-                            timestamp: userMessageDelegate.model.timestamp
-                        }
-                    }
-                    DelegateChoice {
-                        roleValue: "assistant_message"
-                        delegate: AIMessageBubble {
-                            id: assistantMessageDelegate
-                            required property var model
-                            width: ListView.view ? ListView.view.width : 0
-                            text: assistantMessageDelegate.model.text
-                            timestamp: assistantMessageDelegate.model.timestamp
-                        }
-                    }
-                    DelegateChoice {
-                        roleValue: "timeline_event"
-                        delegate: ChatTimelineEvent {
-                            id: timelineEventDelegate
-                            required property var model
-                            width: ListView.view ? ListView.view.width : 0
-                            label: timelineEventDelegate.model.text
-                            phase: timelineEventDelegate.model.phase
-                            kind: timelineEventDelegate.model.kind
-                            iconSource: timelineEventDelegate.model.kind === "tool" ? "qrc:/icons/search.svg" : ""
-                        }
-                    }
-                }
-
-                Text {
-                    anchors.centerIn: parent
+                EmptyChatScreen {
+                    anchors.fill: parent
                     visible: timelineView.count === 0 && !ChatStore.snapshotLoading
-                    text: qsTr("Your private conversation starts here.")
-                    color: Theme.p.inkFaint
-                    horizontalAlignment: Text.AlignHCenter
-                    Component.onCompleted: Type.apply(this, Type.bodyUI)
+                    onPromptFilled: function(prompt) {
+                        root.queuedPrompt = prompt
+                        composer.text = prompt
+                        composer.cursorPosition = prompt.length
+                        composer.forceEditorFocus()
+                        promptSendTimer.restart()
+                    }
                 }
 
                 BusyIndicator {
@@ -212,7 +254,7 @@ Page {
             GhostButton {
                 Layout.alignment: Qt.AlignHCenter
                 visible: root.unseenTailUpdate
-                text: qsTr("Show latest response")
+                text: qsTr("↓ Latest")
                 onClicked: {
                     root.followTail = true
                     root.unseenTailUpdate = false
@@ -220,19 +262,48 @@ Page {
                 }
             }
 
-            NetworkBanner {
+            Rectangle {
                 Layout.fillWidth: true
-                remoteAllowed: SettingsStore.remotePolicy === "remote_allowed"
+                Layout.maximumWidth: ResponsiveStore.contentMaxWidth
+                Layout.alignment: Qt.AlignHCenter
+                visible: !CapabilityStore.activeModelReady
+                implicitHeight: modelNoticeRow.implicitHeight + Spacing.md * 2
+                radius: Theme.radiusLg
+                color: Theme.p.surfaceFaint
+
+                RowLayout {
+                    id: modelNoticeRow
+                    anchors.fill: parent
+                    anchors.margins: Spacing.md
+                    spacing: Spacing.sm
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: qsTr("Choose a verified local model to begin.")
+                        color: Theme.p.inkSecondary
+                        wrapMode: Text.Wrap
+                        Component.onCompleted: Type.apply(this, Type.bodySmall)
+                    }
+                    GhostButton {
+                        text: qsTr("Models")
+                        onClicked: IntentDispatcher.dispatch({ type: "navigation.open", route: "models" })
+                    }
+                }
             }
 
             ChatComposer {
                 id: composer
                 Layout.fillWidth: true
+                Layout.maximumWidth: ResponsiveStore.contentMaxWidth
+                Layout.alignment: Qt.AlignHCenter
                 isStreaming: ChatStore.streaming
                 canSend: CapabilityStore.canSendMessage && !ChatStore.streaming
                 text: ChatStore.draft
                 cursorPosition: Math.min(ChatStore.draftCursorPosition, text.length)
+
                 onTextChanged: {
+                    if (text !== root.queuedPrompt)
+                        promptSendTimer.stop()
                     if (text !== ChatStore.draft)
                         IntentDispatcher.dispatch({
                             type: "chat.updateDraft",
@@ -248,10 +319,19 @@ Page {
                             cursorPosition: cursorPosition
                         })
                 }
-                onSendRequested: function (message) {
+                onSendRequested: function(message) {
+                    root.queuedPrompt = ""
+                    promptSendTimer.stop()
                     IntentDispatcher.dispatch({ type: "chat.sendMessage", text: message })
                 }
                 onStopRequested: IntentDispatcher.dispatch({ type: "chat.stopGeneration" })
+            }
+
+            NetworkBanner {
+                Layout.fillWidth: true
+                Layout.maximumWidth: ResponsiveStore.contentMaxWidth
+                Layout.alignment: Qt.AlignHCenter
+                remoteAllowed: SettingsStore.remotePolicy === "remote_allowed"
             }
         }
     }

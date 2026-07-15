@@ -3,15 +3,20 @@ import QtQuick
 
 QtObject {
     enum Mode { Compact, Medium, Expanded }
+
     property real viewportWidth: 0
     property real viewportHeight: 0
-    readonly property int mode: viewportWidth >= 1100 ? ResponsiveStore.Mode.Expanded
-                                                     : viewportWidth >= 720 ? ResponsiveStore.Mode.Medium
-                                                                            : ResponsiveStore.Mode.Compact
+
+    readonly property int mode: viewportWidth < 600
+                                ? ResponsiveStore.Mode.Compact
+                                : viewportWidth < 840
+                                  ? ResponsiveStore.Mode.Medium
+                                  : ResponsiveStore.Mode.Expanded
     readonly property bool compact: mode === ResponsiveStore.Mode.Compact
     readonly property bool medium: mode === ResponsiveStore.Mode.Medium
     readonly property bool expanded: mode === ResponsiveStore.Mode.Expanded
-    readonly property real contentMaxWidth: expanded ? 920 : medium ? 760 : viewportWidth
+    readonly property real edgePadding: compact ? Spacing.lg : medium ? Spacing.xl : Spacing.xxl
+    readonly property real contentMaxWidth: expanded ? 960 : medium ? 760 : Math.max(0, viewportWidth)
 
     function updateViewport(width, height) {
         viewportWidth = Math.max(0, width || 0)
