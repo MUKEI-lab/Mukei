@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main, "agent/**", "checkpoint/**" ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, "checkpoint/**" ]
   workflow_dispatch:
 
 permissions:
@@ -21,9 +21,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate shell syntax
+      - name: Validate Python and shell syntax
         shell: bash
         run: |
+          python3 -m py_compile \
+            scripts/android/prepare-branding.py \
+            scripts/android/preflight.py
           bash -n scripts/android/build-apk.sh
           bash -n scripts/android/validate-apk.sh
 
@@ -35,8 +38,27 @@ jobs:
       - name: Lint Android build scripts
         run: shellcheck scripts/android/build-apk.sh scripts/android/validate-apk.sh
 
-      - name: Validate launcher, assets, and build contract
+      - name: Validate launcher, Qt manifest, assets, and build contract
         run: python3 scripts/android/preflight.py
+
+      - name: Exercise lossless branding materialization lifecycle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sandbox="$(mktemp -d)"
+          state="${sandbox}/branding-state.json"
+          python3 scripts/android/prepare-branding.py materialize \
+            --repo-root "${sandbox}" \
+            --state "${state}"
+          png_count="$(find "${sandbox}/qml/android/res" -type f -name '*.png' | wc -l)"
+          test "${png_count}" -eq 10
+          python3 scripts/android/prepare-branding.py cleanup \
+            --repo-root "${sandbox}" \
+            --state "${state}"
+          if find "${sandbox}/qml/android/res" -type f -name '*.png' | grep -q .; then
+            echo "Branding cleanup left generated PNG files behind." >&2
+            exit 1
+          fi
 
       - name: Validate Android CMake cache accepts arm64
         run: >-
