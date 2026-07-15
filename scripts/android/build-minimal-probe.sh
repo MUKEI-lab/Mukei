@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 readonly REPO_ROOT
-readonly VARIANT="${1:?usage: build-minimal-probe.sh <qt-widgets-raster|inline-qml-software|qml-diagnostics-widget|quick-cpp-opengl>}"
+readonly VARIANT="${1:?usage: build-minimal-probe.sh <qt-widgets-raster|inline-qml-software|qml-diagnostics-widget|quick-cpp-opengl|full-qml-fixed>}"
 readonly ABI="arm64-v8a"
 readonly ANDROID_API="${ANDROID_API:-29}"
 readonly BUILD_TYPE="${BUILD_TYPE:-Release}"
@@ -14,7 +14,7 @@ readonly DIST_DIR="${DIST_DIR:-${REPO_ROOT}/dist/android-probes}"
 readonly BRANDING_STATE="${BUILD_ROOT}/branding-materialization.json"
 
 case "${VARIANT}" in
-    qt-widgets-raster|inline-qml-software|qml-diagnostics-widget|quick-cpp-opengl) ;;
+    qt-widgets-raster|inline-qml-software|qml-diagnostics-widget|quick-cpp-opengl|full-qml-fixed) ;;
     *) echo "unsupported probe variant: ${VARIANT}" >&2; exit 2 ;;
 esac
 
