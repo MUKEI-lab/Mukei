@@ -16,6 +16,8 @@ readonly BUILD_TYPE="${BUILD_TYPE:-Release}"
 readonly BUILD_ROOT="${BUILD_ROOT:-${REPO_ROOT}/build/android}"
 readonly LLAMA_BUILD_DIR="${BUILD_ROOT}/llama-${ABI}"
 readonly QML_BUILD_DIR="${BUILD_ROOT}/qml-${ABI}"
+readonly ANDROID_SOURCE_ROOT="${BUILD_ROOT}/source"
+readonly ANDROID_QML_SOURCE_DIR="${ANDROID_SOURCE_ROOT}/qml"
 readonly DIST_DIR="${DIST_DIR:-${REPO_ROOT}/dist/android}"
 readonly CXX_QT_EXPORT_DIR="${CXX_QT_EXPORT_DIR:-${REPO_ROOT}/rust/target/cxxqt-export}"
 readonly BRIDGE_LIB="${REPO_ROOT}/rust/target/${RUST_TARGET}/android-release/libmukei_bridge.a"
@@ -131,6 +133,31 @@ python3 "${SCRIPT_DIR}/prepare-branding.py" materialize \
     --repo-root "${REPO_ROOT}" \
     --state "${BRANDING_STATE}"
 
+# The shared QML project historically used plain add_executable() for the
+# product while its tests used qt_add_executable(). On Android, Qt's command
+# creates the MODULE_LIBRARY application target and the <target>_make_apk
+# packaging target. Stage a disposable source mirror and apply exactly this
+# one Android-only transformation without mutating desktop sources or branding.
+rm -rf "${ANDROID_SOURCE_ROOT}"
+mkdir -p "${ANDROID_SOURCE_ROOT}"
+cp -a "${REPO_ROOT}/qml" "${ANDROID_QML_SOURCE_DIR}"
+ln -s "${REPO_ROOT}/rust" "${ANDROID_SOURCE_ROOT}/rust"
+python3 - "${ANDROID_QML_SOURCE_DIR}/CMakeLists.txt" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = "\nadd_executable(mukei\n"
+new = "\nqt_add_executable(mukei\n"
+if text.count(old) != 1:
+    raise SystemExit("expected exactly one Mukei add_executable declaration")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+
+grep -Fq 'qt_add_executable(mukei' "${ANDROID_QML_SOURCE_DIR}/CMakeLists.txt" || \
+    fail "Android source mirror did not receive the Qt executable transformation"
+
 printf '\n==> Building llama.cpp capsule for %s\n' "${ABI}"
 cmake \
     -S "${REPO_ROOT}/rust/llama-cpp-prebuilt" \
@@ -196,7 +223,7 @@ printf '\n==> Configuring Qt Android application\n'
 "${QT_ANDROID_ROOT}/bin/qt-cmake" \
     -DANDROID_ABI="${ABI}" \
     -C "${ANDROID_INITIAL_CACHE}" \
-    -S "${REPO_ROOT}/qml" \
+    -S "${ANDROID_QML_SOURCE_DIR}" \
     -B "${QML_BUILD_DIR}" \
     -G Ninja \
     -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
