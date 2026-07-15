@@ -1,0 +1,44 @@
+name: finalize-startup-bootstrap
+
+on:
+  push:
+    branches: [ "agent/full-qml-fixed-build-2026-07-15" ]
+    paths:
+      - "scripts/frontend/finalize-startup-bootstrap.py"
+      - ".github/workflows/finalize-startup-bootstrap.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-startup-bootstrap-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply physical-device startup fixes
+        run: python3 scripts/frontend/finalize-startup-bootstrap.py
+      - name: Commit canonical source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "MUKEI Startup Finalizer"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            qml/architecture/AppCoordinator.qml \
+            qml/stores/LifecycleStore.qml \
+            rust/crates/mukei-bridge/src/lib.rs
+          if git diff --cached --quiet; then
+            echo "Startup source already finalized."
+            exit 0
+          fi
+          git commit -m "fix(startup): bound Android secure bootstrap"
+          git fetch origin "${GITHUB_REF_NAME}"
+          git rebase "origin/${GITHUB_REF_NAME}"
+          git push --force-with-lease origin HEAD:"${GITHUB_REF_NAME}"
