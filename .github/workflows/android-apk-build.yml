@@ -111,6 +111,18 @@ jobs:
           rustup show
           rustup target add aarch64-linux-android
 
+      - name: Capture native dependency metadata
+        shell: bash
+        run: |
+          mkdir -p dist/android/diagnostics
+          cargo fetch --locked --manifest-path rust/Cargo.toml
+          cargo tree --locked --manifest-path rust/Cargo.toml -i numkong \
+            > dist/android/diagnostics/numkong-reverse-tree.txt
+          NUMKONG_DIR="$(find "${CARGO_HOME}/registry/src" -maxdepth 2 -type d -name 'numkong-7.7.0' -print -quit)"
+          test -n "${NUMKONG_DIR}"
+          cp "${NUMKONG_DIR}/Cargo.toml" dist/android/diagnostics/numkong-Cargo.toml
+          cp "${NUMKONG_DIR}/build.rs" dist/android/diagnostics/numkong-build.rs
+
       - name: Build and validate APK
         shell: bash
         env:
@@ -141,6 +153,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mukei-android-build-diagnostics
-          path: dist/android/build.log
+          path: |
+            dist/android/build.log
+            dist/android/diagnostics/**
           if-no-files-found: warn
           retention-days: 7
