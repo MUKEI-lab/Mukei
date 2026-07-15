@@ -2,21 +2,15 @@ name: android-minimal-probe-apks
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [ "checkpoint/stabilization-2026-07-12" ]
-    paths:
-      - ".github/workflows/android-minimal-probe-apks.yml"
-      - "scripts/android/prepare-minimal-probe.py"
-      - "scripts/android/prepare-full-qml-fixed.py"
-      - "scripts/android/build-minimal-probe.sh"
-      - "scripts/android/prepare-branding.py"
-      - "qml/**"
+  push:
+    branches:
+      - "agent/full-qml-fixed-build-2026-07-15"
 
 permissions:
   contents: read
 
 concurrency:
-  group: android-minimal-probes-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: android-full-qml-fixed-${{ github.ref_name }}
   cancel-in-progress: true
 
 env:
