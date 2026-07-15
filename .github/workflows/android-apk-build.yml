@@ -116,12 +116,22 @@ jobs:
         run: |
           mkdir -p dist/android/diagnostics
           cargo fetch --locked --manifest-path rust/Cargo.toml
-          cargo tree --locked --manifest-path rust/Cargo.toml -i numkong \
-            > dist/android/diagnostics/numkong-reverse-tree.txt
-          NUMKONG_DIR="$(find "${CARGO_HOME}/registry/src" -maxdepth 2 -type d -name 'numkong-7.7.0' -print -quit)"
-          test -n "${NUMKONG_DIR}"
+          NUMKONG_DIR="$(find "${CARGO_HOME}/registry/src" -maxdepth 3 -type d -name 'numkong-7.7.0' -print -quit)"
+          if [[ -z "${NUMKONG_DIR}" ]]; then
+            echo "numkong 7.7.0 source was not found after cargo fetch." >&2
+            exit 1
+          fi
           cp "${NUMKONG_DIR}/Cargo.toml" dist/android/diagnostics/numkong-Cargo.toml
           cp "${NUMKONG_DIR}/build.rs" dist/android/diagnostics/numkong-build.rs
+          cargo tree \
+            --locked \
+            --manifest-path rust/Cargo.toml \
+            --target aarch64-linux-android \
+            -p mukei-bridge \
+            --no-default-features \
+            --features "shipping_native,android_keystore,runtime_hardening" \
+            -i numkong \
+            > dist/android/diagnostics/numkong-reverse-tree.txt 2>&1 || true
 
       - name: Build and validate APK
         shell: bash
