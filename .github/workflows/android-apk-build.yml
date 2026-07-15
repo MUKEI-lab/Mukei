@@ -9,13 +9,6 @@ on:
       - "qml/**"
       - "rust/**"
       - "scripts/android/**"
-  push:
-    branches: [ "agent/android-apk-remediation-*" ]
-    paths:
-      - ".github/workflows/android-apk-build.yml"
-      - "qml/**"
-      - "rust/**"
-      - "scripts/android/**"
 
 permissions:
   contents: read
