@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Prepare the actual Mukei QML UI with the corrected Android entrypoint.
+"""Prepare the actual Mukei QML UI with an on-device failure screen.
 
-This keeps the product QML tree intact while disabling the real native bridge in
-its build workflow. The purpose is to prove the production UI can load after
-fixing the resource/module entrypoint, without database or model-runtime noise.
+The full product QML tree is loaded with the stub backend. A Qt Widgets window
+remains alive underneath it and displays every QQmlError if root creation fails,
+so a phone-only test does not collapse back to the launcher without evidence.
 """
 from __future__ import annotations
 
@@ -30,41 +30,105 @@ endif()
 def patch_main() -> None:
     text = MAIN.read_text(encoding="utf-8")
 
-    wrong_url = 'engine.load(QUrl(QStringLiteral("qrc:/qt/qml/com/mukei/app/MainWindow.qml")));'
-    module_load = 'engine.loadFromModule(QStringLiteral("com.mukei.app"), QStringLiteral("MainWindow"));'
-    if wrong_url not in text:
-        raise SystemExit("expected incorrect MainWindow QRC URL was not found")
-    text = text.replace(wrong_url, module_load, 1)
+    include_anchor = '#include <QGuiApplication>\n'
+    widget_includes = '''#include <QApplication>\n#include <QLabel>\n#include <QPlainTextEdit>\n#include <QVBoxLayout>\n#include <QWidget>\n#include <QQmlError>\n'''
+    if include_anchor not in text:
+        raise SystemExit("QGuiApplication include anchor not found")
+    text = text.replace(include_anchor, include_anchor + widget_includes, 1)
 
-    # The Samsung M34 probe proved the OpenGL Qt Quick path works. Keep this
-    # device-validation build deterministic and avoid the unconditional Vulkan
-    # branch while the production renderer policy is being redesigned.
+    if "QGuiApplication app(argc, argv);" not in text:
+        raise SystemExit("QGuiApplication construction not found")
+    text = text.replace(
+        "QGuiApplication app(argc, argv);",
+        "QApplication app(argc, argv);\n    app.setQuitOnLastWindowClosed(false);",
+        1,
+    )
+
+    # The verified Samsung M34 renderer path is OpenGL.
     if "QSGRendererInterface::Vulkan" not in text:
-        raise SystemExit("expected Android Vulkan selection was not found")
+        raise SystemExit("Android Vulkan selection not found")
     text = text.replace("QSGRendererInterface::Vulkan", "QSGRendererInterface::OpenGL", 1)
 
-    failure_block = '''    QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] {
+    engine_anchor = "    QQmlApplicationEngine engine;\n"
+    diagnostics_setup = '''    QWidget diagnosticsWindow;
+    diagnosticsWindow.setWindowTitle(QStringLiteral("Mukei Full QML Diagnostics"));
+    diagnosticsWindow.setStyleSheet(QStringLiteral(
+        "QWidget { background: #F1E8DC; color: #2B211A; }"
+        "QLabel { font-size: 25px; font-weight: 600; }"
+        "QPlainTextEdit { background: #FBF7F1; color: #2B211A; border: 1px solid #B87333;"
+        " border-radius: 10px; padding: 12px; font-size: 14px; }"));
+    auto *diagnosticsLayout = new QVBoxLayout(&diagnosticsWindow);
+    diagnosticsLayout->setContentsMargins(28, 36, 28, 28);
+    diagnosticsLayout->setSpacing(18);
+    auto *diagnosticsTitle = new QLabel(QStringLiteral("MUKEI FULL QML STARTUP"), &diagnosticsWindow);
+    diagnosticsTitle->setAlignment(Qt::AlignCenter);
+    diagnosticsLayout->addWidget(diagnosticsTitle);
+    auto *diagnosticsText = new QPlainTextEdit(&diagnosticsWindow);
+    diagnosticsText->setReadOnly(true);
+    diagnosticsText->setPlainText(QStringLiteral(
+        "PASS  Android + Qt Widgets fallback window\\n"
+        "PASS  Qt Quick + OpenGL verified on this device\\n"
+        "WAIT  Loading com.mukei.app/MainWindow..."));
+    diagnosticsLayout->addWidget(diagnosticsText, 1);
+    diagnosticsWindow.showFullScreen();
+
+    QQmlApplicationEngine engine;
+'''
+    if engine_anchor not in text:
+        raise SystemExit("QQmlApplicationEngine anchor not found")
+    text = text.replace(engine_anchor, diagnostics_setup, 1)
+
+    old_failure = '''    QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] {
         QCoreApplication::exit(-1);
     }, Qt::QueuedConnection);
+
+    QTimer::singleShot(100, &engine, [&engine] {
+        engine.load(QUrl(QStringLiteral("qrc:/qt/qml/com/mukei/app/MainWindow.qml")));
+    });
 '''
-    diagnostics_block = '''    QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app,
-                     [](const QList<QQmlError> &warnings) {
-        for (const QQmlError &warning : warnings)
-            qCritical().noquote() << "MukeiStartup qml_warning" << warning.toString();
+    diagnostics_connections = '''    QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app,
+                     [diagnosticsText, &diagnosticsWindow](const QList<QQmlError> &warnings) {
+        diagnosticsWindow.showFullScreen();
+        for (const QQmlError &warning : warnings) {
+            const QString message = warning.toString();
+            diagnosticsText->appendPlainText(QStringLiteral("QML  ") + message);
+            qCritical().noquote() << "MukeiStartup qml_warning" << message;
+        }
     });
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated, &app,
-                     [](QObject *object, const QUrl &url) {
+                     [diagnosticsText, &diagnosticsWindow](QObject *object, const QUrl &url) {
+        diagnosticsText->appendPlainText(
+            QStringLiteral("%1  root object: %2")
+                .arg(object ? QStringLiteral("PASS") : QStringLiteral("FAIL"), url.toString()));
         qInfo().noquote() << "MukeiStartup root_object_created ok=" << (object != nullptr)
                           << "url=" << url.toString();
+        if (!object) {
+            diagnosticsWindow.showFullScreen();
+            return;
+        }
+        QObject::connect(object, &QObject::destroyed, &diagnosticsWindow,
+                         [diagnosticsText, &diagnosticsWindow] {
+            diagnosticsText->appendPlainText(QStringLiteral("FAIL  MainWindow root object was destroyed"));
+            diagnosticsWindow.showFullScreen();
+        });
+        QTimer::singleShot(1500, &diagnosticsWindow, &QWidget::hide);
     });
-    QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] {
+    QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
+                     [diagnosticsText, &diagnosticsWindow] {
+        diagnosticsText->appendPlainText(QStringLiteral(
+            "FAIL  MainWindow object creation failed.\\n"
+            "Screenshot every QML line shown above."));
+        diagnosticsWindow.showFullScreen();
         qCritical("MukeiStartup root_object_failed");
-        QCoreApplication::exit(-1);
     }, Qt::QueuedConnection);
+
+    QTimer::singleShot(350, &engine, [&engine] {
+        engine.loadFromModule(QStringLiteral("com.mukei.app"), QStringLiteral("MainWindow"));
+    });
 '''
-    if failure_block not in text:
-        raise SystemExit("expected objectCreationFailed block was not found")
-    text = text.replace(failure_block, diagnostics_block, 1)
+    if old_failure not in text:
+        raise SystemExit("original QML load/failure block not found")
+    text = text.replace(old_failure, diagnostics_connections, 1)
 
     MAIN.write_text(text, encoding="utf-8")
 
@@ -85,7 +149,7 @@ def patch_cmake() -> None:
 
 def patch_manifest() -> None:
     text = MANIFEST.read_text(encoding="utf-8")
-    text = text.replace('android:label="Mukei"', 'android:label="Mukei Full UI Fix"')
+    text = text.replace('android:label="Mukei"', 'android:label="Mukei QML Error Screen"')
     MANIFEST.write_text(text, encoding="utf-8")
 
 
@@ -93,7 +157,7 @@ def main() -> int:
     patch_main()
     patch_cmake()
     patch_manifest()
-    print("Prepared full Mukei QML UI with corrected module entrypoint and OpenGL")
+    print("Prepared full Mukei QML tree with persistent on-device error screen")
     return 0
 
 
