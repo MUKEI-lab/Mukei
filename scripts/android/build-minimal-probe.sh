@@ -10,7 +10,6 @@ readonly ABI="arm64-v8a"
 readonly ANDROID_API="${ANDROID_API:-29}"
 readonly BUILD_TYPE="${BUILD_TYPE:-Release}"
 readonly BUILD_ROOT="${BUILD_ROOT:-${REPO_ROOT}/build/android-probe-${VARIANT}}"
-readonly PACKAGE_ROOT="${BUILD_ROOT}/android-build-mukei"
 readonly DIST_DIR="${DIST_DIR:-${REPO_ROOT}/dist/android-probes}"
 readonly BRANDING_STATE="${BUILD_ROOT}/branding-materialization.json"
 
@@ -44,21 +43,18 @@ trap cleanup_branding EXIT
 require_dir "${ANDROID_SDK_ROOT}"
 require_dir "${ANDROID_NDK_ROOT}"
 require_exe "${QT_ANDROID_ROOT}/bin/qt-cmake"
-require_exe "${QT_HOST_ROOT}/bin/androiddeployqt"
 require_dir "${QT_HOST_ROOT}"
 require_cmd cmake
 require_cmd ninja
 require_cmd python3
 require_cmd unzip
 
-# Qt's androiddeployqt selects the highest installed platform. Keep this probe
-# deterministic and aligned with Mukei's targetSdk/compileSdk 35 contract.
 find "${ANDROID_SDK_ROOT}/platforms" -mindepth 1 -maxdepth 1 -type d \
     ! -name 'android-35' -exec rm -rf {} +
 [[ -f "${ANDROID_SDK_ROOT}/platforms/android-35/android.jar" ]] || \
     fail "Android platform 35 is unavailable"
 
-mkdir -p "${BUILD_ROOT}" "${PACKAGE_ROOT}" "${DIST_DIR}"
+mkdir -p "${BUILD_ROOT}" "${DIST_DIR}"
 
 printf '\n==> Materializing verified launcher resources\n'
 python3 "${SCRIPT_DIR}/prepare-branding.py" verify
@@ -81,24 +77,18 @@ printf '\n==> Configuring minimal probe: %s\n' "${VARIANT}"
     -DMUKEI_USE_REAL_BRIDGE=OFF \
     -DMUKEI_USE_NATIVE_INFERENCE=OFF
 
-printf '\n==> Building only the mukei application target\n'
-cmake --build "${BUILD_ROOT}" --target mukei --parallel
+printf '\n==> Building target-specific Mukei APK\n'
+if ! cmake --build "${BUILD_ROOT}" --target mukei_make_apk --parallel; then
+    printf '\nAvailable APK-related targets:\n' >&2
+    cmake --build "${BUILD_ROOT}" --target help 2>/dev/null | grep -E 'mukei|apk' >&2 || true
+    fail "target-specific APK packaging failed"
+fi
 
-deployment_settings="${BUILD_ROOT}/android-mukei-deployment-settings.json"
-[[ -f "${deployment_settings}" ]] || fail "missing deployment settings: ${deployment_settings}"
-
-packaged_apk="${PACKAGE_ROOT}/mukei-${VARIANT}.apk"
-printf '\n==> Packaging only the mukei application target\n'
-"${QT_HOST_ROOT}/bin/androiddeployqt" \
-    --input "${deployment_settings}" \
-    --output "${PACKAGE_ROOT}" \
-    --apk "${packaged_apk}" \
-    --builddir "${BUILD_ROOT}" \
-    --release
-
-[[ -f "${packaged_apk}" ]] || fail "androiddeployqt produced no APK"
+mapfile -t candidates < <(find "${BUILD_ROOT}" -type f -name '*.apk' -print | sort)
+((${#candidates[@]} > 0)) || fail "mukei_make_apk produced no APK"
+source_apk="${candidates[-1]}"
 output_apk="${DIST_DIR}/mukei-0.7.5-${VARIANT}-unsigned.apk"
-cp -f "${packaged_apk}" "${output_apk}"
+cp -f "${source_apk}" "${output_apk}"
 
 unzip -tq "${output_apk}" >/dev/null
 unzip -l "${output_apk}" | grep -q 'lib/arm64-v8a/libmukei_arm64-v8a.so'
