@@ -17,6 +17,9 @@ concurrency:
   group: apply-production-frontend-${{ github.ref_name }}
   cancel-in-progress: true
 
+env:
+  MIGRATION_REVISION: "2"
+
 jobs:
   migrate:
     runs-on: ubuntu-22.04
@@ -38,6 +41,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "Migration revision ${MIGRATION_REVISION}"
           python3 -m py_compile \
             scripts/frontend/apply-production-frontend.py \
             scripts/frontend/normalize-production-frontend.py
