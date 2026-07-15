@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -36,6 +37,21 @@ def require_text(path: Path, needles: tuple[str, ...]) -> str:
     return text
 
 
+def workspace_version() -> tuple[str, int]:
+    cargo_toml = (ROOT / "rust" / "Cargo.toml").read_text(encoding="utf-8")
+    match = re.search(
+        r'^version\s*=\s*"([0-9]+)\.([0-9]+)\.([0-9]+)"',
+        cargo_toml,
+        re.MULTILINE,
+    )
+    if not match:
+        fail("rust/Cargo.toml workspace version was not found")
+    major, minor, patch = (int(part) for part in match.groups())
+    if minor >= 100 or patch >= 100:
+        fail("Android versionCode formula requires minor and patch below 100")
+    return f"{major}.{minor}.{patch}", major * 10000 + minor * 100 + patch
+
+
 def check_adaptive_icon(path: Path, *, include_monochrome: bool) -> None:
     adaptive = parse_xml(path)
     if adaptive.tag != "adaptive-icon":
@@ -62,6 +78,12 @@ def check_adaptive_icon(path: Path, *, include_monochrome: bool) -> None:
 
 def check_manifest_and_launcher() -> None:
     manifest = parse_xml(ANDROID / "AndroidManifest.xml")
+    version_name, version_code = workspace_version()
+    if manifest.get(A + "versionName") != version_name:
+        fail("Android versionName must match rust/Cargo.toml workspace version")
+    if manifest.get(A + "versionCode") != str(version_code):
+        fail("Android versionCode must use major*10000 + minor*100 + patch")
+
     uses_sdk = manifest.find("uses-sdk")
     if uses_sdk is None:
         fail("AndroidManifest.xml has no uses-sdk element")
@@ -153,6 +175,7 @@ def main() -> int:
     check_build_contract()
     print("Android APK preflight passed")
     print("  launcher resources: complete")
+    print("  version metadata: synchronized")
     print("  QML asset references: complete")
     print("  ABI contract: arm64-v8a only")
     print("  Cargo profile: android-release")
