@@ -2,8 +2,16 @@ name: android-apk-build
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - "agent/full-qml-fixed-build-2026-07-15"
+    paths:
+      - ".github/workflows/android-apk-build.yml"
+      - "qml/**"
+      - "rust/**"
+      - "scripts/android/**"
   pull_request:
-    branches: [ "checkpoint/stabilization-2026-07-12" ]
+    branches: [ "main" ]
     paths:
       - ".github/workflows/android-apk-build.yml"
       - "qml/**"
