@@ -138,6 +138,17 @@ jobs:
           if-no-files-found: error
           retention-days: 3
       - name: Build QML and test targets
-        run: cmake --build "$CMAKE_BUILD_DIR" -j2
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build "$CMAKE_BUILD_DIR" -j2 2>&1 | tee /tmp/mukei-qml-build.log
+      - name: Upload QML build failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qml-build-failure
+          path: /tmp/mukei-qml-build.log
+          if-no-files-found: error
+          retention-days: 3
       - name: Run CTest
         run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
