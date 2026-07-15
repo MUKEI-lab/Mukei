@@ -83,6 +83,16 @@ jobs:
             "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
             "ndk;${ANDROID_NDK_VERSION}"
 
+          # Qt 6.5's androiddeployqt chooses the newest installed platform and
+          # build-tools revision. Hosted runners also carry preview/extension
+          # SDK 36 packages that are incompatible with Qt 6.5's AGP 7.4/AAPT2.
+          find "${SDK_ROOT}/platforms" -mindepth 1 -maxdepth 1 -type d \
+            ! -name 'android-35' -exec rm -rf {} +
+          find "${SDK_ROOT}/build-tools" -mindepth 1 -maxdepth 1 -type d \
+            ! -name "${ANDROID_BUILD_TOOLS_VERSION}" -exec rm -rf {} +
+
+          test -f "${SDK_ROOT}/platforms/android-35/android.jar"
+          test -x "${SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}/aapt2"
           test -d "${SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
           echo "ANDROID_HOME=${SDK_ROOT}" >> "${GITHUB_ENV}"
           echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "${GITHUB_ENV}"
