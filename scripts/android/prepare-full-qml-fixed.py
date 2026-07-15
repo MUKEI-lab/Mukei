@@ -2,8 +2,8 @@
 """Prepare the actual Mukei QML UI with an on-device failure screen.
 
 The full product QML tree is loaded with the stub backend. A Qt Widgets window
-remains alive underneath it and displays every QQmlError if root creation fails,
-so a phone-only test does not collapse back to the launcher without evidence.
+remains alive underneath it and displays resource checks plus every QQmlError if
+root creation fails, so a phone-only test does not lose startup evidence.
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def patch_main() -> None:
     text = MAIN.read_text(encoding="utf-8")
 
     include_anchor = '#include <QGuiApplication>\n'
-    widget_includes = '''#include <QApplication>\n#include <QLabel>\n#include <QPlainTextEdit>\n#include <QVBoxLayout>\n#include <QWidget>\n#include <QQmlError>\n'''
+    widget_includes = '''#include <QApplication>\n#include <QFile>\n#include <QLabel>\n#include <QPlainTextEdit>\n#include <QVBoxLayout>\n#include <QWidget>\n#include <QQmlError>\n'''
     if include_anchor not in text:
         raise SystemExit("QGuiApplication include anchor not found")
     text = text.replace(include_anchor, include_anchor + widget_includes, 1)
@@ -44,7 +44,7 @@ def patch_main() -> None:
         1,
     )
 
-    # The verified Samsung M34 renderer path is OpenGL.
+    # The Samsung M34 probes verified the Qt Quick OpenGL path.
     if "QSGRendererInterface::Vulkan" not in text:
         raise SystemExit("Android Vulkan selection not found")
     text = text.replace("QSGRendererInterface::Vulkan", "QSGRendererInterface::OpenGL", 1)
@@ -68,7 +68,7 @@ def patch_main() -> None:
     diagnosticsText->setPlainText(QStringLiteral(
         "PASS  Android + Qt Widgets fallback window\\n"
         "PASS  Qt Quick + OpenGL verified on this device\\n"
-        "WAIT  Loading com.mukei.app/MainWindow..."));
+        "WAIT  Checking packaged MainWindow resources..."));
     diagnosticsLayout->addWidget(diagnosticsText, 1);
     diagnosticsWindow.showFullScreen();
 
@@ -86,7 +86,19 @@ def patch_main() -> None:
         engine.load(QUrl(QStringLiteral("qrc:/qt/qml/com/mukei/app/MainWindow.qml")));
     });
 '''
-    diagnostics_connections = '''    QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app,
+    diagnostics_connections = '''    const QString canonicalResource = QStringLiteral(":/com/mukei/app/MainWindow.qml");
+    const QString legacyResource = QStringLiteral(":/qt/qml/com/mukei/app/MainWindow.qml");
+    const QUrl canonicalUrl(QStringLiteral("qrc:/com/mukei/app/MainWindow.qml"));
+
+    diagnosticsText->appendPlainText(QStringLiteral("%1  %2")
+        .arg(QFile::exists(canonicalResource) ? QStringLiteral("PASS") : QStringLiteral("FAIL"),
+             canonicalResource));
+    diagnosticsText->appendPlainText(QStringLiteral("%1  %2")
+        .arg(QFile::exists(legacyResource) ? QStringLiteral("PASS") : QStringLiteral("FAIL"),
+             legacyResource));
+    diagnosticsText->appendPlainText(QStringLiteral("WAIT  Direct-loading %1...").arg(canonicalUrl.toString()));
+
+    QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app,
                      [diagnosticsText, &diagnosticsWindow](const QList<QQmlError> &warnings) {
         diagnosticsWindow.showFullScreen();
         for (const QQmlError &warning : warnings) {
@@ -122,8 +134,8 @@ def patch_main() -> None:
         qCritical("MukeiStartup root_object_failed");
     }, Qt::QueuedConnection);
 
-    QTimer::singleShot(350, &engine, [&engine] {
-        engine.loadFromModule(QStringLiteral("com.mukei.app"), QStringLiteral("MainWindow"));
+    QTimer::singleShot(350, &engine, [&engine, canonicalUrl] {
+        engine.load(canonicalUrl);
     });
 '''
     if old_failure not in text:
@@ -149,7 +161,7 @@ def patch_cmake() -> None:
 
 def patch_manifest() -> None:
     text = MANIFEST.read_text(encoding="utf-8")
-    text = text.replace('android:label="Mukei"', 'android:label="Mukei QML Error Screen"')
+    text = text.replace('android:label="Mukei"', 'android:label="Mukei Direct QRC Diagnostics"')
     MANIFEST.write_text(text, encoding="utf-8")
 
 
@@ -157,7 +169,7 @@ def main() -> int:
     patch_main()
     patch_cmake()
     patch_manifest()
-    print("Prepared full Mukei QML tree with persistent on-device error screen")
+    print("Prepared full Mukei QML tree with canonical direct-QRC loading")
     return 0
 
 
