@@ -209,8 +209,11 @@ printf '\n==> Configuring Qt Android application\n'
     -DMUKEI_LLAMA_NATIVE_LIB="${LLAMA_LIB}" \
     -DMUKEI_CXX_QT_EXPORT_DIR="${CXX_QT_EXPORT_DIR}"
 
-cmake --build "${QML_BUILD_DIR}" --parallel
-cmake --build "${QML_BUILD_DIR}" --target apk --parallel
+# Build and package only the product target. The aggregate `apk` target also
+# packages every Android test executable into a shared staging directory.
+cmake --build "${QML_BUILD_DIR}" --target mukei --parallel
+# Do not use the aggregate "--target apk" here.
+cmake --build "${QML_BUILD_DIR}" --target mukei_make_apk --parallel
 
 mapfile -t apk_candidates < <(find "${QML_BUILD_DIR}" -type f -name '*.apk' -print | sort)
 ((${#apk_candidates[@]} > 0)) || fail "Qt/Gradle completed without producing an APK"
