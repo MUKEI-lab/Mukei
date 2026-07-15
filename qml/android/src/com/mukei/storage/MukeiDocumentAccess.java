@@ -1,13 +1,13 @@
 package com.mukei.storage;
 
-import android.app.Activity;
 import android.content.ContentResolver;
+import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.OpenableColumns;
 
-import org.qtproject.qt.android.QtNative;
+import org.qtproject.qt.android.MukeiContext;
 
 /**
  * Android Storage Access Framework boundary for Mukei.
@@ -24,10 +24,8 @@ public final class MukeiDocumentAccess {
 
     private MukeiDocumentAccess() {}
 
-    private static Activity activity() {
-        Activity activity = QtNative.activity();
-        if (activity == null) throw new IllegalStateException("Qt activity unavailable");
-        return activity;
+    private static Context context() {
+        return MukeiContext.requireContext();
     }
 
     private static Uri parse(String value) {
@@ -62,7 +60,7 @@ public final class MukeiDocumentAccess {
         try {
             Uri uri = parse(value);
             if ("file".equals(uri.getScheme())) return ACCESS_NOT_REQUIRED;
-            ContentResolver resolver = activity().getContentResolver();
+            ContentResolver resolver = context().getContentResolver();
             try {
                 resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 return ACCESS_PERSISTED;
@@ -78,7 +76,7 @@ public final class MukeiDocumentAccess {
         try {
             Uri uri = parse(value);
             if ("file".equals(uri.getScheme())) return true;
-            activity().getContentResolver().releasePersistableUriPermission(
+            context().getContentResolver().releasePersistableUriPermission(
                     uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
             return true;
         } catch (SecurityException noPersistedGrant) {
@@ -96,7 +94,7 @@ public final class MukeiDocumentAccess {
                 java.io.File file = new java.io.File(uri.getPath());
                 return file.isFile() && file.canRead();
             }
-            return readable(activity().getContentResolver(), uri);
+            return readable(context().getContentResolver(), uri);
         } catch (Throwable ignored) {
             return false;
         }
@@ -109,7 +107,7 @@ public final class MukeiDocumentAccess {
                 java.io.File file = new java.io.File(uri.getPath());
                 return file.isFile() ? Math.max(0L, file.length()) : -1L;
             }
-            Cursor cursor = activity().getContentResolver().query(
+            Cursor cursor = context().getContentResolver().query(
                     uri, new String[] { OpenableColumns.SIZE }, null, null, null);
             if (cursor == null) return -1L;
             try (Cursor closeable = cursor) {
@@ -127,7 +125,7 @@ public final class MukeiDocumentAccess {
         try {
             Uri uri = parse(value);
             if ("file".equals(uri.getScheme())) return "application/octet-stream";
-            String mime = activity().getContentResolver().getType(uri);
+            String mime = context().getContentResolver().getType(uri);
             return mime == null ? "application/octet-stream" : mime;
         } catch (Throwable ignored) {
             return "application/octet-stream";
@@ -141,7 +139,7 @@ public final class MukeiDocumentAccess {
                 String segment = uri.getLastPathSegment();
                 return segment == null ? "Private document" : segment;
             }
-            Cursor cursor = activity().getContentResolver().query(
+            Cursor cursor = context().getContentResolver().query(
                     uri, new String[] { OpenableColumns.DISPLAY_NAME }, null, null, null);
             if (cursor == null) return "Private document";
             try (Cursor closeable = cursor) {
