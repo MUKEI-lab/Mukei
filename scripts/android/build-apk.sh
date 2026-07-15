@@ -146,6 +146,27 @@ printf '\n==> Cross-compiling Rust/CXX-Qt bridge for %s\n' "${RUST_TARGET}"
         AR_aarch64_linux_android="${TARGET_AR}" \
         RANLIB_aarch64_linux_android="${TARGET_RANLIB}" \
         RANLIB="${TARGET_RANLIB}" \
+        NK_TARGET_NEON=1 \
+        NK_TARGET_NEONHALF=0 \
+        NK_TARGET_NEONSDOT=0 \
+        NK_TARGET_NEONBFDOT=0 \
+        NK_TARGET_NEONFHM=0 \
+        NK_TARGET_SVE=0 \
+        NK_TARGET_SVEHALF=0 \
+        NK_TARGET_SVEBFDOT=0 \
+        NK_TARGET_SVESDOT=0 \
+        NK_TARGET_SVE2=0 \
+        NK_TARGET_SVE2P1=0 \
+        NK_TARGET_NEONFP8=0 \
+        NK_TARGET_SME=0 \
+        NK_TARGET_SME2=0 \
+        NK_TARGET_SME2P1=0 \
+        NK_TARGET_SMEF64=0 \
+        NK_TARGET_SMEHALF=0 \
+        NK_TARGET_SMEBF16=0 \
+        NK_TARGET_SMEBI32=0 \
+        NK_TARGET_SMELUT2=0 \
+        NK_TARGET_SMEFA64=0 \
         cargo build \
             -p mukei-bridge \
             --profile android-release \
