@@ -1,0 +1,128 @@
+name: android-apk-build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ "checkpoint/stabilization-2026-07-12" ]
+    paths:
+      - ".github/workflows/android-apk-build.yml"
+      - "qml/**"
+      - "rust/**"
+      - "scripts/android/**"
+  push:
+    branches: [ "agent/android-apk-remediation-*" ]
+    paths:
+      - ".github/workflows/android-apk-build.yml"
+      - "qml/**"
+      - "rust/**"
+      - "scripts/android/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-apk-build-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: "6.5.3"
+  ANDROID_NDK_VERSION: "25.1.8937393"
+  ANDROID_BUILD_TOOLS_VERSION: "35.0.1"
+
+jobs:
+  build-apk:
+    name: Build arm64-v8a APK
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install host tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            p7zip-full \
+            libegl1 \
+            libgl1 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0
+          python -m pip install --upgrade pip
+          python -m pip install "aqtinstall==3.3.*" "py7zr==1.1.*"
+
+      - name: Install Android SDK and NDK components
+        shell: bash
+        run: |
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [[ -z "${SDK_ROOT}" ]]; then
+            echo "Android SDK root is unavailable on the runner." >&2
+            exit 1
+          fi
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
+            "ndk;${ANDROID_NDK_VERSION}"
+          echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "${GITHUB_ENV}"
+          echo "ANDROID_NDK_ROOT=${SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "${GITHUB_ENV}"
+
+      - name: Install Qt Android and host kits
+        shell: bash
+        run: |
+          QT_INSTALL_ROOT="${RUNNER_TEMP}/Qt"
+          aqt install-qt \
+            linux android "${QT_VERSION}" android_arm64_v8a \
+            --autodesktop \
+            --outputdir "${QT_INSTALL_ROOT}" \
+            --external 7z
+          QT_ANDROID_ROOT="${QT_INSTALL_ROOT}/${QT_VERSION}/android_arm64_v8a"
+          QT_HOST_ROOT="${QT_INSTALL_ROOT}/${QT_VERSION}/gcc_64"
+          test -x "${QT_ANDROID_ROOT}/bin/qt-cmake"
+          test -x "${QT_ANDROID_ROOT}/bin/qmake"
+          test -d "${QT_HOST_ROOT}"
+          echo "QT_ANDROID_ROOT=${QT_ANDROID_ROOT}" >> "${GITHUB_ENV}"
+          echo "QT_HOST_ROOT=${QT_HOST_ROOT}" >> "${GITHUB_ENV}"
+
+      - name: Install Rust Android target
+        shell: bash
+        run: |
+          rustup show
+          rustup target add aarch64-linux-android
+
+      - name: Build and validate APK
+        shell: bash
+        env:
+          CARGO_TERM_COLOR: always
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
+        run: bash scripts/android/build-apk.sh
+
+      - name: Record APK checksums
+        shell: bash
+        run: |
+          sha256sum dist/android/*.apk | tee dist/android/SHA256SUMS
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mukei-0.7.5-arm64-v8a-apk
+          path: |
+            dist/android/*.apk
+            dist/android/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
