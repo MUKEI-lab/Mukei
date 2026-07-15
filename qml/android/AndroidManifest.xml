@@ -10,6 +10,10 @@
   minSdk 29 aligns with QT_ANDROID_MIN_SDK_VERSION in CMakeLists.txt;
   targetSdk 35 aligns with QT_ANDROID_TARGET_SDK_VERSION. versionCode uses
   major*10000 + minor*100 + patch and must increase for every APK release.
+
+  Do not replace this manifest with the branding handoff: the handoff contains
+  resources only. Qt-generated metadata and placeholders remain owned by
+  androiddeployqt.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           package="app.mukei"
@@ -23,12 +27,14 @@
         android:label="Mukei"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/MukeiAppTheme"
         android:allowBackup="false"
         android:hasFragileUserData="true"
         android:supportsRtl="true">
         <activity
             android:name="org.qtproject.qt.android.bindings.QtActivity"
             android:exported="true"
+            android:theme="@style/MukeiAppTheme"
             android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|density|uiMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
