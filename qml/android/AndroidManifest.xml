@@ -8,10 +8,13 @@
   permission at runtime.
 
   minSdk 29 aligns with QT_ANDROID_MIN_SDK_VERSION in CMakeLists.txt;
-  targetSdk 35 aligns with QT_ANDROID_TARGET_SDK_VERSION.
+  targetSdk 35 aligns with QT_ANDROID_TARGET_SDK_VERSION. versionCode uses
+  major*10000 + minor*100 + patch and must increase for every APK release.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-          package="app.mukei">
+          package="app.mukei"
+          android:versionCode="705"
+          android:versionName="0.7.5">
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="35"/>
 
     <uses-permission android:name="android.permission.INTERNET"/>
