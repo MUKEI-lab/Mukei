@@ -1,0 +1,53 @@
+name: android-apk-preflight
+
+on:
+  push:
+    branches: [ main, "agent/**", "checkpoint/**" ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gate-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: Android APK packaging preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate shell syntax
+        shell: bash
+        run: |
+          bash -n scripts/android/build-apk.sh
+          bash -n scripts/android/validate-apk.sh
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Lint Android build scripts
+        run: shellcheck scripts/android/build-apk.sh scripts/android/validate-apk.sh
+
+      - name: Validate launcher, assets, and build contract
+        run: python3 scripts/android/preflight.py
+
+      - name: Validate Android CMake cache accepts arm64
+        run: >-
+          cmake
+          -DANDROID_ABI=arm64-v8a
+          -P qml/cmake/MukeiAndroidApkInitialCache.cmake
+
+      - name: Validate Android CMake cache rejects other ABIs
+        shell: bash
+        run: |
+          if cmake -DANDROID_ABI=x86_64 -P qml/cmake/MukeiAndroidApkInitialCache.cmake; then
+            echo "Expected the APK-first cache to reject x86_64." >&2
+            exit 1
+          fi
