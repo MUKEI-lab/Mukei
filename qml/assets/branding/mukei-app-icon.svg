@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" role="img" aria-labelledby="title desc">
+  <title id="title">Mukei app icon</title>
+  <desc id="desc">An ink-colored geometric M monogram on a warm paper background with a small gold mark.</desc>
+  <rect width="108" height="108" rx="24" fill="#F4EFE7"/>
+  <path d="M25 79V29h14l15 28 15-28h14v50H70V50L59 72H49L38 50v29H25z" fill="#2A1B2D"/>
+  <rect x="50" y="82" width="8" height="8" fill="#B58A4A"/>
+</svg>
