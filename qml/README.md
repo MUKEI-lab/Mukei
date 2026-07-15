@@ -112,3 +112,10 @@ matrix for the current snapshot.
 
 Replace asset sets deliberately rather than silently editing third-party
 artifacts in place.
+
+## Production validation
+
+The production Android workflow finalizes the canonical bridge event contract,
+links the real CXX-Qt bridge and native inference capsule, compiles the full QML
+module, validates the APK contents, and publishes separate test-signed and
+unsigned artifacts. Physical-device validation remains a release gate.
