@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/workflows/android-minimal-probe-apks.yml"
       - "scripts/android/prepare-minimal-probe.py"
+      - "scripts/android/prepare-full-qml-fixed.py"
       - "scripts/android/build-minimal-probe.sh"
       - "scripts/android/prepare-branding.py"
       - "qml/**"
@@ -32,8 +33,7 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - qml-diagnostics-widget
-          - quick-cpp-opengl
+          - full-qml-fixed
 
     steps:
       - name: Checkout
@@ -102,13 +102,14 @@ jobs:
           echo "QT_ANDROID_ROOT=${QT_ANDROID_ROOT}" >> "${GITHUB_ENV}"
           echo "QT_HOST_ROOT=${QT_HOST_ROOT}" >> "${GITHUB_ENV}"
 
-      - name: Prepare minimal source probe
+      - name: Prepare full QML fixed source
         shell: bash
         run: |
-          python3 scripts/android/prepare-minimal-probe.py "${{ matrix.variant }}"
-          grep -q "MukeiProbe" qml/main.cpp
+          python3 scripts/android/prepare-full-qml-fixed.py
+          grep -q 'loadFromModule(QStringLiteral("com.mukei.app")' qml/main.cpp
+          grep -q 'qt_add_executable(mukei' qml/CMakeLists.txt
 
-      - name: Build unsigned probe APK
+      - name: Build unsigned full UI APK
         shell: bash
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
@@ -118,7 +119,7 @@ jobs:
           bash scripts/android/build-minimal-probe.sh "${{ matrix.variant }}" \
             2>&1 | tee "dist/android-probes/${{ matrix.variant }}-build.log"
 
-      - name: Sign and verify probe APK
+      - name: Sign and verify full UI APK
         shell: bash
         run: |
           VARIANT="${{ matrix.variant }}"
@@ -137,7 +138,7 @@ jobs:
             -keysize 3072 \
             -sigalg SHA256withRSA \
             -validity 3650 \
-            -dname "CN=Mukei ${VARIANT} Probe,O=MUKEI-lab,C=IN"
+            -dname "CN=Mukei Full QML Fix,O=MUKEI-lab,C=IN"
           zipalign -p -f 4 "${UNSIGNED}" "${ALIGNED}"
           apksigner sign \
             --ks "${KEYSTORE}" \
@@ -151,7 +152,7 @@ jobs:
           apksigner verify --verbose --print-certs "${SIGNED}"
           sha256sum "${SIGNED}" > "dist/android-probes/${VARIANT}-SHA256SUMS"
 
-      - name: Upload probe APK
+      - name: Upload full UI APK
         uses: actions/upload-artifact@v4
         with:
           name: mukei-0.7.5-${{ matrix.variant }}-probe-apk
@@ -161,7 +162,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload probe diagnostics
+      - name: Upload build diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
