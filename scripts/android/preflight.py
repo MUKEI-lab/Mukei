@@ -36,6 +36,30 @@ def require_text(path: Path, needles: tuple[str, ...]) -> str:
     return text
 
 
+def check_adaptive_icon(path: Path, *, include_monochrome: bool) -> None:
+    adaptive = parse_xml(path)
+    if adaptive.tag != "adaptive-icon":
+        fail(f"{path.relative_to(ROOT)} is not an adaptive-icon")
+
+    expected = {
+        "background": "@color/mukei_launcher_background",
+        "foreground": "@drawable/ic_launcher_foreground",
+    }
+    if include_monochrome:
+        expected["monochrome"] = "@drawable/ic_launcher_monochrome"
+
+    for child_name, drawable in expected.items():
+        child = adaptive.find(child_name)
+        if child is None or child.get(A + "drawable") != drawable:
+            fail(f"{path.relative_to(ROOT)} has invalid {child_name} reference")
+
+    monochrome = adaptive.find("monochrome")
+    if include_monochrome and monochrome is None:
+        fail(f"{path.relative_to(ROOT)} must declare a monochrome layer")
+    if not include_monochrome and monochrome is not None:
+        fail(f"{path.relative_to(ROOT)} must keep the API 26 adaptive-icon schema")
+
+
 def check_manifest_and_launcher() -> None:
     manifest = parse_xml(ANDROID / "AndroidManifest.xml")
     uses_sdk = manifest.find("uses-sdk")
@@ -55,19 +79,14 @@ def check_manifest_and_launcher() -> None:
         fail("application roundIcon must reference @mipmap/ic_launcher_round")
 
     for resource_name in ("ic_launcher", "ic_launcher_round"):
-        adaptive_path = ANDROID / "res" / "mipmap-anydpi-v26" / f"{resource_name}.xml"
-        adaptive = parse_xml(adaptive_path)
-        if adaptive.tag != "adaptive-icon":
-            fail(f"{adaptive_path.relative_to(ROOT)} is not an adaptive-icon")
-        expected = {
-            "background": "@color/mukei_launcher_background",
-            "foreground": "@drawable/ic_launcher_foreground",
-            "monochrome": "@drawable/ic_launcher_monochrome",
-        }
-        for child_name, drawable in expected.items():
-            child = adaptive.find(child_name)
-            if child is None or child.get(A + "drawable") != drawable:
-                fail(f"{resource_name} has invalid {child_name} reference")
+        check_adaptive_icon(
+            ANDROID / "res" / "mipmap-anydpi-v26" / f"{resource_name}.xml",
+            include_monochrome=False,
+        )
+        check_adaptive_icon(
+            ANDROID / "res" / "mipmap-anydpi-v33" / f"{resource_name}.xml",
+            include_monochrome=True,
+        )
 
     parse_xml(ANDROID / "res" / "drawable" / "ic_launcher_foreground.xml")
     parse_xml(ANDROID / "res" / "drawable" / "ic_launcher_monochrome.xml")
