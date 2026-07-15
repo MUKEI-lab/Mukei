@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - "agent/full-qml-fixed-build-2026-07-15"
+  pull_request:
+    branches:
+      - "agent/android-apk-remediation-2026-07-15"
 
 permissions:
   contents: read
