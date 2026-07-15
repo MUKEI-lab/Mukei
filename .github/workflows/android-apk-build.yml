@@ -19,7 +19,7 @@ on:
       - "scripts/android/**"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: android-apk-build-${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -254,3 +254,38 @@ jobs:
             dist/android/diagnostics/**
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Publish branch build report
+        if: always() && github.event_name == 'push'
+        shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          mkdir -p reports/ci
+          {
+            echo "# Latest production Android APK build"
+            echo
+            echo "- status: ${JOB_STATUS}"
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- run_number: ${GITHUB_RUN_NUMBER}"
+            echo "- source_sha: ${GITHUB_SHA}"
+            echo "- branch: ${GITHUB_REF_NAME}"
+            echo "- event: ${GITHUB_EVENT_NAME}"
+            echo "- updated_utc: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            if [[ -f dist/android/SHA256SUMS ]]; then
+              echo
+              echo '```text'
+              cat dist/android/SHA256SUMS
+              echo '```'
+            fi
+          } > reports/ci/android-apk-build-latest.md
+
+          git config user.name "Mukei Android CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add reports/ci/android-apk-build-latest.md
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "ci: record Android APK build ${GITHUB_RUN_NUMBER}"
+          git push origin HEAD:${GITHUB_REF_NAME}
