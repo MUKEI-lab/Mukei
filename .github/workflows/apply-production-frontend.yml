@@ -1,0 +1,72 @@
+name: apply-production-frontend
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "agent/full-qml-fixed-build-2026-07-15"
+    paths:
+      - ".github/workflows/apply-production-frontend.yml"
+      - "scripts/frontend/apply-production-frontend.py"
+      - "scripts/frontend/normalize-production-frontend.py"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-production-frontend-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  migrate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout working branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/full-qml-fixed-build-2026-07-15
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Apply and validate production frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            scripts/frontend/apply-production-frontend.py \
+            scripts/frontend/normalize-production-frontend.py
+          python3 scripts/frontend/apply-production-frontend.py
+          python3 scripts/frontend/normalize-production-frontend.py
+
+          grep -Fq 'qt_add_executable(mukei' qml/CMakeLists.txt
+          grep -Fq 'set(CMAKE_AUTORCC ON)' qml/CMakeLists.txt
+          grep -Fq 'qrc:/com/mukei/app/MainWindow.qml' qml/main.cpp
+          grep -Fq 'QSGRendererInterface::OpenGL' qml/main.cpp
+          grep -Fq 'function onEventEmitted' qml/events/EventDispatcher.qml
+          grep -Fq 'All data lives on this device' qml/screens/SettingsScreen.qml
+          grep -Fq 'Choose a verified local model' qml/screens/ChatScreen.qml
+
+      - name: Commit canonical production source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "MUKEI Frontend Migration"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            qml \
+            scripts/android/build-apk.sh \
+            .github/workflows/android-apk-build.yml
+
+          if git diff --cached --quiet; then
+            echo "Canonical production frontend is already applied."
+            exit 0
+          fi
+
+          git commit -m "feat(frontend): apply UXB v2.1 production frontend"
+          git push origin HEAD:agent/full-qml-fixed-build-2026-07-15
