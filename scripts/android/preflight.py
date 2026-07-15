@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-"""Static Android packaging contract checks for the APK-first release path."""
+"""Static Android packaging and branding contract checks for the APK-first path."""
 
 from __future__ import annotations
 
+import hashlib
+import importlib.util
 import re
 import sys
 import xml.etree.ElementTree as ET
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[2]
 ANDROID = ROOT / "qml" / "android"
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
 A = f"{{{ANDROID_NS}}}"
+OVERLAY_PREFIX = PurePosixPath("02_ANDROID_RESOURCE_OVERLAY/qml/android/res")
 
 
-def fail(message: str) -> None:
+def fail(message: str) -> "NoReturn":
     raise SystemExit(f"android preflight failed: {message}")
 
 
@@ -52,31 +55,77 @@ def workspace_version() -> tuple[str, int]:
     return f"{major}.{minor}.{patch}", major * 10000 + minor * 100 + patch
 
 
-def check_adaptive_icon(path: Path, *, include_monochrome: bool) -> None:
+def load_branding_module():
+    module_path = ROOT / "scripts" / "android" / "prepare-branding.py"
+    spec = importlib.util.spec_from_file_location("mukei_prepare_branding", module_path)
+    if spec is None or spec.loader is None:
+        fail("could not load scripts/android/prepare-branding.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_branding_bundle_and_overlay() -> None:
+    branding = load_branding_module()
+    _, manifest = branding.load_payload()
+    branding.verify()
+
+    committed_members = (
+        "drawable/ic_launcher_foreground.xml",
+        "drawable/ic_launcher_monochrome.xml",
+        "drawable/mukei_splash_background.xml",
+        "drawable/mukei_splash_icon.xml",
+        "mipmap-anydpi-v26/ic_launcher.xml",
+        "mipmap-anydpi-v26/ic_launcher_round.xml",
+        "values/mukei_brand_colors.xml",
+    )
+    for relative in committed_members:
+        member = str(OVERLAY_PREFIX / relative)
+        destination = ANDROID / "res" / Path(relative)
+        if member not in manifest:
+            fail(f"approved branding manifest is missing {member}")
+        expected_size, expected_hash = manifest[member]
+        if not destination.is_file():
+            fail(f"approved branding resource is missing: {destination.relative_to(ROOT)}")
+        actual = destination.read_bytes()
+        if len(actual) != expected_size or hashlib.sha256(actual).hexdigest() != expected_hash:
+            fail(f"approved branding resource was modified: {destination.relative_to(ROOT)}")
+
+    obsolete = (
+        ROOT / "qml" / "assets" / "branding" / "mukei-app-icon.svg",
+        ANDROID / "res" / "values" / "colors.xml",
+        ANDROID / "res" / "mipmap-anydpi-v33" / "ic_launcher.xml",
+        ANDROID / "res" / "mipmap-anydpi-v33" / "ic_launcher_round.xml",
+    )
+    for path in obsolete:
+        if path.exists():
+            fail(f"obsolete placeholder branding remains: {path.relative_to(ROOT)}")
+
+
+def check_adaptive_icon(path: Path) -> None:
     adaptive = parse_xml(path)
     if adaptive.tag != "adaptive-icon":
         fail(f"{path.relative_to(ROOT)} is not an adaptive-icon")
-
     expected = {
-        "background": "@color/mukei_launcher_background",
+        "background": "@color/ic_launcher_background",
         "foreground": "@drawable/ic_launcher_foreground",
+        "monochrome": "@drawable/ic_launcher_monochrome",
     }
-    if include_monochrome:
-        expected["monochrome"] = "@drawable/ic_launcher_monochrome"
-
     for child_name, drawable in expected.items():
         child = adaptive.find(child_name)
         if child is None or child.get(A + "drawable") != drawable:
             fail(f"{path.relative_to(ROOT)} has invalid {child_name} reference")
 
-    monochrome = adaptive.find("monochrome")
-    if include_monochrome and monochrome is None:
-        fail(f"{path.relative_to(ROOT)} must declare a monochrome layer")
-    if not include_monochrome and monochrome is not None:
-        fail(f"{path.relative_to(ROOT)} must keep the API 26 adaptive-icon schema")
+
+def style_items(path: Path) -> dict[str, str]:
+    resources = parse_xml(path)
+    style = next((node for node in resources.findall("style") if node.get("name") == "MukeiAppTheme"), None)
+    if style is None:
+        fail(f"{path.relative_to(ROOT)} does not declare MukeiAppTheme")
+    return {node.get("name", ""): (node.text or "").strip() for node in style.findall("item")}
 
 
-def check_manifest_and_launcher() -> None:
+def check_manifest_launcher_and_splash() -> None:
     manifest = parse_xml(ANDROID / "AndroidManifest.xml")
     version_name, version_code = workspace_version()
     if manifest.get(A + "versionName") != version_name:
@@ -95,30 +144,60 @@ def check_manifest_and_launcher() -> None:
     application = manifest.find("application")
     if application is None:
         fail("AndroidManifest.xml has no application element")
-    if application.get(A + "icon") != "@mipmap/ic_launcher":
-        fail("application icon must reference @mipmap/ic_launcher")
-    if application.get(A + "roundIcon") != "@mipmap/ic_launcher_round":
-        fail("application roundIcon must reference @mipmap/ic_launcher_round")
+    expected_application = {
+        "icon": "@mipmap/ic_launcher",
+        "roundIcon": "@mipmap/ic_launcher_round",
+        "theme": "@style/MukeiAppTheme",
+    }
+    for attribute, expected in expected_application.items():
+        if application.get(A + attribute) != expected:
+            fail(f"application {attribute} must reference {expected}")
+
+    activity = application.find("activity")
+    if activity is None or activity.get(A + "name") != "org.qtproject.qt.android.bindings.QtActivity":
+        fail("QtActivity launcher declaration is missing")
+    if activity.get(A + "theme") != "@style/MukeiAppTheme":
+        fail("QtActivity must use @style/MukeiAppTheme")
 
     for resource_name in ("ic_launcher", "ic_launcher_round"):
-        check_adaptive_icon(
-            ANDROID / "res" / "mipmap-anydpi-v26" / f"{resource_name}.xml",
-            include_monochrome=False,
-        )
-        check_adaptive_icon(
-            ANDROID / "res" / "mipmap-anydpi-v33" / f"{resource_name}.xml",
-            include_monochrome=True,
-        )
+        check_adaptive_icon(ANDROID / "res" / "mipmap-anydpi-v26" / f"{resource_name}.xml")
 
-    parse_xml(ANDROID / "res" / "drawable" / "ic_launcher_foreground.xml")
-    parse_xml(ANDROID / "res" / "drawable" / "ic_launcher_monochrome.xml")
-    colors = parse_xml(ANDROID / "res" / "values" / "colors.xml")
-    if not any(node.get("name") == "mukei_launcher_background" for node in colors.findall("color")):
-        fail("launcher background color is not declared")
+    for drawable in (
+        "ic_launcher_foreground.xml",
+        "ic_launcher_monochrome.xml",
+        "mukei_splash_background.xml",
+        "mukei_splash_icon.xml",
+    ):
+        parse_xml(ANDROID / "res" / "drawable" / drawable)
 
-    master_logo = parse_xml(ROOT / "qml" / "assets" / "branding" / "mukei-app-icon.svg")
-    if not master_logo.tag.endswith("svg"):
-        fail("canonical app icon is not an SVG document")
+    colors = parse_xml(ANDROID / "res" / "values" / "mukei_brand_colors.xml")
+    colors_by_name = {node.get("name"): (node.text or "").strip().upper() for node in colors.findall("color")}
+    if colors_by_name.get("ic_launcher_background") != "#2B211A":
+        fail("approved espresso launcher background changed")
+    if colors_by_name.get("mukei_splash_background") != "#F1E8DC":
+        fail("approved paper splash background changed")
+
+    base_items = style_items(ANDROID / "res" / "values" / "styles.xml")
+    required_base = {
+        "android:windowBackground": "@drawable/mukei_splash_background",
+        "android:windowLightStatusBar": "true",
+        "android:statusBarColor": "@color/mukei_splash_background",
+        "android:navigationBarColor": "@color/mukei_splash_background",
+    }
+    for name, value in required_base.items():
+        if base_items.get(name) != value:
+            fail(f"base MukeiAppTheme has invalid {name}")
+
+    v31_items = style_items(ANDROID / "res" / "values-v31" / "styles.xml")
+    required_v31 = {
+        **required_base,
+        "android:windowSplashScreenBackground": "@color/mukei_splash_background",
+        "android:windowSplashScreenAnimatedIcon": "@drawable/mukei_splash_icon",
+        "android:windowSplashScreenIconBackgroundColor": "@android:color/transparent",
+    }
+    for name, value in required_v31.items():
+        if v31_items.get(name) != value:
+            fail(f"Android 12+ MukeiAppTheme has invalid {name}")
 
 
 def check_qml_assets() -> None:
@@ -141,11 +220,14 @@ def check_build_contract() -> None:
         (
             'readonly ABI="arm64-v8a"',
             'readonly RUST_TARGET="aarch64-linux-android"',
+            "prepare-branding.py\" verify",
+            "prepare-branding.py\" materialize",
+            "prepare-branding.py\" cleanup",
             "--profile android-release",
             '--features "shipping_native,android_keystore,runtime_hardening"',
             "MukeiAndroidApkInitialCache.cmake",
             "-DQT_ANDROID_BUILD_ALL_ABIS=OFF",
-            '--target apk',
+            "--target apk",
             'bash "${SCRIPT_DIR}/validate-apk.sh"',
         ),
     )
@@ -160,7 +242,7 @@ def check_build_contract() -> None:
     require_text(
         ROOT / "qml" / "cmake" / "MukeiAndroidApkInitialCache.cmake",
         (
-            'ANDROID_ABI=arm64-v8a',
+            "ANDROID_ABI=arm64-v8a",
             "aarch64-linux-android/android-release/libmukei_bridge.a",
             "prebuilt/arm64-v8a/libmukei_llama_native.so",
             "set(MUKEI_USE_REAL_BRIDGE ON",
@@ -170,11 +252,13 @@ def check_build_contract() -> None:
 
 
 def main() -> int:
-    check_manifest_and_launcher()
+    check_branding_bundle_and_overlay()
+    check_manifest_launcher_and_splash()
     check_qml_assets()
     check_build_contract()
     print("Android APK preflight passed")
-    print("  launcher resources: complete")
+    print("  Mukei branding v3.2: exact payload verified")
+    print("  launcher and splash resources: complete")
     print("  version metadata: synchronized")
     print("  QML asset references: complete")
     print("  ABI contract: arm64-v8a only")
