@@ -51,6 +51,13 @@ require_cmd ninja
 require_cmd python3
 require_cmd unzip
 
+# Qt's androiddeployqt selects the highest installed platform. Keep this probe
+# deterministic and aligned with Mukei's targetSdk/compileSdk 35 contract.
+find "${ANDROID_SDK_ROOT}/platforms" -mindepth 1 -maxdepth 1 -type d \
+    ! -name 'android-35' -exec rm -rf {} +
+[[ -f "${ANDROID_SDK_ROOT}/platforms/android-35/android.jar" ]] || \
+    fail "Android platform 35 is unavailable"
+
 mkdir -p "${BUILD_ROOT}" "${PACKAGE_ROOT}" "${DIST_DIR}"
 
 printf '\n==> Materializing verified launcher resources\n'
