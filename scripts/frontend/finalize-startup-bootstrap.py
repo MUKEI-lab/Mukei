@@ -111,7 +111,7 @@ def patch_rust(text):
     text = replace_once(text,
 'async fn hydrate_provider_secrets_from_platform() -> Result<(), String> {',
 'fn hydrate_provider_secrets_from_platform() -> Result<(), String> {',
-'fn hydrate_provider_secrets_from_platform()')
+'\nfn hydrate_provider_secrets_from_platform()')
     text = replace_once(text,
 '''    Ok(())
 }
