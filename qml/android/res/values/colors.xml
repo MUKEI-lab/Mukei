@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- First-party Mukei launcher palette. Keep in sync with the canonical SVG. -->
+    <color name="mukei_launcher_background">#F4EFE7</color>
+</resources>
