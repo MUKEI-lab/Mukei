@@ -32,8 +32,8 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - qt-widgets-raster
-          - inline-qml-software
+          - qml-diagnostics-widget
+          - quick-cpp-opengl
 
     steps:
       - name: Checkout
