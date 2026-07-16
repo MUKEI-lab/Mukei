@@ -43,7 +43,7 @@ object BackendRuntimeHost {
         running.set(true)
         val appContext = context.applicationContext
         executor.execute {
-            var nativeGateway: RustNativeGateway? = null
+            var ownedGateway: RustNativeGateway? = null
             try {
                 val dataRoot = File(appContext.filesDir, "mukei").canonicalFile
                 if (!dataRoot.exists() && !dataRoot.mkdirs()) {
@@ -58,10 +58,11 @@ object BackendRuntimeHost {
                     .toString()
                     .toByteArray(StandardCharsets.UTF_8)
 
-                nativeGateway = SecureRuntimeFactory.open(appContext, configJson)
+                val activeGateway = SecureRuntimeFactory.open(appContext, configJson)
+                ownedGateway = activeGateway
                 val acknowledgement = JSONObject(
                     String(
-                        nativeGateway.submitCommand(initializeEnvelope(configPath)),
+                        activeGateway.submitCommand(initializeEnvelope(configPath)),
                         StandardCharsets.UTF_8,
                     ),
                 )
@@ -70,9 +71,9 @@ object BackendRuntimeHost {
                         acknowledgement.optString("rejection_reason", "initialize_rejected"),
                     )
                 }
-                gateway.set(nativeGateway)
+                gateway.set(activeGateway)
                 val security = JSONObject(
-                    String(nativeGateway.securityStatus(), StandardCharsets.UTF_8),
+                    String(activeGateway.securityStatus(), StandardCharsets.UTF_8),
                 )
                 val summary = listOf(
                     security.optString("sqlcipher", "unknown"),
@@ -86,8 +87,8 @@ object BackendRuntimeHost {
                 ).joinToString(" · ")
                 publish(State.Ready(summary))
 
-                val processor = AndroidPlatformRequestProcessor(appContext, nativeGateway)
-                while (running.get() && gateway.get() === nativeGateway) {
+                val processor = AndroidPlatformRequestProcessor(appContext, activeGateway)
+                while (running.get() && gateway.get() === activeGateway) {
                     var batch = processor.processOnce(
                         maximumRequests = PLATFORM_BATCH_SIZE,
                         timeoutMilliseconds = PLATFORM_LONG_POLL_MILLISECONDS,
@@ -104,7 +105,7 @@ object BackendRuntimeHost {
                     publish(State.Failed(stableFailureCode(failure)))
                 }
             } finally {
-                nativeGateway?.let { active ->
+                ownedGateway?.let { active ->
                     gateway.compareAndSet(active, null)
                     active.runCatching { close() }
                 }
