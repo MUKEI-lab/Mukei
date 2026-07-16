@@ -1,50 +1,28 @@
-//! `mukei-core` — Agent / Engine / RAG / Storage / Diagnostics.
+//! `mukei-core` — platform-neutral agent, inference, RAG, storage, and runtime contracts.
 //!
-//! Top-level cross-cuts:
-//!   * Runs under the bounded `MukeiRuntime` (TRD §2.2 — Android uses
-//!     `MAX_BLOCKING_THREADS=6` + `TOOL_BLOCKING_SLOTS=2`).
-//!   * Every SQLite-bearing future is wrapped in `spawn_blocking` per the
-//!     "Golden Rule" (TRD §2.4).
-//!   * All callbacks leaving the Rust boundary are paired with a
-//!     [`CallbackGuard`] (TRD §1.3, REQ-ARCH-05).
-//!   * Crosses FFI only via the typed adapters in `crate::ffi`; this crate
-//!     itself does not link to CXX-Qt so it can be unit-tested on any host.
-//!
-//! Public surface is intentionally narrow — QML only sees what is reachable
-//! through `MukeiAgent` (bridge crate).
+//! Android framework integration belongs in `mukei-android-jni`; presentation
+//! state belongs in Kotlin/Compose. This crate contains neither UI toolkit nor
+//! transport ownership.
 
 #![cfg_attr(
     all(not(test), feature = "release-hardening"),
     deny(unsafe_op_in_unsafe_fn)
 )]
 #![deny(rust_2018_idioms)]
-// Gradual `missing_docs` re-enablement. Modules listed under
-// `#[allow(missing_docs)]` below are pending a per-item documentation
-// sweep; everything ELSE in this crate is required to carry doc-comments
-// on every `pub` item.
-//
-// Adding a new pub item to one of the allow-listed modules is fine, but
-// adding a new module here is NOT — every new module ships fully
-// documented from day one.
 #![warn(missing_docs)]
 
-// ---------------------------------------------------------------------
-// Crate-level feature plumbing.
-// ---------------------------------------------------------------------
 #[cfg(feature = "tokio")]
 pub use tokio;
 
-// ----- Public surface modules: missing_docs is ENFORCED ------------------
+// Public, platform-neutral contracts.
+pub mod boundary;
 pub mod error;
-pub mod ffi;
 pub mod guard;
 pub mod saas;
 pub mod ui_contract;
 pub mod ui_protocol;
 
-// ----- Crate-internal scaffolding: missing_docs allow-listed for now ----
-// Each of these has a top-level `# Invariants` block; the per-item doc
-// pass is tracked in the engineering backlog.
+// Domain and infrastructure modules.
 #[allow(missing_docs)]
 pub mod agent;
 #[allow(missing_docs)]
@@ -70,26 +48,40 @@ pub mod tools;
 #[allow(missing_docs)]
 pub mod types;
 
-// Re-exports for ergonomic use from `mukei-bridge`.
 pub use crate::error::{ErrorClass, MukeiError, Result};
 
-// `cxx` is a hard dep upstream; here it is only a *trait* dep so we don't
-// pull the entire C++ toolchain. The bridge crate re-exports the real
-// handle.
+/// Common imports for native transport crates.
 pub mod prelude {
-    //! Common imports for the core crates.
+    pub use crate::boundary::{
+        BoundaryStateChange, LoadingStage, RuntimeSnapshot, StreamTagDetector, TagEvents,
+    };
     pub use crate::error::{MukeiError, Result};
+    pub use crate::guard::{BoundaryLease, GuardError, Inner as BoundaryLeaseOwner};
     pub use crate::types::{
         ChatMessage, ConversationId, MessageId, Role, ToolCall, ToolCallId, ToolResult,
     };
-    pub use crate::{
-        callback_with_guard,
-        guard::{CallbackGuard, GuardError},
-    };
+}
+
+/// Temporary compatibility exports for code moving from the retired desktop
+/// bridge vocabulary to the platform-neutral boundary module.
+#[deprecated(note = "Use mukei_core::boundary; this compatibility module will be removed")]
+pub mod ffi {
+    /// Snapshot compatibility exports.
+    pub mod agent {
+        pub use crate::boundary::{LoadingStage, RuntimeSnapshot as FfiAgentSnapshot};
+    }
+
+    /// Streaming delimiter compatibility exports.
+    pub mod tags {
+        pub use crate::boundary::{
+            close_tag, open_tag, StreamTagDetector as TagsStreaming, TagEvents, TAG_WINDOW,
+        };
+    }
+
+    pub use agent::FfiAgentSnapshot;
 }
 
 #[cfg(doctest)]
-/// Compile-time sanity check that `Result` is used everywhere.
 #[allow(dead_code)]
 fn _doc_assert_uses_result() -> Result<()> {
     Ok(())
@@ -106,7 +98,10 @@ mod smoke_tests {
     }
 
     #[test]
-    fn prelude_compiles() {
-        let _ = prelude::CallbackGuard::invalid();
+    fn platform_boundary_compiles() {
+        let lease = guard::BoundaryLease::invalid();
+        assert!(!lease.is_valid());
+        let mut detector = boundary::StreamTagDetector::new();
+        assert!(detector.push("plain text").is_empty());
     }
 }
