@@ -99,16 +99,17 @@ mod tests {
             .persist_value("operations", json!({"revision": 2}));
 
         let (barrier_sender, barrier_receiver) = tokio::sync::oneshot::channel();
-        assert!(runtime
+        runtime
             .features
             .persistence_sender
             .send(PersistenceCommand::Barrier(barrier_sender))
-            .is_ok());
+            .expect("projection writer");
         runtime
             .async_runtime
-            .block_on(async {
-                tokio::time::timeout(Duration::from_secs(2), barrier_receiver).await
-            })
+            .block_on(tokio::time::timeout(
+                Duration::from_secs(2),
+                barrier_receiver,
+            ))
             .expect("projection barrier timeout")
             .expect("projection barrier");
 
@@ -173,6 +174,8 @@ mod tests {
         runtime.shutdown();
         runtime.shutdown();
         assert_eq!(runtime.state(), RuntimeState::Stopped);
-        assert!(runtime.snapshot(RuntimeSnapshotDomain::Application).is_ok());
+        assert!(runtime
+            .snapshot(RuntimeSnapshotDomain::Application)
+            .is_ok());
     }
 }
