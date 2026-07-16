@@ -1,0 +1,93 @@
+name: android-release-candidate
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "android-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.4.1"
+      - name: Install Android native build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build perl make
+          cargo install cargo-ndk --locked
+      - name: Build pinned native capsules and JNI runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ndk="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_ROOT:-}}"
+          test -n "$ndk"
+          output="$GITHUB_WORKSPACE/android/core/native/src/main/jniLibs"
+          rm -rf "$output"
+          mkdir -p "$output"
+          for abi in arm64-v8a x86_64; do
+            cmake -S rust/llama-cpp-prebuilt \
+              -B "build/llama-$abi" \
+              -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
+              -DANDROID_ABI="$abi" \
+              -DANDROID_PLATFORM=android-26 \
+              -DANDROID_STL=c++_static \
+              -DMUKEI_LLAMA_FORCE_REBUILD=ON
+            cmake --build "build/llama-$abi" --target mukei_llama_native
+            export MUKEI_LLAMA_NATIVE_LIB_DIR="$GITHUB_WORKSPACE/rust/llama-cpp-prebuilt/prebuilt/$abi"
+            (
+              cd rust
+              cargo ndk -t "$abi" -o ../android/core/native/src/main/jniLibs \
+                build -p mukei-android-jni --release \
+                --no-default-features \
+                --features runtime_production,runtime_hardening
+            )
+            cp "$MUKEI_LLAMA_NATIVE_LIB_DIR/libmukei_llama_native.so" "$output/$abi/"
+          done
+      - name: Build unsigned R8-shrunk ABI APKs
+        run: gradle -p android :app:lintRelease :app:assembleRelease --stacktrace
+      - name: Verify release contents and produce checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="android/app/build/outputs/apk/release"
+          mapfile -t apks < <(find "$output" -type f -name "*.apk" | sort)
+          test "${#apks[@]}" -eq 2
+          arm_apk="$(printf '%s\n' "${apks[@]}" | grep 'arm64-v8a')"
+          x86_apk="$(printf '%s\n' "${apks[@]}" | grep 'x86_64')"
+          unzip -l "$arm_apk" | grep -q 'lib/arm64-v8a/libmukei_android.so'
+          unzip -l "$arm_apk" | grep -q 'lib/arm64-v8a/libmukei_llama_native.so'
+          unzip -l "$x86_apk" | grep -q 'lib/x86_64/libmukei_android.so'
+          unzip -l "$x86_apk" | grep -q 'lib/x86_64/libmukei_llama_native.so'
+          printf '%s\0' "${apks[@]}" | sort -z | xargs -0 sha256sum > "$output/SHA256SUMS"
+          test -s "$output/SHA256SUMS"
+          test -s android/app/build/outputs/mapping/release/mapping.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mukei-android-release-candidate-${{ github.ref_name }}-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/apk/release/SHA256SUMS
+            android/app/build/outputs/mapping/release/mapping.txt
+            android/app/build/reports/lint-results-release.html

@@ -8,7 +8,9 @@ on:
       - "rust/Cargo.toml"
       - "rust/crates/mukei-core/**"
       - "rust/crates/mukei-android-jni/**"
+      - "rust/llama-cpp-prebuilt/**"
       - ".github/workflows/android-kotlin-ci.yml"
+      - ".github/workflows/android-release-candidate.yml"
   pull_request:
     branches: [ Kotlin ]
     paths:
@@ -16,7 +18,9 @@ on:
       - "rust/Cargo.toml"
       - "rust/crates/mukei-core/**"
       - "rust/crates/mukei-android-jni/**"
+      - "rust/llama-cpp-prebuilt/**"
       - ".github/workflows/android-kotlin-ci.yml"
+      - ".github/workflows/android-release-candidate.yml"
   workflow_dispatch:
 
 permissions:
@@ -27,7 +31,79 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  rust-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install native build dependencies
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y clang cmake ninja-build pkg-config libssl-dev perl make
+      - name: Check Rust formatting
+        working-directory: rust
+        run: cargo fmt --all -- --check
+      - name: Test platform-neutral runtime
+        working-directory: rust
+        run: cargo test -p mukei-core --lib
+      - name: Test XML prompt sandbox
+        working-directory: rust
+        run: cargo test -p mukei-core tools::sentinel
+      - name: Check SQLCipher core
+        working-directory: rust
+        run: >-
+          cargo check -p mukei-core
+          --no-default-features
+          --features std,tokio,sqlcipher,runtime_hardening
+      - name: Test secure JNI bootstrap contracts
+        working-directory: rust
+        run: >-
+          cargo test -p mukei-android-jni --lib
+          --no-default-features
+          --features secure_runtime,runtime_hardening
+      - name: Build and test host inference capsule
+        run: |
+          set -euo pipefail
+          cmake -S rust/llama-cpp-prebuilt \
+            -B build/llama-host \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMUKEI_LLAMA_FORCE_REBUILD=ON
+          cmake --build build/llama-host --target mukei_llama_native_smoke
+          ctest --test-dir build/llama-host --output-on-failure
+      - name: Check production inference adapter against pinned capsule
+        working-directory: rust
+        env:
+          MUKEI_LLAMA_NATIVE_LIB_DIR: ${{ github.workspace }}/rust/llama-cpp-prebuilt/prebuilt/host
+        run: >-
+          cargo check -p mukei-android-jni
+          --no-default-features
+          --features native_inference
+
+  android-debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.4.1"
+      - name: Test and lint Android modules
+        run: >-
+          gradle -p android
+          :core:protocol:testDebugUnitTest
+          :core:native:testDebugUnitTest
+          :app:lintDebug
+          :app:assembleDebug
+          --stacktrace
+
+  release-hardening:
+    needs: [ rust-security, android-debug ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,28 +112,72 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.4.1"
-      - name: Test platform-neutral Rust runtime
-        working-directory: rust
-        run: cargo test -p mukei-core --lib
-      - name: Test JNI runtime registry
-        working-directory: rust
-        run: cargo test -p mukei-android-jni --lib
-      - name: Check Android JNI library
-        working-directory: rust
-        run: cargo check -p mukei-android-jni
-      - name: Check production inference adapter
-        working-directory: rust
-        run: >-
-          cargo check -p mukei-android-jni
-          --no-default-features
-          --features native_inference
-      - name: Compile Kotlin scaffold
+      - name: Install Android native build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build perl make
+          cargo install cargo-ndk --locked
+      - name: Build ABI-matched native runtime and inference capsules
+        shell: bash
+        run: |
+          set -euo pipefail
+          ndk="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_ROOT:-}}"
+          test -n "$ndk"
+          output="$GITHUB_WORKSPACE/android/core/native/src/main/jniLibs"
+          rm -rf "$output"
+          mkdir -p "$output"
+          for abi in arm64-v8a x86_64; do
+            cmake -S rust/llama-cpp-prebuilt \
+              -B "build/llama-$abi" \
+              -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
+              -DANDROID_ABI="$abi" \
+              -DANDROID_PLATFORM=android-26 \
+              -DANDROID_STL=c++_static \
+              -DMUKEI_LLAMA_FORCE_REBUILD=ON
+            cmake --build "build/llama-$abi" --target mukei_llama_native
+            export MUKEI_LLAMA_NATIVE_LIB_DIR="$GITHUB_WORKSPACE/rust/llama-cpp-prebuilt/prebuilt/$abi"
+            (
+              cd rust
+              cargo ndk -t "$abi" -o ../android/core/native/src/main/jniLibs \
+                build -p mukei-android-jni --release \
+                --no-default-features \
+                --features runtime_production,runtime_hardening
+            )
+            cp "$MUKEI_LLAMA_NATIVE_LIB_DIR/libmukei_llama_native.so" "$output/$abi/"
+          done
+      - name: Build R8-shrunk ABI release APKs
         run: >-
           gradle -p android
-          :core:protocol:testDebugUnitTest
-          :core:native:testDebugUnitTest
-          :app:assembleDebug
+          :app:lintRelease
+          :app:assembleRelease
           --stacktrace
+      - name: Verify ABI, JNI and R8 outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="android/app/build/outputs/apk/release"
+          mapfile -t apks < <(find "$release_dir" -type f -name "*.apk" | sort)
+          test "${#apks[@]}" -eq 2
+          arm_apk="$(printf '%s\n' "${apks[@]}" | grep 'arm64-v8a')"
+          x86_apk="$(printf '%s\n' "${apks[@]}" | grep 'x86_64')"
+          unzip -l "$arm_apk" | grep -q 'lib/arm64-v8a/libmukei_android.so'
+          unzip -l "$arm_apk" | grep -q 'lib/arm64-v8a/libmukei_llama_native.so'
+          unzip -l "$x86_apk" | grep -q 'lib/x86_64/libmukei_android.so'
+          unzip -l "$x86_apk" | grep -q 'lib/x86_64/libmukei_llama_native.so'
+          test -s android/app/build/outputs/mapping/release/mapping.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-release-hardening-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/mapping/release/mapping.txt
+            android/app/build/reports/lint-results-release.html

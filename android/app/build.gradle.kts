@@ -15,8 +15,33 @@ android {
         versionName = "0.1.0"
     }
 
+    buildTypes {
+        debug {
+            isMinifyEnabled = false
+            isShrinkResources = false
+        }
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = false
+        }
+    }
+
     buildFeatures {
         compose = true
+        buildConfig = false
     }
 
     compileOptions {
@@ -25,6 +50,7 @@ android {
     }
 
     packaging {
+        jniLibs.useLegacyPackaging = false
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
 }
