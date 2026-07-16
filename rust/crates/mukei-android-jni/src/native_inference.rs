@@ -6,6 +6,7 @@
 //! cancellation without calling Java from native inference threads.
 
 use std::ffi::{c_char, c_void, CStr, CString};
+use std::fmt;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
@@ -121,6 +122,15 @@ struct NativeLlamaBackend {
     model: Arc<NativeModelHandle>,
     generation_gate: Arc<Semaphore>,
     max_new_tokens: u32,
+}
+
+impl fmt::Debug for NativeLlamaBackend {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NativeLlamaBackend")
+            .field("max_new_tokens", &self.max_new_tokens)
+            .finish_non_exhaustive()
+    }
 }
 
 impl NativeLlamaBackend {
