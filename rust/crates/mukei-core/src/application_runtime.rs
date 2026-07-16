@@ -1,3 +1,4 @@
+include!("application_runtime/durable.rs");
 include!("application_runtime/foundation_types.rs");
 include!("application_runtime/foundation_state.rs");
 include!("application_runtime/foundation_context.rs");
