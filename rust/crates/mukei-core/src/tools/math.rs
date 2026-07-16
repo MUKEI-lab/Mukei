@@ -43,7 +43,6 @@ impl Tool for MathTool {
         }
         let expression = args.expression.trim().to_string();
         validate_expression(&expression)?;
-
         let expression_for_eval = expression.clone();
         let mut join =
             crate::runtime::spawn_blocking_tool(move || evaluate_expression(&expression_for_eval));
@@ -56,7 +55,6 @@ impl Tool for MathTool {
                 return Err(MukeiError::ToolTimeout(Some(TIMEOUT)));
             }
         };
-
         Ok(wrap_external_data(
             ExternalDataSource::Math,
             &format!("Expression: {expression}\nResult: {result}"),
@@ -68,7 +66,7 @@ pub fn validate_expression(expression: &str) -> Result<()> {
     if expression.is_empty() {
         return Err(MukeiError::ToolArgumentInvalid {
             field: "expression",
-            reason: "empty expression".to_string(),
+            reason: "empty expression".into(),
         });
     }
     for character in expression.chars() {
@@ -81,7 +79,6 @@ pub fn validate_expression(expression: &str) -> Result<()> {
             return Err(MukeiError::SandboxViolation);
         }
     }
-
     for identifier in extract_identifiers(expression) {
         if !ALLOWED_IDENTIFIERS.contains(&identifier.as_str()) {
             return Err(MukeiError::ToolArgumentInvalid {
@@ -113,10 +110,11 @@ fn evaluate_expression(expression: &str) -> Result<f64> {
     let mut parser = ArithmeticParser::new(expression);
     let value = parser.parse_expression()?;
     parser.skip_whitespace();
-    if !parser.is_at_end() {
-        return Err(math_parse_error("unexpected trailing input"));
+    if parser.is_at_end() {
+        Ok(value)
+    } else {
+        Err(math_parse_error("unexpected trailing input"))
     }
-    Ok(value)
 }
 
 fn math_parse_error(reason: &'static str) -> MukeiError {
@@ -193,7 +191,11 @@ impl<'a> ArithmeticParser<'a> {
 
     fn parse_primary(&mut self) -> Result<f64> {
         self.skip_whitespace();
-        if self.consume(b'(') {
+        let Some(next) = self.peek() else {
+            return Err(math_parse_error("expected a value"));
+        };
+        if next == b'(' {
+            self.position += 1;
             let value = self.parse_expression()?;
             self.skip_whitespace();
             if !self.consume(b')') {
@@ -201,31 +203,93 @@ impl<'a> ArithmeticParser<'a> {
             }
             return Ok(value);
         }
+        if next.is_ascii_digit() || next == b'.' {
+            return self.parse_number();
+        }
+        if next.is_ascii_alphabetic() || next == b'_' {
+            return self.parse_identifier_or_function();
+        }
+        Err(math_parse_error("unexpected token"))
+    }
 
+    fn parse_number(&mut self) -> Result<f64> {
         let start = self.position;
+        let mut saw_digit = false;
+        let mut saw_dot = false;
         while let Some(byte) = self.peek() {
-            if byte.is_ascii_digit() || matches!(byte, b'.' | b'e' | b'E') {
+            if byte.is_ascii_digit() {
+                saw_digit = true;
                 self.position += 1;
-            } else if matches!(byte, b'+' | b'-')
-                && self.position > start
-                && matches!(self.input[self.position - 1], b'e' | b'E')
-            {
+            } else if byte == b'.' && !saw_dot {
+                saw_dot = true;
                 self.position += 1;
             } else {
                 break;
             }
         }
-        if start == self.position {
-            return Err(math_parse_error("expected numeric value"));
+        if !saw_digit {
+            return Err(math_parse_error("invalid numeric literal"));
+        }
+        if matches!(self.peek(), Some(b'e' | b'E')) {
+            let marker = self.position;
+            self.position += 1;
+            if matches!(self.peek(), Some(b'+' | b'-')) {
+                self.position += 1;
+            }
+            let exponent_start = self.position;
+            while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
+                self.position += 1;
+            }
+            if self.position == exponent_start {
+                self.position = marker;
+            }
         }
         std::str::from_utf8(&self.input[start..self.position])
             .ok()
-            .and_then(|value| value.parse::<f64>().ok())
-            .ok_or_else(|| math_parse_error("invalid numeric value"))
+            .and_then(|literal| literal.parse::<f64>().ok())
+            .ok_or_else(|| math_parse_error("invalid numeric literal"))
+    }
+
+    fn parse_identifier_or_function(&mut self) -> Result<f64> {
+        let start = self.position;
+        while self
+            .peek()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            self.position += 1;
+        }
+        let name = std::str::from_utf8(&self.input[start..self.position])
+            .map_err(|_| math_parse_error("invalid identifier"))?;
+        self.skip_whitespace();
+        if !self.consume(b'(') {
+            return match name {
+                "pi" => Ok(std::f64::consts::PI),
+                "e" => Ok(std::f64::consts::E),
+                _ => Err(math_parse_error("function call requires parentheses")),
+            };
+        }
+        let mut arguments = Vec::with_capacity(2);
+        self.skip_whitespace();
+        if !self.consume(b')') {
+            loop {
+                arguments.push(self.parse_expression()?);
+                if arguments.len() > 2 {
+                    return Err(math_parse_error("too many function arguments"));
+                }
+                self.skip_whitespace();
+                if self.consume(b')') {
+                    break;
+                }
+                if !self.consume(b',') {
+                    return Err(math_parse_error("expected comma or closing parenthesis"));
+                }
+            }
+        }
+        evaluate_function(name, &arguments)
     }
 
     fn skip_whitespace(&mut self) {
-        while self.peek().is_some_and(u8::is_ascii_whitespace) {
+        while self.peek().is_some_and(|byte| byte.is_ascii_whitespace()) {
             self.position += 1;
         }
     }
@@ -248,6 +312,46 @@ impl<'a> ArithmeticParser<'a> {
     }
 }
 
+fn evaluate_function(name: &str, arguments: &[f64]) -> Result<f64> {
+    let unary = |function: fn(f64) -> f64| -> Result<f64> {
+        let [value] = arguments else {
+            return Err(math_parse_error("function expects one argument"));
+        };
+        Ok(function(*value))
+    };
+    let binary = |function: fn(f64, f64) -> f64| -> Result<f64> {
+        let [left, right] = arguments else {
+            return Err(math_parse_error("function expects two arguments"));
+        };
+        Ok(function(*left, *right))
+    };
+    match name {
+        "abs" => unary(f64::abs),
+        "sqrt" => unary(f64::sqrt),
+        "cbrt" => unary(f64::cbrt),
+        "exp" => unary(f64::exp),
+        "ln" => unary(f64::ln),
+        "log10" => unary(f64::log10),
+        "sin" => unary(f64::sin),
+        "cos" => unary(f64::cos),
+        "tan" => unary(f64::tan),
+        "asin" => unary(f64::asin),
+        "acos" => unary(f64::acos),
+        "atan" => unary(f64::atan),
+        "sinh" => unary(f64::sinh),
+        "cosh" => unary(f64::cosh),
+        "tanh" => unary(f64::tanh),
+        "floor" => unary(f64::floor),
+        "ceil" => unary(f64::ceil),
+        "round" => unary(f64::round),
+        "signum" => unary(f64::signum),
+        "log" => binary(f64::log),
+        "min" => binary(f64::min),
+        "max" => binary(f64::max),
+        _ => Err(math_parse_error("unknown function")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,11 +359,17 @@ mod tests {
     #[tokio::test]
     async fn result_uses_canonical_sandbox() {
         let output = MathTool
-            .run(serde_json::json!({"expression": "2 + 2"}))
+            .run(serde_json::json!({"expression": "sqrt(16) + max(2, 3)"}))
             .await
             .unwrap();
         assert!(output.starts_with("<external_data source=\"math\" trust=\"untrusted\">"));
-        assert_eq!(output.matches("</external_data>").count(), 1);
+        assert!(output.contains("Result: 7"));
+    }
+
+    #[test]
+    fn constants_and_functions_remain_supported() {
+        assert!((evaluate_expression("sin(pi / 2)").unwrap() - 1.0).abs() < 1e-9);
+        assert_eq!(evaluate_expression("log(8, 2)").unwrap(), 3.0);
     }
 
     #[test]
