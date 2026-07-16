@@ -49,3 +49,5 @@ jobs:
           git fetch origin "${GITHUB_REF_NAME}"
           git rebase "origin/${GITHUB_REF_NAME}"
           git push --force-with-lease origin HEAD:"${GITHUB_REF_NAME}"
+
+# Re-run marker: canonical protocol dispatch after explicit QML dependency injection.
