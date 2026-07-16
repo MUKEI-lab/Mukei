@@ -21,6 +21,13 @@ Stop the one-fix/one-APK loop. Most defects must be detected by deterministic QM
 - Test local navigation without a native runtime.
 - Test state-dependent controls with deterministic stores.
 
+Current implementation:
+
+- Safe-mode controls have stable object IDs.
+- Diagnostics controls have stable object IDs.
+- Composer editor, attach, and send controls have stable object IDs.
+- Recovery interaction tests and startup lifecycle tests are installed in the existing Qt QuickTest suite.
+
 ## Batch B — startup state machine
 
 The required observable sequence is:
