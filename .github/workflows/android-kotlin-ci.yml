@@ -1,0 +1,40 @@
+name: android-kotlin-ci
+
+on:
+  push:
+    branches: [ Kotlin ]
+    paths:
+      - "android/**"
+      - ".github/workflows/android-kotlin-ci.yml"
+  pull_request:
+    branches: [ Kotlin ]
+    paths:
+      - "android/**"
+      - ".github/workflows/android-kotlin-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-kotlin-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.4.1"
+      - name: Compile Kotlin scaffold
+        run: >-
+          gradle -p android
+          :core:protocol:testDebugUnitTest
+          :app:assembleDebug
+          --stacktrace
