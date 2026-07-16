@@ -1,4 +1,4 @@
-# Compiled and build artifacts
+# Native and compiled artifacts
 *.o
 *.obj
 *.exe
@@ -8,67 +8,57 @@
 *.out
 
 # Rust
+rust/target/
 target/
 Cargo.lock.bak
 **/*.rs.bk
 
-# Dependencies
-node_modules/
-venv/
-.venv/
-__pycache__/
-.mypy_cache/
-.pytest_cache/
+# Gradle / Android
 .gradle/
+android/.gradle/
+android/**/build/
+android/local.properties
+*.apk
+*.aab
+*.keystore
+*.jks
 
-# Logs and temp files
+# IDE
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Python and tooling
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Logs and temporary files
 *.log
 *.tmp
 *.swp
 
-# Environment / secrets
+# Environment and secrets
 .env
 .env.local
 *.env.*
 *.pem
 *.key
 
-# Editors
-.vscode/
-.idea/
-*.iml
-.DS_Store
-
-# Build directories
+# Generated output
 build/
 dist/
 out/
-
-# Coverage
 coverage/
 htmlcov/
 .coverage
 lcov.info
 
-# Android build artifacts
-qml/android/build/
-qml/android/.gradle/
-qml/android/local.properties
-qml/android/gradle/
-*.apk
-*.aab
-*.keystore
-
-# Qt/QML
-*.moc
-moc_*.cpp
-qrc_*.cpp
-ui_*.h
-*.pro.user
-CMakeCache.txt
-CMakeFiles/
-cmake-build-*/
-
-# OS/tooling
-Thumbs.db
+# Native inference capsule
 rust/llama-cpp-prebuilt/prebuilt/
+
+# OS
+Thumbs.db

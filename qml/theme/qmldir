@@ -1,5 +1,0 @@
-prefer :/com/mukei/app/theme/
-singleton Theme 1.0 Theme.qml
-singleton Type 1.0 Type.qml
-singleton Spacing 1.0 Spacing.qml
-singleton Motion 1.0 Motion.qml
