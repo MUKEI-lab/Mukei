@@ -10,34 +10,22 @@ import java.util.concurrent.atomic.AtomicBoolean
  * directly. All returned payloads are bounded Protocol V2 UTF-8 JSON bytes.
  */
 interface MukeiNativeGateway : Closeable {
-    /** Returns the negotiated native runtime and transport contract. */
     fun protocolCapabilities(): ByteArray
-
-    /** Returns the local-only security/bootstrap state for this runtime. */
     fun securityStatus(): ByteArray
-
-    /** Submits one Protocol V2 command envelope. */
     fun submitCommand(commandJson: ByteArray): ByteArray
 
-    /** Drains one bounded Protocol V2 event batch. */
     fun drainEvents(
         maximumEvents: Int = 32,
         timeoutMilliseconds: Long = 1_000,
     ): ByteArray
 
-    /** Drains Android-only service requests emitted by the Rust runtime. */
     fun drainPlatformRequests(
         maximumRequests: Int = 8,
         timeoutMilliseconds: Long = 0,
     ): ByteArray
 
-    /** Completes one Android-only service request. */
     fun submitPlatformResponse(responseJson: ByteArray): ByteArray
-
-    /** Requests one authoritative Protocol V2 snapshot. */
     fun requestSnapshot(domain: String): ByteArray
-
-    /** Gracefully stops native work while preserving the handle for final reads. */
     fun shutdown(): ByteArray
 }
 
@@ -72,11 +60,7 @@ class RustNativeGateway private constructor(
         require(timeoutMilliseconds in 0..30_000) {
             "timeoutMilliseconds must be between 0 and 30000"
         }
-        return NativeBindings.drainEvents(
-            nativeHandle,
-            maximumEvents,
-            timeoutMilliseconds,
-        )
+        return NativeBindings.drainEvents(nativeHandle, maximumEvents, timeoutMilliseconds)
     }
 
     override fun drainPlatformRequests(
@@ -157,6 +141,7 @@ internal object NativeBindings {
         System.loadLibrary("mukei_android")
     }
 
+    external fun generateDatabaseKey(): ByteArray
     external fun createRuntime(configJson: ByteArray): Long
 
     external fun createSecureRuntime(
@@ -165,13 +150,9 @@ internal object NativeBindings {
     ): Long
 
     external fun shutdownRuntime(handle: Long): ByteArray
-
     external fun destroyRuntime(handle: Long)
-
     external fun destroySecureRuntime(handle: Long)
-
     external fun protocolCapabilities(handle: Long): ByteArray
-
     external fun securityStatus(handle: Long): ByteArray
 
     external fun submitCommand(
