@@ -34,6 +34,8 @@ Item {
         EventDispatcher.agentSource = agent
         EventDispatcher.bridgeSource = bridge
         IntentDispatcher.configure(agent, bridge, runtime)
+        IntentDispatcher.configureProtocolDependencies(
+                    ContractStore, CapabilityStore, ChatStore, OperationStore)
         UiSessionStore.configure(agent)
         ConversationStore.configure(agent)
         ChatStore.configure(agent)
@@ -54,10 +56,27 @@ Item {
         NavigationStore.syncWithLifecycle(LifecycleStore.state)
         startupWatchdog.restart()
         if (runtimeSource && runtimeSource.autoInitialize === true) {
-            IntentDispatcher.dispatch({
+            LifecycleStore.setLocalState(
+                        "initialize_submitted",
+                        qsTr("The production frontend submitted the secure startup command."))
+            var accepted = IntentDispatcher.dispatch({
                 type: "app.initialize",
                 configPath: runtimeSource.configPath
             })
+            if (accepted && !LifecycleStore.ready && !LifecycleStore.quarantined) {
+                LifecycleStore.setLocalState(
+                            "initialize_acknowledged",
+                            qsTr("The local runtime accepted the startup command and is scheduling native initialization."))
+            } else if (!accepted) {
+                startupWatchdog.stop()
+                var detail = qsTr("The local runtime rejected the startup command before native initialization began.")
+                LifecycleStore.setLocalState("fatal_error", detail)
+                NavigationStore.syncWithLifecycle(LifecycleStore.state)
+                ErrorStore.push({ code: "ERR_STARTUP_COMMAND_REJECTED", severity: "fatal",
+                                  recoverable: true, user_message: detail,
+                                  suggested_action: "collect_diagnostics" },
+                                "ERR_STARTUP_COMMAND_REJECTED")
+            }
         } else {
             LifecycleStore.setLocalState("needs_database_key", "")
             NavigationStore.syncWithLifecycle(LifecycleStore.state)
@@ -224,6 +243,10 @@ Item {
         }
 
         if (event.category === "app_lifecycle") {
+            if (["ready", "degraded", "fatal_error", "quarantined", "audit_quarantined",
+                 "key_invalidated", "wrapped_key_corrupt", "database_open_failed",
+                 "reset_required"].indexOf(event.state) >= 0)
+                startupWatchdog.stop()
             NavigationStore.syncWithLifecycle(event.state)
             if (event.state === "ready" || event.state === "degraded")
                 Qt.callLater(hydrateReadyState)
