@@ -11,6 +11,45 @@ mod tests {
     use super::*;
     use crate::ui_protocol::{CommandScope, ProtocolVersion};
 
+    struct DelayedProjectionStore {
+        writes: std::sync::Mutex<Vec<Value>>,
+        delay_first: AtomicBool,
+    }
+
+    impl DelayedProjectionStore {
+        fn new() -> Self {
+            Self {
+                writes: std::sync::Mutex::new(Vec::new()),
+                delay_first: AtomicBool::new(true),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeProjectionStore for DelayedProjectionStore {
+        async fn load(&self, _key: &str) -> Result<Option<Value>, MukeiError> {
+            Ok(None)
+        }
+
+        async fn save(&self, _key: &str, value: Value) -> Result<(), MukeiError> {
+            if self
+                .delay_first
+                .swap(false, std::sync::atomic::Ordering::AcqRel)
+            {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            self.writes
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push(value);
+            Ok(())
+        }
+
+        async fn delete(&self, _key: &str) -> Result<(), MukeiError> {
+            Ok(())
+        }
+    }
+
     fn runtime() -> MukeiRuntime {
         MukeiRuntime::create(RuntimeConfig {
             app_data_dir: format!("/tmp/mukei-runtime-tests-{}", Uuid::new_v4()),
@@ -44,6 +83,44 @@ mod tests {
         ));
         assert_eq!(acknowledgement.status, AcknowledgementStatus::Accepted);
         assert_eq!(runtime.state(), RuntimeState::Ready);
+    }
+
+    #[test]
+    fn projection_writer_preserves_fifo_order() {
+        let runtime = runtime();
+        let store = Arc::new(DelayedProjectionStore::new());
+        runtime.features.attach_projection_store(store.clone());
+
+        runtime
+            .features
+            .persist_value("operations", json!({"revision": 1}));
+        runtime
+            .features
+            .persist_value("operations", json!({"revision": 2}));
+
+        let (barrier_sender, barrier_receiver) = tokio::sync::oneshot::channel();
+        runtime
+            .features
+            .persistence_sender
+            .send(PersistenceCommand::Barrier(barrier_sender))
+            .expect("projection writer");
+        runtime
+            .async_runtime
+            .block_on(tokio::time::timeout(
+                Duration::from_secs(2),
+                barrier_receiver,
+            ))
+            .expect("projection barrier timeout")
+            .expect("projection barrier");
+
+        let writes = store
+            .writes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(
+            writes.as_slice(),
+            &[json!({"revision": 1}), json!({"revision": 2})]
+        );
     }
 
     #[test]
@@ -97,6 +174,8 @@ mod tests {
         runtime.shutdown();
         runtime.shutdown();
         assert_eq!(runtime.state(), RuntimeState::Stopped);
-        assert!(runtime.snapshot(RuntimeSnapshotDomain::Application).is_ok());
+        assert!(runtime
+            .snapshot(RuntimeSnapshotDomain::Application)
+            .is_ok());
     }
 }
