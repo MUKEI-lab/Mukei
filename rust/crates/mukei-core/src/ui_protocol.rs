@@ -1,81 +1,100 @@
-//! Versioned command/acknowledgement/event protocol shared by the local bridge and QML UI.
+//! Versioned local protocol between the Kotlin application layer and the
+//! platform-neutral Rust runtime.
 //!
-//! The protocol is intentionally transport-neutral. It runs over the existing in-process
-//! CXX-Qt bridge today and keeps opaque string identifiers so the same envelopes can later be
-//! carried over a remote transport without changing UI lifecycle semantics.
+//! Protocol V2 is transport-neutral. Android currently carries these envelopes
+//! in-process over JNI as bounded UTF-8 JSON. Domain logic remains outside this
+//! module; this module owns only validation, identities, acknowledgements,
+//! ordered events, batches, snapshots, and capability negotiation.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Current protocol major version. Unknown majors are incompatible and must fail closed.
+/// Current incompatible protocol generation.
 pub const PROTOCOL_MAJOR: u16 = 2;
-/// Current protocol minor version. Minor additions are backward-compatible optional fields.
+/// Current backward-compatible protocol generation.
 pub const PROTOCOL_MINOR: u16 = 0;
-/// Oldest peer major supported by this implementation.
+/// Oldest peer major accepted by this implementation.
 pub const MIN_SUPPORTED_PEER_MAJOR: u16 = 2;
-/// Maximum serialized command envelope size accepted at the bridge boundary.
+/// Maximum serialized command envelope accepted by a native transport.
 pub const MAX_COMMAND_ENVELOPE_BYTES: usize = 64 * 1024;
+/// Maximum serialized event batch returned by a native transport.
+pub const MAX_EVENT_BATCH_BYTES: usize = 512 * 1024;
+/// Maximum number of events returned by one drain operation.
+pub const MAX_EVENT_BATCH_ITEMS: usize = 256;
 /// Maximum opaque protocol identifier length.
 pub const MAX_PROTOCOL_ID_LEN: usize = 128;
 /// Maximum command type length.
 pub const MAX_COMMAND_TYPE_LEN: usize = 96;
+/// Maximum event type length.
+pub const MAX_EVENT_TYPE_LEN: usize = 128;
 /// Maximum idempotency key length.
 pub const MAX_IDEMPOTENCY_KEY_LEN: usize = 192;
 
-/// Stable machine capability: protocol-v2 command envelope support.
+/// Capability: Protocol V2 command envelopes.
 pub const CAP_COMMAND_ENVELOPE_V2: &str = "command_envelope_v2";
-/// Stable machine capability: immediate accepted/rejected command acknowledgement.
+/// Capability: immediate accepted/rejected acknowledgements.
 pub const CAP_COMMAND_ACKNOWLEDGEMENT: &str = "command_acknowledgement";
-/// Stable machine capability: globally unique event identity.
+/// Capability: globally unique event identities.
 pub const CAP_EVENT_IDENTITY: &str = "event_identity";
-/// Stable machine capability: sequencing is monotonic within each stream.
+/// Capability: monotonic sequencing inside each logical stream.
 pub const CAP_PER_STREAM_SEQUENCING: &str = "per_stream_sequencing";
-/// Stable machine capability: bounded replay protection for idempotent commands.
+/// Capability: bounded replay protection for idempotent commands.
 pub const CAP_IDEMPOTENT_COMMAND_REPLAY: &str = "idempotent_command_replay";
-/// Stable machine capability: command-correlated operation lifecycle projection.
+/// Capability: command-correlated operation lifecycle events.
 pub const CAP_OPERATION_LIFECYCLE_EVENTS: &str = "operation_lifecycle_events";
-/// Stable machine capability: chat cancellation targets an explicit scoped operation.
-pub const CAP_SCOPED_CHAT_OPERATIONS: &str = "scoped_chat_operations";
-/// Stable machine capability: isolated legacy-v1 event ingestion remains
-/// available during transition.
-pub const CAP_LEGACY_EVENT_V1_COMPATIBILITY: &str = "legacy_event_v1_compatibility";
+/// Capability: event delivery through bounded drain batches.
+pub const CAP_BOUNDED_EVENT_DRAIN: &str = "bounded_event_drain";
+/// Capability: authoritative domain snapshots for recovery.
+pub const CAP_RUNTIME_SNAPSHOTS: &str = "runtime_snapshots";
+/// Capability: deterministic process-scoped runtime shutdown.
+pub const CAP_GRACEFUL_SHUTDOWN: &str = "graceful_shutdown";
+/// Capability implemented by the Android transport adapter.
+pub const CAP_ANDROID_JNI_TRANSPORT: &str = "android_jni_transport";
 
-/// Protocol version carried by every v2 command, acknowledgement, and event envelope.
+/// Client family participating in protocol negotiation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClientKind {
+    /// Native Android application written in Kotlin/Compose.
+    Android,
+}
+
+/// Version carried by every V2 protocol envelope.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProtocolVersion {
-    /// Incompatible protocol generation.
+    /// Incompatible generation.
     pub major: u16,
-    /// Backward-compatible optional-field generation.
+    /// Backward-compatible generation.
     pub minor: u16,
 }
 
 impl ProtocolVersion {
-    /// Current protocol version.
+    /// Current local version.
     pub const CURRENT: Self = Self {
         major: PROTOCOL_MAJOR,
         minor: PROTOCOL_MINOR,
     };
 
-    /// Whether this implementation can safely consume a peer version.
+    /// Whether this implementation can safely consume the version.
     pub fn is_compatible(self) -> bool {
         self.major == PROTOCOL_MAJOR && self.major >= MIN_SUPPORTED_PEER_MAJOR
     }
 }
 
-/// Protocol-level capability snapshot used during UI/bridge negotiation.
+/// Protocol capability snapshot advertised by one runtime.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProtocolCapabilitySnapshot {
-    /// Current local protocol version.
+    /// Current local version.
     pub current_version: ProtocolVersion,
-    /// Minimum peer major accepted by this implementation.
+    /// Minimum accepted peer major.
     pub minimum_supported_peer_major: u16,
-    /// Stable machine capability names that are actually implemented.
+    /// Stable machine capability names actually implemented.
     pub capabilities: Vec<String>,
 }
 
 impl ProtocolCapabilitySnapshot {
-    /// Current local capability set.
+    /// Baseline capabilities implemented by the platform-neutral runtime.
     pub fn current() -> Self {
         Self {
             current_version: ProtocolVersion::CURRENT,
@@ -87,87 +106,121 @@ impl ProtocolCapabilitySnapshot {
                 CAP_PER_STREAM_SEQUENCING.into(),
                 CAP_IDEMPOTENT_COMMAND_REPLAY.into(),
                 CAP_OPERATION_LIFECYCLE_EVENTS.into(),
-                CAP_SCOPED_CHAT_OPERATIONS.into(),
-                CAP_LEGACY_EVENT_V1_COMPATIBILITY.into(),
+                CAP_BOUNDED_EVENT_DRAIN.into(),
+                CAP_RUNTIME_SNAPSHOTS.into(),
+                CAP_GRACEFUL_SHUTDOWN.into(),
             ],
         }
     }
+
+    /// Build a capability snapshot that also identifies implemented commands.
+    pub fn for_commands(commands: &[CommandType]) -> Self {
+        let mut snapshot = Self::current();
+        for command in commands {
+            snapshot
+                .capabilities
+                .push(format!("command:{}", command.as_str()));
+        }
+        snapshot
+    }
+
+    /// Add one transport capability when the adapter genuinely implements it.
+    pub fn with_transport(mut self, capability: &str) -> Self {
+        if !self.capabilities.iter().any(|value| value == capability) {
+            self.capabilities.push(capability.to_owned());
+        }
+        self
+    }
 }
 
-/// Structured logical scope. Domain identifiers remain opaque strings at the serialized boundary.
+/// Android runtime contract negotiated before feature commands are submitted.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeContractSnapshot {
+    /// Client family expected by this contract.
+    pub client_kind: ClientKind,
+    /// Process-scoped native runtime session identity.
+    pub runtime_session_id: String,
+    /// Protocol capabilities implemented by the runtime and transport.
+    pub protocol: ProtocolCapabilitySnapshot,
+    /// Snapshot schema generation.
+    pub snapshot_schema_version: u16,
+}
+
+/// Structured logical command scope.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandScope {
-    /// Optional conversation identifier.
+    /// Optional conversation identity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<String>,
-    /// Optional branch identifier.
+    /// Optional branch identity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch_id: Option<String>,
-    /// Optional turn identifier for scoped chat operations.
+    /// Optional turn identity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
-    /// Optional model identifier.
+    /// Optional model identity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_id: Option<String>,
-    /// Optional document identifier.
+    /// Optional document identity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub document_id: Option<String>,
 }
 
-/// Serialized protocol-v2 command envelope accepted by the bridge.
+/// Serialized command accepted by the native runtime.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CommandEnvelopeV2 {
     /// Protocol version.
     pub protocol_version: ProtocolVersion,
-    /// Stable unique identity of this command envelope.
+    /// Stable command identity.
     pub command_id: String,
-    /// Identity of this submission request.
+    /// Identity of this submission attempt.
     pub request_id: String,
     /// Stable machine command type.
     pub command_type: String,
     /// Client submission time.
     pub submitted_at: DateTime<Utc>,
-    /// Existing or client-proposed operation identity when applicable.
+    /// Existing or proposed operation identity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation_id: Option<String>,
-    /// Correlation identity shared by acknowledgement and resulting events.
+    /// Identity shared by acknowledgement and resulting events.
     pub correlation_id: String,
-    /// Replay-protection key for commands that support safe resubmission.
+    /// Replay-protection key when supported by the command.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idempotency_key: Option<String>,
     /// Optional logical scope.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<CommandScope>,
-    /// Structured payload validated against `command_type` before dispatch.
+    /// Structured command payload.
     pub payload: Value,
 }
 
-/// Canonical registry of backend command types crossing the QML/Rust boundary.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Canonical command registry crossing the application/runtime boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CommandType {
-    /// Initialize the local runtime.
+    /// Initialize the native runtime.
     AppInitialize,
     /// Submit a chat message.
     ChatSendMessage,
-    /// Request cancellation of the active chat turn.
+    /// Cancel an active generation.
     ChatStopGeneration,
-    /// Clear the active conversation session.
+    /// Clear the active conversation.
     ChatClearConversation,
     /// Start a model download.
     ModelDownload,
-    /// Cancel active model downloads.
+    /// Cancel model downloads.
     DownloadCancel,
     /// Select an installed model.
     ModelSelect,
     /// Delete an installed model.
     ModelDelete,
-    /// Grant private document access.
+    /// Grant access to a staged private document.
     DocumentGrant,
     /// Revoke a private document.
     DocumentRevoke,
     /// Retry document ingestion.
     DocumentRetryIngestion,
-    /// Persist a UI setting.
+    /// Persist one product setting.
     SettingsUpdate,
     /// Resume an interrupted response.
     RecoveryResume,
@@ -176,7 +229,7 @@ pub enum CommandType {
 }
 
 impl CommandType {
-    /// Parse one stable machine command type.
+    /// Parse a stable serialized command type.
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "app.initialize" => Some(Self::AppInitialize),
@@ -217,7 +270,7 @@ impl CommandType {
         }
     }
 
-    /// Whether replay protection is mandatory for this command type.
+    /// Whether a command requires an idempotency key.
     pub const fn requires_idempotency_key(self) -> bool {
         matches!(
             self,
@@ -232,47 +285,47 @@ impl CommandType {
         )
     }
 
-    /// Whether the command creates or represents an operation lifecycle.
+    /// Whether a command participates in operation lifecycle projection.
     pub const fn creates_operation(self) -> bool {
         true
     }
 }
 
-/// Payload for runtime initialization.
+/// Runtime initialization payload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InitializePayload {
     /// App-private configuration path.
     pub config_path: String,
 }
 
-/// Payload for chat submission.
+/// Chat submission payload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SendMessagePayload {
-    /// User text to submit.
+    /// User-authored text.
     pub text: String,
 }
 
-/// Payload containing one model identifier.
+/// Payload containing one model identity.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelPayload {
-    /// Canonical model identifier.
+    /// Canonical model identity.
     pub model_id: String,
 }
 
-/// Payload for a model download.
+/// Model download payload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelDownloadPayload {
-    /// Canonical model identifier or approved HTTPS source understood by the existing bridge.
+    /// Approved model identity or HTTPS source.
     pub model_id: String,
-    /// Optional pinned SHA-256 for bespoke QA sources.
+    /// Optional pinned SHA-256 digest.
     #[serde(default)]
     pub sha256: String,
 }
 
-/// Payload for private document grant.
+/// Private document grant payload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentGrantPayload {
-    /// Opaque SAF/app-private target.
+    /// Opaque app-private staged target.
     pub target: String,
     /// User-visible document label.
     pub label: String,
@@ -280,14 +333,14 @@ pub struct DocumentGrantPayload {
     pub mime_type: String,
 }
 
-/// Payload containing one document identifier.
+/// Payload containing one document identity.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentPayload {
-    /// Opaque document identifier.
+    /// Opaque document identity.
     pub document_id: String,
 }
 
-/// Payload for one setting mutation.
+/// Product setting mutation payload.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SettingUpdatePayload {
     /// Stable setting key.
@@ -296,49 +349,49 @@ pub struct SettingUpdatePayload {
     pub value: Value,
 }
 
-/// Validated typed command payload.
+/// Type-checked command payload.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ValidatedCommandPayload {
     /// No payload fields.
     Empty,
-    /// Runtime initialization payload.
+    /// Runtime initialization.
     Initialize(InitializePayload),
-    /// Chat message payload.
+    /// Chat submission.
     SendMessage(SendMessagePayload),
-    /// Model download payload.
+    /// Model download.
     ModelDownload(ModelDownloadPayload),
-    /// Model identifier payload.
+    /// Model identity.
     Model(ModelPayload),
-    /// Document grant payload.
+    /// Private document grant.
     DocumentGrant(DocumentGrantPayload),
-    /// Document identifier payload.
+    /// Document identity.
     Document(DocumentPayload),
-    /// Setting mutation payload.
+    /// Setting mutation.
     SettingUpdate(SettingUpdatePayload),
 }
 
-/// Structurally validated command ready for bridge-side policy preflight and dispatch.
+/// Structurally validated command ready for policy and dispatch.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ValidatedCommand {
     /// Original envelope.
     pub envelope: CommandEnvelopeV2,
-    /// Registry command type.
+    /// Parsed command registry value.
     pub command_type: CommandType,
     /// Type-checked payload.
     pub payload: ValidatedCommandPayload,
 }
 
-/// Stable machine acknowledgement status.
+/// Acknowledgement status.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AcknowledgementStatus {
-    /// Validated and accepted for processing; does not imply completion.
+    /// Validated and accepted for processing.
     Accepted,
     /// Rejected before execution.
     Rejected,
 }
 
-/// Stable machine-readable command rejection reason.
+/// Stable command rejection reason.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RejectionReason {
@@ -348,21 +401,21 @@ pub enum RejectionReason {
     UnknownCommand,
     /// Envelope or typed payload is malformed.
     InvalidPayload,
-    /// Required capability is not currently available.
+    /// Required capability is unavailable.
     CapabilityUnavailable,
-    /// Conflicting/busy operation prevents acceptance.
+    /// Conflicting operation prevents acceptance.
     BusyConflict,
-    /// Logical scope is invalid or no longer current.
+    /// Logical scope is stale or invalid.
     StaleScope,
-    /// Local backend is unavailable.
+    /// Native backend is unavailable.
     BackendUnavailable,
-    /// Idempotency key was reused for different command content.
+    /// Idempotency key conflicts with different content.
     DuplicateReplayConflict,
     /// Local policy denied the command.
     PolicyDenied,
 }
 
-/// Immediate command acknowledgement envelope.
+/// Immediate command acknowledgement.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandAcknowledgementV2 {
     /// Protocol version.
@@ -373,12 +426,12 @@ pub struct CommandAcknowledgementV2 {
     pub request_id: String,
     /// Correlation identity copied from the request.
     pub correlation_id: String,
-    /// Allocated or targeted operation identity when applicable.
+    /// Allocated or targeted operation identity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation_id: Option<String>,
     /// Accepted or rejected.
     pub status: AcknowledgementStatus,
-    /// Machine rejection reason when rejected.
+    /// Rejection reason when rejected.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rejection_reason: Option<RejectionReason>,
     /// Acknowledgement timestamp.
@@ -400,14 +453,14 @@ impl CommandAcknowledgementV2 {
         }
     }
 
-    /// Build a rejected acknowledgement. Missing malformed IDs are echoed as empty strings.
+    /// Build a rejected acknowledgement.
     pub fn rejected(envelope: Option<&CommandEnvelopeV2>, reason: RejectionReason) -> Self {
         Self {
             protocol_version: ProtocolVersion::CURRENT,
-            command_id: envelope.map(|v| v.command_id.clone()).unwrap_or_default(),
-            request_id: envelope.map(|v| v.request_id.clone()).unwrap_or_default(),
+            command_id: envelope.map(|value| value.command_id.clone()).unwrap_or_default(),
+            request_id: envelope.map(|value| value.request_id.clone()).unwrap_or_default(),
             correlation_id: envelope
-                .map(|v| v.correlation_id.clone())
+                .map(|value| value.correlation_id.clone())
                 .unwrap_or_default(),
             operation_id: None,
             status: AcknowledgementStatus::Rejected,
@@ -416,9 +469,9 @@ impl CommandAcknowledgementV2 {
         }
     }
 
-    /// Validate that this acknowledgement belongs to `command` and is structurally complete.
+    /// Validate correlation and status invariants for one command.
     pub fn validate_for(&self, command: &CommandEnvelopeV2) -> bool {
-        if self.protocol_version.major != ProtocolVersion::CURRENT.major
+        if !self.protocol_version.is_compatible()
             || self.command_id != command.command_id
             || self.request_id != command.request_id
             || self.correlation_id != command.correlation_id
@@ -435,7 +488,7 @@ impl CommandAcknowledgementV2 {
     }
 }
 
-/// Protocol-v2 reliable event envelope.
+/// Reliable ordered event emitted by the native runtime.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EventEnvelopeV2 {
     /// Protocol version.
@@ -444,11 +497,11 @@ pub struct EventEnvelopeV2 {
     pub event_id: String,
     /// Ordered logical stream identity.
     pub stream_id: String,
-    /// Monotonic sequence within `stream_id`.
+    /// Monotonic sequence within the stream.
     pub sequence: u64,
-    /// Stable event category/type.
+    /// Stable event type.
     pub event_type: String,
-    /// Event emission timestamp.
+    /// Emission timestamp.
     pub emitted_at: DateTime<Utc>,
     /// Correlation identity when applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -456,10 +509,10 @@ pub struct EventEnvelopeV2 {
     /// Operation identity when applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation_id: Option<String>,
-    /// Direct request identity when applicable.
+    /// Request identity when applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
-    /// Direct command identity when applicable.
+    /// Command identity when applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command_id: Option<String>,
     /// Originating command type when applicable.
@@ -467,6 +520,103 @@ pub struct EventEnvelopeV2 {
     pub command_type: Option<String>,
     /// Structured event payload.
     pub payload: Value,
+}
+
+impl EventEnvelopeV2 {
+    /// Validate event envelope invariants before projection into Kotlin state.
+    pub fn validate(&self) -> bool {
+        self.protocol_version.is_compatible()
+            && valid_protocol_id(&self.event_id, MAX_PROTOCOL_ID_LEN)
+            && valid_protocol_id(&self.stream_id, MAX_PROTOCOL_ID_LEN)
+            && self.sequence > 0
+            && non_empty_bounded(&self.event_type, MAX_EVENT_TYPE_LEN)
+            && optional_protocol_id_valid(self.correlation_id.as_deref())
+            && optional_protocol_id_valid(self.operation_id.as_deref())
+            && optional_protocol_id_valid(self.request_id.as_deref())
+            && optional_protocol_id_valid(self.command_id.as_deref())
+            && self
+                .command_type
+                .as_deref()
+                .is_none_or(|value| non_empty_bounded(value, MAX_COMMAND_TYPE_LEN))
+    }
+}
+
+/// One bounded event-drain response.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EventBatchV2 {
+    /// Protocol version.
+    pub protocol_version: ProtocolVersion,
+    /// Native runtime session identity.
+    pub runtime_session_id: String,
+    /// Batch creation timestamp.
+    pub drained_at: DateTime<Utc>,
+    /// Ordered events drained from the native queue.
+    pub events: Vec<EventEnvelopeV2>,
+    /// Whether additional events were known to remain when the batch was built.
+    pub has_more: bool,
+}
+
+impl EventBatchV2 {
+    /// Validate batch and contained event invariants.
+    pub fn validate(&self) -> bool {
+        self.protocol_version.is_compatible()
+            && valid_protocol_id(&self.runtime_session_id, MAX_PROTOCOL_ID_LEN)
+            && self.events.len() <= MAX_EVENT_BATCH_ITEMS
+            && self.events.iter().all(EventEnvelopeV2::validate)
+    }
+}
+
+/// Authoritative snapshot domain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotDomainV2 {
+    /// Runtime lifecycle and session metadata.
+    Application,
+    /// Product settings projection.
+    Settings,
+    /// Protocol capability contract.
+    Protocol,
+    /// Operation and replay registry summary.
+    Operations,
+}
+
+impl SnapshotDomainV2 {
+    /// Parse a stable snapshot-domain string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "application" => Some(Self::Application),
+            "settings" => Some(Self::Settings),
+            "protocol" => Some(Self::Protocol),
+            "operations" => Some(Self::Operations),
+            _ => None,
+        }
+    }
+}
+
+/// Versioned authoritative runtime snapshot.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SnapshotEnvelopeV2 {
+    /// Protocol version.
+    pub protocol_version: ProtocolVersion,
+    /// Native runtime session identity.
+    pub runtime_session_id: String,
+    /// Snapshot domain.
+    pub domain: SnapshotDomainV2,
+    /// Domain schema generation.
+    pub schema_version: u16,
+    /// Snapshot generation timestamp.
+    pub generated_at: DateTime<Utc>,
+    /// Domain payload.
+    pub payload: Value,
+}
+
+impl SnapshotEnvelopeV2 {
+    /// Validate snapshot identity and schema invariants.
+    pub fn validate(&self) -> bool {
+        self.protocol_version.is_compatible()
+            && valid_protocol_id(&self.runtime_session_id, MAX_PROTOCOL_ID_LEN)
+            && self.schema_version > 0
+    }
 }
 
 /// Validate an opaque protocol identifier.
@@ -477,7 +627,11 @@ pub fn valid_protocol_id(value: &str, max_len: usize) -> bool {
         && value == value.trim()
         && value
             .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/'))
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | ':' | '/'))
+}
+
+fn optional_protocol_id_valid(value: Option<&str>) -> bool {
+    value.is_none_or(|value| valid_protocol_id(value, MAX_PROTOCOL_ID_LEN))
 }
 
 fn non_empty_bounded(value: &str, max_len: usize) -> bool {
@@ -524,28 +678,28 @@ fn validate_scope_for_command(
         };
     };
 
-    let has_conversation_scope = scope.conversation_id.is_some() || scope.branch_id.is_some();
-    let has_model_scope = scope.model_id.is_some();
-    let has_document_scope = scope.document_id.is_some();
+    let has_conversation = scope.conversation_id.is_some() || scope.branch_id.is_some();
+    let has_model = scope.model_id.is_some();
+    let has_document = scope.document_id.is_some();
 
     match (command_type, payload) {
         (CommandType::RecoveryResume | CommandType::RecoveryRegenerate, _) => {
             if scope.conversation_id.is_none()
                 || scope.branch_id.is_none()
-                || has_model_scope
-                || has_document_scope
+                || has_model
+                || has_document
             {
                 return Err(RejectionReason::StaleScope);
             }
         }
         (CommandType::ChatSendMessage | CommandType::ChatClearConversation, _) => {
-            if has_model_scope || has_document_scope {
+            if has_model || has_document {
                 return Err(RejectionReason::StaleScope);
             }
         }
         (CommandType::ChatStopGeneration, _) => {
-            if has_model_scope
-                || has_document_scope
+            if has_model
+                || has_document
                 || scope.conversation_id.is_none()
                 || scope.branch_id.is_none()
             {
@@ -553,12 +707,12 @@ fn validate_scope_for_command(
             }
         }
         (CommandType::ModelDownload, ValidatedCommandPayload::ModelDownload(value)) => {
-            if has_conversation_scope
-                || has_document_scope
+            if has_conversation
+                || has_document
                 || scope
                     .model_id
                     .as_deref()
-                    .is_some_and(|id| id != value.model_id.as_str())
+                    .is_some_and(|identity| identity != value.model_id)
             {
                 return Err(RejectionReason::StaleScope);
             }
@@ -567,12 +721,12 @@ fn validate_scope_for_command(
             CommandType::ModelSelect | CommandType::ModelDelete,
             ValidatedCommandPayload::Model(value),
         ) => {
-            if has_conversation_scope
-                || has_document_scope
+            if has_conversation
+                || has_document
                 || scope
                     .model_id
                     .as_deref()
-                    .is_some_and(|id| id != value.model_id.as_str())
+                    .is_some_and(|identity| identity != value.model_id)
             {
                 return Err(RejectionReason::StaleScope);
             }
@@ -581,12 +735,12 @@ fn validate_scope_for_command(
             CommandType::DocumentRevoke | CommandType::DocumentRetryIngestion,
             ValidatedCommandPayload::Document(value),
         ) => {
-            if has_conversation_scope
-                || has_model_scope
+            if has_conversation
+                || has_model
                 || scope
                     .document_id
                     .as_deref()
-                    .is_some_and(|id| id != value.document_id.as_str())
+                    .is_some_and(|identity| identity != value.document_id)
             {
                 return Err(RejectionReason::StaleScope);
             }
@@ -597,7 +751,7 @@ fn validate_scope_for_command(
             | CommandType::DownloadCancel
             | CommandType::SettingsUpdate,
             _,
-        ) if has_conversation_scope || has_model_scope || has_document_scope => {
+        ) if has_conversation || has_model || has_document => {
             return Err(RejectionReason::StaleScope);
         }
         _ => {}
@@ -605,7 +759,7 @@ fn validate_scope_for_command(
     Ok(())
 }
 
-/// Parse and type-check one command envelope before any execution occurs.
+/// Parse and type-check a command before execution.
 pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand, RejectionReason> {
     if !envelope.protocol_version.is_compatible() {
         return Err(RejectionReason::UnsupportedProtocol);
@@ -616,10 +770,8 @@ pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand,
     {
         return Err(RejectionReason::InvalidPayload);
     }
-    if let Some(operation_id) = envelope.operation_id.as_deref() {
-        if !valid_protocol_id(operation_id, MAX_PROTOCOL_ID_LEN) {
-            return Err(RejectionReason::InvalidPayload);
-        }
+    if !optional_protocol_id_valid(envelope.operation_id.as_deref()) {
+        return Err(RejectionReason::InvalidPayload);
     }
     if envelope.command_type.is_empty() || envelope.command_type.len() > MAX_COMMAND_TYPE_LEN {
         return Err(RejectionReason::UnknownCommand);
@@ -638,10 +790,12 @@ pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand,
         if !valid_protocol_id(key, MAX_IDEMPOTENCY_KEY_LEN) {
             return Err(RejectionReason::InvalidPayload);
         }
-    } else if let Some(key) = envelope.idempotency_key.as_deref() {
-        if !valid_protocol_id(key, MAX_IDEMPOTENCY_KEY_LEN) {
-            return Err(RejectionReason::InvalidPayload);
-        }
+    } else if envelope
+        .idempotency_key
+        .as_deref()
+        .is_some_and(|key| !valid_protocol_id(key, MAX_IDEMPOTENCY_KEY_LEN))
+    {
+        return Err(RejectionReason::InvalidPayload);
     }
 
     let payload = match command_type {
@@ -715,7 +869,7 @@ pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand,
                 || envelope
                     .payload
                     .as_object()
-                    .is_some_and(|value| !value.is_empty())
+                    .is_some_and(|object| !object.is_empty())
             {
                 return Err(RejectionReason::InvalidPayload);
             }
@@ -724,10 +878,73 @@ pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand,
     };
 
     validate_scope_for_command(command_type, envelope.scope.as_ref(), &payload)?;
-
     Ok(ValidatedCommand {
         envelope,
         command_type,
         payload,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn initialize_command() -> CommandEnvelopeV2 {
+        CommandEnvelopeV2 {
+            protocol_version: ProtocolVersion::CURRENT,
+            command_id: "cmd-init".into(),
+            request_id: "req-init".into(),
+            command_type: "app.initialize".into(),
+            submitted_at: Utc::now(),
+            operation_id: None,
+            correlation_id: "corr-init".into(),
+            idempotency_key: None,
+            scope: None,
+            payload: json!({ "config_path": "/data/user/0/ai.mukei.android/files/config.toml" }),
+        }
+    }
+
+    #[test]
+    fn android_runtime_capabilities_exclude_legacy_transport() {
+        let snapshot = ProtocolCapabilitySnapshot::for_commands(&[CommandType::AppInitialize])
+            .with_transport(CAP_ANDROID_JNI_TRANSPORT);
+        assert!(snapshot
+            .capabilities
+            .contains(&CAP_ANDROID_JNI_TRANSPORT.to_owned()));
+        assert!(!snapshot
+            .capabilities
+            .iter()
+            .any(|value| value.contains("legacy") || value.contains("qml") || value.contains("qt")));
+    }
+
+    #[test]
+    fn initialize_command_validates() {
+        assert!(validate_command(initialize_command()).is_ok());
+    }
+
+    #[test]
+    fn event_batch_rejects_zero_sequence() {
+        let batch = EventBatchV2 {
+            protocol_version: ProtocolVersion::CURRENT,
+            runtime_session_id: "runtime-1".into(),
+            drained_at: Utc::now(),
+            events: vec![EventEnvelopeV2 {
+                protocol_version: ProtocolVersion::CURRENT,
+                event_id: "event-1".into(),
+                stream_id: "application:lifecycle".into(),
+                sequence: 0,
+                event_type: "application.ready".into(),
+                emitted_at: Utc::now(),
+                correlation_id: None,
+                operation_id: None,
+                request_id: None,
+                command_id: None,
+                command_type: None,
+                payload: json!({}),
+            }],
+            has_more: false,
+        };
+        assert!(!batch.validate());
+    }
 }

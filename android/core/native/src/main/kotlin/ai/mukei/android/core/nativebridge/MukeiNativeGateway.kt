@@ -6,16 +6,23 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Narrow Kotlin boundary for the Rust runtime.
  *
- * Feature modules must depend on this interface, never on [NativeBindings].
+ * Feature modules depend on this interface and never call [NativeBindings]
+ * directly. All returned payloads are bounded Protocol V2 UTF-8 JSON bytes.
  */
 interface MukeiNativeGateway : Closeable {
+    /** Returns the negotiated native runtime and transport contract. */
+    fun protocolCapabilities(): ByteArray
+
+    /** Submits one Protocol V2 command envelope. */
     fun submitCommand(commandJson: ByteArray): ByteArray
 
+    /** Drains one bounded Protocol V2 event batch. */
     fun drainEvents(
         maximumEvents: Int = 32,
         timeoutMilliseconds: Long = 1_000,
     ): ByteArray
 
+    /** Requests one authoritative Protocol V2 snapshot. */
     fun requestSnapshot(domain: String): ByteArray
 }
 
@@ -23,6 +30,11 @@ class RustNativeGateway private constructor(
     private val nativeHandle: Long,
 ) : MukeiNativeGateway {
     private val closed = AtomicBoolean(false)
+
+    override fun protocolCapabilities(): ByteArray {
+        checkOpen()
+        return NativeBindings.protocolCapabilities(nativeHandle)
+    }
 
     override fun submitCommand(commandJson: ByteArray): ByteArray {
         checkOpen()
@@ -64,6 +76,7 @@ class RustNativeGateway private constructor(
 
     companion object {
         fun create(configJson: ByteArray): RustNativeGateway {
+            require(configJson.isNotEmpty()) { "Runtime configuration must not be empty" }
             val handle = NativeBindings.createRuntime(configJson)
             check(handle > 0L) { "Native runtime creation failed" }
             return RustNativeGateway(handle)
@@ -79,6 +92,8 @@ internal object NativeBindings {
     external fun createRuntime(configJson: ByteArray): Long
 
     external fun destroyRuntime(handle: Long)
+
+    external fun protocolCapabilities(handle: Long): ByteArray
 
     external fun submitCommand(
         handle: Long,

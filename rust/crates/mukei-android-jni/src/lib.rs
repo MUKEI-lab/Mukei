@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -8,32 +8,45 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use jni::objects::{JByteArray, JObject, JString};
 use jni::sys::{jbyteArray, jint, jlong};
 use jni::JNIEnv;
+use mukei_core::application_runtime::RuntimeConfig;
+use mukei_core::ui_protocol::{
+    validate_command, ClientKind, CommandAcknowledgementV2, CommandEnvelopeV2, EventBatchV2,
+    ProtocolCapabilitySnapshot, ProtocolVersion, RejectionReason, RuntimeContractSnapshot,
+    SnapshotDomainV2, SnapshotEnvelopeV2, CAP_ANDROID_JNI_TRANSPORT,
+    MAX_COMMAND_ENVELOPE_BYTES, MAX_EVENT_BATCH_ITEMS,
+};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
-use serde_json::{json, Value};
+use serde_json::json;
+use uuid::Uuid;
 
-const MAX_ENVELOPE_BYTES: usize = 64 * 1024;
-const MAX_EVENT_BATCH: jint = 256;
 const MAX_DRAIN_TIMEOUT_MS: jlong = 30_000;
 
-static NEXT_HANDLE: AtomicI64 = AtomicI64::new(1);
-static RUNTIMES: Lazy<Mutex<HashSet<jlong>>> = Lazy::new(|| Mutex::new(HashSet::new()));
-
-fn runtime_exists(handle: jlong) -> bool {
-    handle > 0 && RUNTIMES.lock().contains(&handle)
+#[derive(Clone)]
+struct RuntimeTransportEntry {
+    session_id: String,
+    config: RuntimeConfig,
 }
 
-fn json_bytes(value: Value) -> Vec<u8> {
-    value.to_string().into_bytes()
+static NEXT_HANDLE: AtomicI64 = AtomicI64::new(1);
+static RUNTIMES: Lazy<Mutex<HashMap<jlong, RuntimeTransportEntry>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn runtime_entry(handle: jlong) -> Option<RuntimeTransportEntry> {
+    if handle <= 0 {
+        return None;
+    }
+    RUNTIMES.lock().get(&handle).cloned()
 }
 
 fn panic_payload() -> Vec<u8> {
-    json_bytes(json!({
+    serde_json::to_vec(&json!({
         "error": {
             "code": "native_panic_contained",
-            "message": "The native boundary contained an unexpected panic."
+            "message": "The JNI boundary contained an unexpected panic."
         }
     }))
+    .unwrap_or_else(|_| b"{}".to_vec())
 }
 
 fn guarded_bytes(operation: impl FnOnce() -> Vec<u8>) -> Vec<u8> {
@@ -46,13 +59,18 @@ fn to_java_bytes(env: &mut JNIEnv<'_>, bytes: &[u8]) -> jbyteArray {
         .unwrap_or_else(|_| null_mut())
 }
 
-fn error_payload(code: &str, message: &str) -> Vec<u8> {
-    json_bytes(json!({
+fn serialize<T: serde::Serialize>(value: &T) -> Vec<u8> {
+    serde_json::to_vec(value).unwrap_or_else(|_| panic_payload())
+}
+
+fn invalid_handle_payload() -> Vec<u8> {
+    serde_json::to_vec(&json!({
         "error": {
-            "code": code,
-            "message": message
+            "code": "invalid_runtime_handle",
+            "message": "The native runtime handle is not active."
         }
     }))
+    .unwrap_or_else(|_| b"{}".to_vec())
 }
 
 #[no_mangle]
@@ -62,17 +80,26 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_cr
     config_json: JByteArray<'_>,
 ) -> jlong {
     catch_unwind(AssertUnwindSafe(|| {
-        let config = env.convert_byte_array(&config_json).unwrap_or_default();
-        if config.len() > MAX_ENVELOPE_BYTES {
+        let config_bytes = env.convert_byte_array(&config_json).unwrap_or_default();
+        if config_bytes.is_empty() || config_bytes.len() > MAX_COMMAND_ENVELOPE_BYTES {
             return 0;
         }
+        let config: RuntimeConfig = match serde_json::from_slice(&config_bytes) {
+            Ok(value) => value,
+            Err(_) => return 0,
+        };
 
         let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
         if handle <= 0 {
             return 0;
         }
-
-        RUNTIMES.lock().insert(handle);
+        RUNTIMES.lock().insert(
+            handle,
+            RuntimeTransportEntry {
+                session_id: Uuid::new_v4().to_string(),
+                config,
+            },
+        );
         handle
     }))
     .unwrap_or(0)
@@ -92,6 +119,28 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_de
 }
 
 #[no_mangle]
+pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_protocolCapabilities(
+    mut env: JNIEnv<'_>,
+    _this: JObject<'_>,
+    handle: jlong,
+) -> jbyteArray {
+    let response = guarded_bytes(|| {
+        let Some(runtime) = runtime_entry(handle) else {
+            return invalid_handle_payload();
+        };
+        let contract = RuntimeContractSnapshot {
+            client_kind: ClientKind::Android,
+            runtime_session_id: runtime.session_id,
+            protocol: ProtocolCapabilitySnapshot::current()
+                .with_transport(CAP_ANDROID_JNI_TRANSPORT),
+            snapshot_schema_version: 1,
+        };
+        serialize(&contract)
+    });
+    to_java_bytes(&mut env, &response)
+}
+
+#[no_mangle]
 pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_submitCommand(
     mut env: JNIEnv<'_>,
     _this: JObject<'_>,
@@ -99,44 +148,42 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_su
     command_json: JByteArray<'_>,
 ) -> jbyteArray {
     let response = guarded_bytes(|| {
-        if !runtime_exists(handle) {
-            return error_payload("invalid_runtime_handle", "The native runtime handle is not active.");
+        if runtime_entry(handle).is_none() {
+            return invalid_handle_payload();
         }
-
         let command_bytes = match env.convert_byte_array(&command_json) {
             Ok(bytes) => bytes,
-            Err(_) => return error_payload("invalid_payload", "The command bytes could not be read."),
+            Err(_) => {
+                return serialize(&CommandAcknowledgementV2::rejected(
+                    None,
+                    RejectionReason::InvalidPayload,
+                ))
+            }
         };
-
-        if command_bytes.is_empty() || command_bytes.len() > MAX_ENVELOPE_BYTES {
-            return error_payload("invalid_payload", "The command envelope size is invalid.");
+        if command_bytes.is_empty() || command_bytes.len() > MAX_COMMAND_ENVELOPE_BYTES {
+            return serialize(&CommandAcknowledgementV2::rejected(
+                None,
+                RejectionReason::InvalidPayload,
+            ));
         }
-
-        let command: Value = match serde_json::from_slice(&command_bytes) {
+        let command: CommandEnvelopeV2 = match serde_json::from_slice(&command_bytes) {
             Ok(value) => value,
-            Err(_) => return error_payload("invalid_payload", "The command envelope is not valid JSON."),
+            Err(_) => {
+                return serialize(&CommandAcknowledgementV2::rejected(
+                    None,
+                    RejectionReason::InvalidPayload,
+                ))
+            }
         };
-
-        let field = |name: &str| {
-            command
-                .get(name)
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned()
+        let acknowledgement = match validate_command(command.clone()) {
+            Ok(_) => CommandAcknowledgementV2::rejected(
+                Some(&command),
+                RejectionReason::BackendUnavailable,
+            ),
+            Err(reason) => CommandAcknowledgementV2::rejected(Some(&command), reason),
         };
-
-        json_bytes(json!({
-            "protocol_version": { "major": 2, "minor": 0 },
-            "accepted": false,
-            "command_id": field("command_id"),
-            "request_id": field("request_id"),
-            "correlation_id": field("correlation_id"),
-            "operation_id": command.get("operation_id").cloned().unwrap_or(Value::Null),
-            "rejection_reason": "backend_unavailable",
-            "detail": "The JNI boundary is active; mukei-core command dispatch is the next integration step."
-        }))
+        serialize(&acknowledgement)
     });
-
     to_java_bytes(&mut env, &response)
 }
 
@@ -149,21 +196,28 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_dr
     timeout_milliseconds: jlong,
 ) -> jbyteArray {
     let response = guarded_bytes(|| {
-        if !runtime_exists(handle) {
-            return error_payload("invalid_runtime_handle", "The native runtime handle is not active.");
+        let Some(runtime) = runtime_entry(handle) else {
+            return invalid_handle_payload();
+        };
+        if !(1..=MAX_EVENT_BATCH_ITEMS as jint).contains(&maximum_events)
+            || !(0..=MAX_DRAIN_TIMEOUT_MS).contains(&timeout_milliseconds)
+        {
+            return serde_json::to_vec(&json!({
+                "error": {
+                    "code": "invalid_drain_request",
+                    "message": "The event batch size or timeout is invalid."
+                }
+            }))
+            .unwrap_or_else(|_| b"{}".to_vec());
         }
-
-        if !(1..=MAX_EVENT_BATCH).contains(&maximum_events) {
-            return error_payload("invalid_batch_size", "The requested event batch size is invalid.");
-        }
-
-        if !(0..=MAX_DRAIN_TIMEOUT_MS).contains(&timeout_milliseconds) {
-            return error_payload("invalid_timeout", "The event drain timeout is invalid.");
-        }
-
-        b"[]".to_vec()
+        serialize(&EventBatchV2 {
+            protocol_version: ProtocolVersion::CURRENT,
+            runtime_session_id: runtime.session_id,
+            drained_at: chrono::Utc::now(),
+            events: Vec::new(),
+            has_more: false,
+        })
     });
-
     to_java_bytes(&mut env, &response)
 }
 
@@ -175,26 +229,44 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_re
     domain: JString<'_>,
 ) -> jbyteArray {
     let response = guarded_bytes(|| {
-        if !runtime_exists(handle) {
-            return error_payload("invalid_runtime_handle", "The native runtime handle is not active.");
-        }
-
+        let Some(runtime) = runtime_entry(handle) else {
+            return invalid_handle_payload();
+        };
         let domain: String = match env.get_string(&domain) {
             Ok(value) => value.into(),
-            Err(_) => return error_payload("invalid_domain", "The snapshot domain could not be read."),
+            Err(_) => {
+                return serde_json::to_vec(&json!({
+                    "error": { "code": "invalid_domain" }
+                }))
+                .unwrap_or_else(|_| b"{}".to_vec())
+            }
         };
-
-        if domain.trim().is_empty() {
-            return error_payload("invalid_domain", "The snapshot domain must not be blank.");
-        }
-
-        json_bytes(json!({
-            "protocol_version": { "major": 2, "minor": 0 },
-            "domain": domain,
-            "status": "scaffold",
-            "payload": {}
-        }))
+        let Some(domain) = SnapshotDomainV2::parse(domain.trim()) else {
+            return serde_json::to_vec(&json!({
+                "error": { "code": "unsupported_snapshot_domain" }
+            }))
+            .unwrap_or_else(|_| b"{}".to_vec());
+        };
+        let payload = match domain {
+            SnapshotDomainV2::Application => json!({
+                "state": "transport_ready_core_runtime_unbound",
+                "app_data_dir": runtime.config.app_data_dir,
+            }),
+            SnapshotDomainV2::Protocol => json!({
+                "capabilities": ProtocolCapabilitySnapshot::current()
+                    .with_transport(CAP_ANDROID_JNI_TRANSPORT),
+            }),
+            SnapshotDomainV2::Settings => json!({ "values": {} }),
+            SnapshotDomainV2::Operations => json!({ "active": [], "replay_entries": 0 }),
+        };
+        serialize(&SnapshotEnvelopeV2 {
+            protocol_version: ProtocolVersion::CURRENT,
+            runtime_session_id: runtime.session_id,
+            domain,
+            schema_version: 1,
+            generated_at: chrono::Utc::now(),
+            payload,
+        })
     });
-
     to_java_bytes(&mut env, &response)
 }
