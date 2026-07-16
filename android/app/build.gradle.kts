@@ -6,13 +6,14 @@ plugins {
 android {
     namespace = "ai.mukei.android"
     compileSdk = 37
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         applicationId = "ai.mukei.android"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 70500
+        versionName = "0.7.5"
     }
 
     buildTypes {
@@ -27,6 +28,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+        }
+        create("offline") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            applicationIdSuffix = ".offline"
+            versionNameSuffix = "-offline"
         }
     }
 
