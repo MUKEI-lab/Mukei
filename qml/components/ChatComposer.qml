@@ -5,6 +5,7 @@ import "../theme"
 
 FocusScope {
     id: root
+    objectName: "chatComposer"
 
     property alias text: textArea.text
     property alias cursorPosition: textArea.cursorPosition
@@ -46,6 +47,7 @@ FocusScope {
         spacing: Spacing.xs
 
         IconButton {
+            objectName: "chatAttachButton"
             iconSource: "qrc:/icons/attach.svg"
             text: qsTr("Attach local file")
             Accessible.description: qsTr("Add a private local document to this conversation")
@@ -54,6 +56,7 @@ FocusScope {
 
         TextArea {
             id: textArea
+            objectName: "chatMessageEditor"
             Layout.fillWidth: true
             Layout.minimumHeight: Type.bodyUI.pixelSize
             Layout.maximumHeight: Type.bodyUI.pixelSize * 6
@@ -80,6 +83,7 @@ FocusScope {
 
         Button {
             id: sendButton
+            objectName: "chatSendButton"
             implicitWidth: Spacing.xxl
             implicitHeight: Spacing.xxl
             enabled: root.isStreaming || (root.canSend && textArea.text.trim().length > 0)
