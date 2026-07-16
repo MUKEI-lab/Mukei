@@ -20,6 +20,8 @@ pub mod application_runtime;
 pub mod boundary;
 pub mod error;
 pub mod guard;
+#[cfg(feature = "tokio")]
+pub mod platform;
 pub mod saas;
 pub mod ui_contract;
 pub mod ui_protocol;
@@ -56,36 +58,22 @@ pub use crate::error::{ErrorClass, MukeiError, Result};
 pub mod prelude {
     #[cfg(feature = "tokio")]
     pub use crate::application_runtime::{
-        MukeiRuntime, RuntimeConfig, RuntimeError, RuntimeSnapshotDomain,
-        RuntimeSnapshotEnvelope, RuntimeState,
+        EventDrain, MukeiRuntime, RuntimeConfig, RuntimeError, RuntimeServices,
+        RuntimeSnapshotDomain, RuntimeSnapshotEnvelope, RuntimeState,
     };
     pub use crate::boundary::{
         BoundaryStateChange, LoadingStage, RuntimeSnapshot, StreamTagDetector, TagEvents,
     };
     pub use crate::error::{MukeiError, Result};
     pub use crate::guard::{BoundaryLease, GuardError, Inner as BoundaryLeaseOwner};
+    #[cfg(feature = "tokio")]
+    pub use crate::platform::{
+        PlatformBrokerSnapshot, PlatformPortError, PlatformRequest, PlatformRequestBatch,
+        PlatformRequestBroker, PlatformRequestKind, PlatformResponse, PlatformResponseStatus,
+    };
     pub use crate::types::{
         ChatMessage, ConversationId, MessageId, Role, ToolCall, ToolCallId, ToolResult,
     };
-}
-
-/// Temporary compatibility exports for code moving from the retired desktop
-/// bridge vocabulary to the platform-neutral boundary module.
-#[deprecated(note = "Use mukei_core::boundary; this compatibility module will be removed")]
-pub mod ffi {
-    /// Snapshot compatibility exports.
-    pub mod agent {
-        pub use crate::boundary::{LoadingStage, RuntimeSnapshot as FfiAgentSnapshot};
-    }
-
-    /// Streaming delimiter compatibility exports.
-    pub mod tags {
-        pub use crate::boundary::{
-            close_tag, open_tag, StreamTagDetector as TagsStreaming, TagEvents, TAG_WINDOW,
-        };
-    }
-
-    pub use agent::FfiAgentSnapshot;
 }
 
 #[cfg(doctest)]

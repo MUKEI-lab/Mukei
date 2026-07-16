@@ -1,25 +1,20 @@
-//! `mukei_core::agent` — TRD §2.
+//! Agent orchestration for context assembly, inference, tool execution, and
+//! watchdog enforcement.
 //!
-//! Pure-Rust ReAct (Reason + Act) loop. The up-stream types from
-//! [`crate::types`] and down-stream I/O from [`crate::engine`] and
-//! [`crate::tools`] are *only* observable through this module's
-//! public surface, which keeps the FFI boundary tight.
+//! Native transports submit commands through `application_runtime`; the agent
+//! loop reports structured outcomes and streamed text to the runtime event bus.
 
 pub mod context;
 pub mod loop_;
 pub mod tools;
 pub mod watchdog;
 
-pub use context::{ContextBudget, ContextBudgetManager};
-pub use loop_::{AgentEventSink, AgentLoop, AgentLoopHandle, AgentRunOutcome, AgentRunRequest};
+pub use context::{ContextBudget, ContextBudgetManager, TokenCount};
+pub use loop_::{AgentEventSink, AgentLoop, AgentRunOutcome, AgentRunRequest};
 pub use tools::{
-    FailureKind, FailureTracker, OutputRepeatTracker, ToolExecutionPolicy, ToolExecutor,
-    ToolOutcome,
+    FailureKind, FailureTracker, ToolExecutionPolicy, ToolExecutor, ToolOutcome,
 };
-// Issue #18: legacy aliases (`ToolPolicy`, `MAX_FAILURES_PER_TOOL`) were
-// removed. New code uses `ToolExecutionPolicy` / `policy.max_failures_per_tool`.
-pub use tools::{render_repeat_output_envelope, render_tool_error_envelope};
 pub use watchdog::{Watchdog, WatchdogHandle};
 
-/// Global state machine snapshot. Mirrors `crate::ffi::agent`.
-pub type AgentSnapshot = crate::ffi::agent::FfiAgentSnapshot;
+/// Platform-neutral runtime state snapshot retained for domain callers.
+pub type AgentSnapshot = crate::boundary::RuntimeSnapshot;
