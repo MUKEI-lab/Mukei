@@ -1,22 +1,5 @@
 # =====================================================================
 # Mukei backend CI
-#
-# Scope of THIS workflow (deliberately narrow, keeps CI green):
-#
-#   * mukei-core only, feature set = default (no-default-features + std,tokio).
-#
-#     mukei-bridge requires a Qt 6 / cxx-qt toolchain and the
-#     llama.cpp prebuilt on the runner. Wiring those up is a separate
-#     ticket (see rust-toolchain.toml and llama-cpp-prebuilt/). Until
-#     that lands, running the bridge crate here would just fail loudly
-#     and mask the real signal from the pure-Rust kernel, so we scope
-#     CI to what actually builds in a stock GitHub runner.
-#
-#   * fmt + clippy (deny warnings) + unit tests, on stable Rust.
-#
-# The goal is a durable green-badge signal for the pure-Rust core so
-# that regressions in config/storage/agent/tools land loud in PR review
-# without waiting for the full mobile pipeline.
 # =====================================================================
 
 name: ci
@@ -27,8 +10,6 @@ on:
   pull_request:
     branches: [ main ]
 
-# Use the source branch for both push and pull_request events so duplicate
-# validation for the same branch collapses into the newest run.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
@@ -39,9 +20,6 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # -------------------------------------------------------------------
-  # Job 1 — formatting. Fast fail before we spin up a heavier compile.
-  # -------------------------------------------------------------------
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
@@ -55,9 +33,6 @@ jobs:
         working-directory: rust
         run: cargo fmt --all -- --check
 
-  # -------------------------------------------------------------------
-  # Job 2 — clippy on mukei-core (default features only).
-  # -------------------------------------------------------------------
   clippy:
     name: clippy (mukei-core)
     runs-on: ubuntu-latest
@@ -87,9 +62,6 @@ jobs:
           --lib --tests
           -- -D warnings
 
-  # -------------------------------------------------------------------
-  # Job 3 — unit tests on mukei-core (default features only).
-  # -------------------------------------------------------------------
   test:
     name: test (mukei-core)
     runs-on: ubuntu-latest
@@ -116,9 +88,6 @@ jobs:
           --features std,tokio
           --lib --tests
 
-  # -------------------------------------------------------------------
-  # Job 4 — static QML architecture and security guards.
-  # -------------------------------------------------------------------
   qml-architecture:
     name: qml architecture guards
     runs-on: ubuntu-latest
@@ -130,3 +99,14 @@ jobs:
         run: python3 qml/scripts/qml_contract_guard.py qml
       - name: QML security check
         run: python3 qml/scripts/qml_security_analyzer.py qml
+      - name: Interaction audit baseline
+        run: >-
+          python3 qml/scripts/qml_interaction_audit.py qml
+          --report "${RUNNER_TEMP}/qml-interaction-audit.md"
+      - name: Upload interaction audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: qml-interaction-audit
+          path: ${{ runner.temp }}/qml-interaction-audit.md
+          if-no-files-found: error
+          retention-days: 14
