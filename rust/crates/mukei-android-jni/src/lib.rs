@@ -3,6 +3,8 @@
 mod runtime_registry;
 #[cfg(feature = "native_inference")]
 mod native_inference;
+#[cfg(feature = "rag_runtime")]
+mod native_rag;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr::null_mut;
@@ -15,9 +17,7 @@ use jni::JNIEnv;
 use mukei_core::application_runtime::{
     MukeiRuntime, RuntimeConfig, RuntimeServices, RuntimeSnapshotDomain,
 };
-use mukei_core::platform::{
-    PlatformResponse, MAX_PLATFORM_DRAIN_ITEMS,
-};
+use mukei_core::platform::{PlatformResponse, MAX_PLATFORM_DRAIN_ITEMS};
 use mukei_core::ui_protocol::{
     ClientKind, CommandAcknowledgementV2, CommandEnvelopeV2, EventBatchV2,
     ProtocolVersion, RejectionReason, RuntimeContractSnapshot, SnapshotDomainV2,
