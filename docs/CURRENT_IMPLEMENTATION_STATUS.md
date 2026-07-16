@@ -4,18 +4,18 @@
 **Role:** Android production branch  
 **Desktop branch:** `main`
 
-## Completed bootstrap work
+## Bootstrap completed
 
-- Android and desktop delivery lines are separated by branch.
-- QML, Qt Android packaging and CXX-Qt bridge source are removed from this branch.
-- `mukei-core` remains the shared platform-neutral engine.
+1. `Kotlin` was created from `main`.
+2. QML, CXX-Qt bridge crates, Qt Android packaging scripts and their CI workflows were removed from this branch.
+3. A Kotlin/Jetpack Compose Android scaffold was added under `android/`.
+4. Protocol V2 Kotlin boundary models were added under `android/core/protocol/`.
+5. A narrow Kotlin native gateway and dedicated Rust `mukei-android-jni` crate were added.
 
-## Active construction
+## Current bridge state
 
-- Kotlin/Jetpack Compose application scaffold.
-- Transport-neutral Protocol V2 Kotlin models.
-- Dedicated `mukei-android-jni` runtime boundary.
+The JNI runtime owns opaque handles, validates input bounds, contains Rust panics and exposes command, event-drain and snapshot entry points. Domain dispatch into `mukei-core` is intentionally not implemented in this scaffold commit; commands currently return a stable `backend_unavailable` acknowledgement.
 
 ## Release status
 
-This is an architecture bootstrap, not a release candidate. Native build, protocol contract, APK packaging, device lifecycle, Keystore/SQLCipher and physical-device validation remain open gates.
+This is an architecture scaffold, not a release candidate. Remote CI, generated dependency locks, Android ABI builds, native library packaging, Protocol V2 contract tests, Keystore/SQLCipher integration and physical-device validation remain open gates.

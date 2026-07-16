@@ -1,0 +1,34 @@
+[package]
+name = "mukei-android-jni"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Dedicated JNI boundary between the Mukei Kotlin application and mukei-core"
+
+[lib]
+name = "mukei_android"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[features]
+default = ["runtime_development"]
+runtime_development = []
+runtime_test = []
+runtime_production = [
+    "mukei-core/llama_cpp",
+    "mukei-core/sqlcipher",
+    "mukei-core/network",
+    "mukei-core/candle",
+    "mukei-core/usearch_hnsw",
+]
+runtime_hardening = ["mukei-core/runtime_hardening"]
+
+[dependencies]
+mukei-core = { path = "../mukei-core", default-features = false, features = ["std", "tokio"] }
+jni = { workspace = true }
+once_cell = { workspace = true }
+parking_lot = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }

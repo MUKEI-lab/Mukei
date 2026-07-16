@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "MukeiAndroid"
 include(":app")
 include(":core:protocol")
+include(":core:native")

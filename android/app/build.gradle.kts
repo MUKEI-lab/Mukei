@@ -31,6 +31,7 @@ android {
 
 dependencies {
     implementation(project(":core:protocol"))
+    implementation(project(":core:native"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
