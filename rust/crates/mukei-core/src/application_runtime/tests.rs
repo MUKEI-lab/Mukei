@@ -13,7 +13,7 @@ mod tests {
 
     fn runtime() -> MukeiRuntime {
         MukeiRuntime::create(RuntimeConfig {
-            app_data_dir: "/tmp/mukei-runtime-tests".into(),
+            app_data_dir: format!("/tmp/mukei-runtime-tests-{}", Uuid::new_v4()),
             worker_threads: 1,
             max_blocking_threads: 2,
             event_capacity: 64,
@@ -37,9 +37,10 @@ mod tests {
     }
 
     fn initialize(runtime: &MukeiRuntime) {
+        let config_path = Path::new(&runtime.config.app_data_dir).join("mukei.toml");
         let acknowledgement = runtime.submit(command(
             "app.initialize",
-            json!({"config_path": "/tmp/mukei-runtime-tests/missing.toml"}),
+            json!({"config_path": config_path.to_string_lossy()}),
         ));
         assert_eq!(acknowledgement.status, AcknowledgementStatus::Accepted);
         assert_eq!(runtime.state(), RuntimeState::Ready);
@@ -84,7 +85,10 @@ mod tests {
         assert_eq!(acknowledgement.status, AcknowledgementStatus::Accepted);
         let batch = runtime.drain_platform_requests(4, Duration::ZERO);
         assert_eq!(batch.requests.len(), 1);
-        assert!(matches!(batch.requests[0].request, PlatformRequestKind::DocumentStage { .. }));
+        assert!(matches!(
+            batch.requests[0].request,
+            PlatformRequestKind::DocumentStage { .. }
+        ));
     }
 
     #[test]
