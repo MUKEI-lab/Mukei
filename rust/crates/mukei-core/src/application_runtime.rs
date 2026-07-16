@@ -3,6 +3,7 @@ include!("application_runtime/foundation_types.rs");
 include!("application_runtime/foundation_state.rs");
 include!("application_runtime/foundation_context.rs");
 include!("application_runtime/foundation_runtime_struct.rs");
+include!("application_runtime/services.rs");
 include!("application_runtime/base.rs");
 include!("application_runtime/chat.rs");
 include!("application_runtime/models_download.rs");
