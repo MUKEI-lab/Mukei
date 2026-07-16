@@ -90,6 +90,7 @@ mod secure_runtime {
     struct SecureResources {
         _database: Arc<DatabasePool>,
         encryption_status: DatabaseEncryptionStatus,
+        rag_ready: bool,
     }
 
     static SECURE_RESOURCES: Lazy<Mutex<HashMap<jlong, SecureResources>>> =
@@ -224,16 +225,35 @@ mod secure_runtime {
                 Ok(runtime) => Arc::new(runtime),
                 Err(_) => return 0,
             };
-            let projection_store: Arc<dyn RuntimeProjectionStore> = Arc::new(
-                SqlcipherProjectionStore {
+            let projection_store: Arc<dyn RuntimeProjectionStore> =
+                Arc::new(SqlcipherProjectionStore {
                     pool: Arc::clone(&database_pool),
-                },
-            );
+                });
             if let Err(error) = runtime.attach_projection_store(projection_store) {
                 mukei_core::diagnostics::logger::log_error(&error);
                 runtime.shutdown();
                 return 0;
             }
+
+            #[cfg(feature = "rag_runtime")]
+            let rag_ready = match crate::native_rag::AndroidRagService::open(
+                app_data_root,
+                Arc::clone(&database_pool),
+            ) {
+                Ok(service) => {
+                    runtime.attach_rag_service(service);
+                    true
+                }
+                Err(error) => {
+                    tracing::info!(
+                        code = error.error_code(),
+                        "verified embedding bundle unavailable; RAG capability disabled"
+                    );
+                    false
+                }
+            };
+            #[cfg(not(feature = "rag_runtime"))]
+            let rag_ready = false;
 
             let handle = match super::super::RUNTIMES.lock().insert(Arc::clone(&runtime)) {
                 Some(handle) => handle,
@@ -247,6 +267,7 @@ mod secure_runtime {
                 SecureResources {
                     _database: database_pool,
                     encryption_status,
+                    rag_ready,
                 },
             );
             handle
@@ -277,6 +298,7 @@ mod secure_runtime {
                 "crash_sink": "app_private",
                 "telemetry": "local_only",
                 "projections": "encrypted",
+                "rag": if resources.rag_ready { "ready" } else { "artifacts_required" },
             }))
         });
         super::super::to_java_bytes(&mut env, &response)
