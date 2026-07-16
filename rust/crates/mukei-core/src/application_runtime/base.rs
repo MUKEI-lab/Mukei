@@ -16,6 +16,7 @@ impl MukeiRuntime {
             .thread_name("mukei-native")
             .enable_all()
             .build()?;
+        let runtime_handle = async_runtime.handle().clone();
         let events = Arc::new(EventBus::new(config.event_capacity));
         let activation = ModelActivationService::new(services.backend_factory.is_some());
         let runtime = Self {
@@ -26,13 +27,17 @@ impl MukeiRuntime {
             cancellation: CancellationToken::new(),
             events,
             platform: Arc::new(PlatformRequestBroker::default()),
-            features: Arc::new(FeatureState::default()),
+            features: Arc::new(FeatureState::new(runtime_handle)),
             settings: RwLock::new(HashMap::new()),
             replay: Mutex::new(HashMap::new()),
             product_config: RwLock::new(None),
             activation,
             backend_factory: services.backend_factory,
             agent_loop: RwLock::new(None),
+            projection_store: RwLock::new(None),
+            rag_service: RwLock::new(None),
+            remote_tool_secrets: Mutex::new(None),
+            remote_policy: RwLock::new(crate::tools::RemoteFeaturePolicy::LocalOnly),
             closed: AtomicBool::new(false),
         };
         runtime.events.emit(
@@ -75,6 +80,14 @@ impl MukeiRuntime {
                 CommandType::RecoveryResume,
                 CommandType::RecoveryRegenerate,
             ]);
+        }
+        if self
+            .rag_service
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some()
+        {
+            commands.push(CommandType::DocumentRetryIngestion);
         }
         #[cfg(feature = "network")]
         commands.push(CommandType::ModelDownload);
@@ -162,60 +175,46 @@ impl MukeiRuntime {
         }
 
         let root = PathBuf::from(&self.config.app_data_dir);
-        let product_config = if Path::new(&payload.config_path).is_file() {
-            match MukeiConfig::load_and_validate(Path::new(&payload.config_path)) {
-                Ok(config) => config,
-                Err(_) => {
-                    *self
-                        .state
-                        .write()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner()) = RuntimeState::Failed;
-                    return CommandAcknowledgementV2::rejected(
-                        Some(&command.envelope),
-                        RejectionReason::InvalidPayload,
-                    );
-                }
+        let expected_config_path = root.join("mukei.toml");
+        if Path::new(&payload.config_path) != expected_config_path.as_path() {
+            *self.state.write().unwrap_or_else(|p| p.into_inner()) = RuntimeState::Failed;
+            return CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::PolicyDenied,
+            );
+        }
+        if !expected_config_path.is_file()
+            && crate::config::write_default(&expected_config_path).is_err()
+        {
+            *self.state.write().unwrap_or_else(|p| p.into_inner()) = RuntimeState::Failed;
+            return CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::BackendUnavailable,
+            );
+        }
+        let product_config = match MukeiConfig::load_and_validate(&expected_config_path) {
+            Ok(config) => config,
+            Err(_) => {
+                *self.state.write().unwrap_or_else(|p| p.into_inner()) = RuntimeState::Failed;
+                return CommandAcknowledgementV2::rejected(
+                    Some(&command.envelope),
+                    RejectionReason::InvalidPayload,
+                );
             }
-        } else {
-            MukeiConfig::default_for_data_root(&root)
         };
-        if product_config.ensure_storage_directories().is_err() {
-            *self
-                .state
-                .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = RuntimeState::Failed;
+        if product_config
+            .validate_android_storage_paths(&expected_config_path)
+            .is_err()
+            || product_config.ensure_storage_directories().is_err()
+        {
+            *self.state.write().unwrap_or_else(|p| p.into_inner()) = RuntimeState::Failed;
             return CommandAcknowledgementV2::rejected(
                 Some(&command.envelope),
                 RejectionReason::BackendUnavailable,
             );
         }
 
-        let context = ContextBudgetManager::new(
-            Arc::new(RuntimeContextBackend {
-                features: Arc::clone(&self.features),
-            }),
-            Arc::new(RuntimeTokenCounter),
-            product_config.n_ctx,
-        );
-        let policy = ToolExecutionPolicy::from(&product_config.agent);
-        let executor = ToolExecutor::with_policy(
-            Arc::new(ToolRegistry::new()),
-            Arc::new(FailureTracker::with_threshold(
-                product_config.agent.max_failures_per_tool,
-            )),
-            policy,
-        );
-        let watchdog = WatchdogHandle::new(Watchdog::new(
-            product_config.watchdog.max_iterations,
-            product_config.watchdog.max_token_budget,
-            Duration::from_secs(product_config.watchdog.max_wall_seconds),
-        ));
-        let backend: Arc<dyn crate::engine::InferenceBackend> = self.activation.clone();
-        let agent_loop = AgentLoop::new_with_backend(context, executor, watchdog, backend);
-        *self
-            .agent_loop
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(agent_loop);
+        self.install_agent_loop(&product_config);
         *self
             .product_config
             .write()
