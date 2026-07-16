@@ -4,23 +4,23 @@ impl MukeiRuntime {
             return ack;
         }
         let ValidatedCommandPayload::DocumentGrant(payload) = &command.payload else {
-            return CommandAcknowledgementV2::rejected(Some(&command.envelope), RejectionReason::InvalidPayload);
+            return CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::InvalidPayload,
+            );
         };
         let (acknowledgement, operation_id, token) = self.accept_operation(command);
         let document_id = Uuid::new_v4().to_string();
-        self.features.documents.write().unwrap_or_else(|p| p.into_inner()).insert(
-            document_id.clone(),
-            DocumentProjection {
-                document_id: document_id.clone(),
-                label: payload.label.clone(),
-                mime_type: payload.mime_type.clone(),
-                source_fingerprint: blake3::hash(payload.target.as_bytes()).to_hex().to_string(),
-                staged_path: None,
-                size_bytes: None,
-                status: DocumentStatus::Staging,
-                error_code: None,
-            },
-        );
+        self.features.insert_document(DocumentProjection {
+            document_id: document_id.clone(),
+            label: payload.label.clone(),
+            mime_type: payload.mime_type.clone(),
+            source_fingerprint: blake3::hash(payload.target.as_bytes()).to_hex().to_string(),
+            staged_path: None,
+            size_bytes: None,
+            status: DocumentStatus::Staging,
+            error_code: None,
+        });
         let request_id = match self.platform.enqueue(
             Some(operation_id.clone()),
             PlatformRequestKind::DocumentStage {
@@ -31,7 +31,17 @@ impl MukeiRuntime {
         ) {
             Ok(value) => value,
             Err(_) => {
-                self.features.update_operation(&operation_id, OperationStatus::Failed, None, Some("platform_queue_full".into()), Value::Null);
+                self.features.update_document(&document_id, |document| {
+                    document.status = DocumentStatus::Failed;
+                    document.error_code = Some("platform_queue_full".into());
+                });
+                self.features.update_operation(
+                    &operation_id,
+                    OperationStatus::Failed,
+                    None,
+                    Some("platform_queue_full".into()),
+                    Value::Null,
+                );
                 return acknowledgement;
             }
         };
@@ -41,34 +51,84 @@ impl MukeiRuntime {
         let command_envelope = command.envelope.clone();
         let operation_id_for_task = operation_id.clone();
         self.async_runtime.handle().spawn(async move {
-            match platform.wait_for_response(&request_id, PLATFORM_WAIT_TIMEOUT, token).await {
+            match platform
+                .wait_for_response(&request_id, PLATFORM_WAIT_TIMEOUT, token)
+                .await
+            {
                 Ok(payload) => {
-                    let staged_path = payload.get("staged_path").and_then(Value::as_str).map(str::to_owned);
+                    let staged_path = payload
+                        .get("staged_path")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
                     let size_bytes = payload.get("size_bytes").and_then(Value::as_u64);
-                    if staged_path.is_none() {
-                        features.update_operation(&operation_id_for_task, OperationStatus::Failed, None, Some("invalid_platform_response".into()), Value::Null);
+                    let Some(staged_path_value) = staged_path.clone() else {
+                        features.update_document(&document_id, |document| {
+                            document.status = DocumentStatus::Failed;
+                            document.error_code = Some("invalid_platform_response".into());
+                        });
+                        features.update_operation(
+                            &operation_id_for_task,
+                            OperationStatus::Failed,
+                            None,
+                            Some("invalid_platform_response".into()),
+                            Value::Null,
+                        );
                         return;
-                    }
-                    if let Some(document) = features.documents.write().unwrap_or_else(|p| p.into_inner()).get_mut(&document_id) {
-                        document.staged_path = staged_path.clone();
+                    };
+                    features.update_document(&document_id, |document| {
+                        document.staged_path = Some(staged_path_value);
                         document.size_bytes = size_bytes;
                         document.status = DocumentStatus::Staged;
-                    }
-                    features.update_operation(&operation_id_for_task, OperationStatus::Completed, Some(1.0), None, json!({"document_id": document_id, "staged_path": staged_path, "size_bytes": size_bytes}));
-                    events.emit("application:documents", "document.granted", json!({"document_id": document_id, "size_bytes": size_bytes}), Some(&command_envelope), Some(operation_id_for_task.clone()));
-                    events.emit(&format!("operation:{}", operation_id_for_task), "operation.completed", json!({"state": "completed"}), Some(&command_envelope), Some(operation_id_for_task));
+                        document.error_code = None;
+                    });
+                    features.update_operation(
+                        &operation_id_for_task,
+                        OperationStatus::Completed,
+                        Some(1.0),
+                        None,
+                        json!({
+                            "document_id": document_id,
+                            "staged_path": staged_path,
+                            "size_bytes": size_bytes,
+                        }),
+                    );
+                    events.emit(
+                        "application:documents",
+                        "document.granted",
+                        json!({"document_id": document_id, "size_bytes": size_bytes}),
+                        Some(&command_envelope),
+                        Some(operation_id_for_task.clone()),
+                    );
+                    events.emit(
+                        &format!("operation:{}", operation_id_for_task),
+                        "operation.completed",
+                        json!({"state": "completed"}),
+                        Some(&command_envelope),
+                        Some(operation_id_for_task),
+                    );
                 }
                 Err(error) => {
-                    if let Some(document) = features.documents.write().unwrap_or_else(|p| p.into_inner()).get_mut(&document_id) {
+                    features.update_document(&document_id, |document| {
                         document.status = DocumentStatus::Failed;
                         document.error_code = Some(error.to_string());
-                    }
-                    features.update_operation(&operation_id_for_task, OperationStatus::Failed, None, Some(error.to_string()), Value::Null);
-                    events.emit(&format!("operation:{}", operation_id_for_task), "operation.failed", json!({"code": "platform_document_stage_failed"}), Some(&command_envelope), Some(operation_id_for_task));
+                    });
+                    features.update_operation(
+                        &operation_id_for_task,
+                        OperationStatus::Failed,
+                        None,
+                        Some(error.to_string()),
+                        Value::Null,
+                    );
+                    events.emit(
+                        &format!("operation:{}", operation_id_for_task),
+                        "operation.failed",
+                        json!({"code": "platform_document_stage_failed"}),
+                        Some(&command_envelope),
+                        Some(operation_id_for_task),
+                    );
                 }
             }
         });
         acknowledgement
     }
-
 }
