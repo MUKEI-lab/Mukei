@@ -17,14 +17,13 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import org.json.JSONObject
 
-/**
- * Creates a production runtime backed by SQLCipher and Android Keystore.
- *
- * Rust owns raw SQLCipher key generation. Kotlin only wraps or unwraps the
- * transient key with a non-exportable Android Keystore AES-GCM key. At rest,
- * only the authenticated ciphertext envelope is stored below app-private files.
- */
+/** Secure Android composition root for SQLCipher and wrapped provider secrets. */
 object SecureRuntimeFactory {
+    enum class RemoteProvider(val fileName: String) {
+        Brave("brave_api_key.enc"),
+        Tavily("tavily_api_key.enc"),
+    }
+
     @Synchronized
     fun open(
         context: Context,
@@ -33,31 +32,79 @@ object SecureRuntimeFactory {
         require(configJson.isNotEmpty()) { "Runtime configuration must not be empty" }
         val appContext = context.applicationContext
         val filesRoot = appContext.filesDir.canonicalFile
-        val configuredRoot = try {
-            val config = JSONObject(String(configJson, StandardCharsets.UTF_8))
-            File(config.getString("app_data_dir")).canonicalFile
-        } catch (failure: Exception) {
-            throw SecurityBootstrapException("runtime_config_invalid", failure)
-        }
+        val configuredRoot = parseConfiguredRoot(configJson)
         ensureInsideFilesDir(configuredRoot, filesRoot, allowRoot = true)
 
-        val keyFile = File(filesRoot, DATABASE_KEY_FILE).canonicalFile
-        ensureInsideFilesDir(keyFile, filesRoot)
-        keyFile.parentFile?.let { parent ->
-            if (!parent.exists() && !parent.mkdirs()) {
-                throw SecurityBootstrapException("secure_storage_unavailable")
-            }
-        }
-
+        val keyFile = secureFile(filesRoot, DATABASE_KEY_FILE)
         val rawKey = if (keyFile.exists()) {
             unwrapDatabaseKey(keyFile)
         } else {
             createAndPersistDatabaseKey(keyFile)
         }
-        return try {
+        val gateway = try {
             RustNativeGateway.createSecure(configJson, rawKey)
         } finally {
             rawKey.fill(0)
+        }
+        return try {
+            configureRemoteToolsIfPresent(gateway, filesRoot)
+            gateway
+        } catch (failure: Throwable) {
+            gateway.runCatching { close() }
+            throw failure
+        }
+    }
+
+    /** Persist one provider credential as an authenticated Keystore envelope. */
+    @Synchronized
+    fun storeRemoteToolSecret(
+        context: Context,
+        provider: RemoteProvider,
+        secret: ByteArray,
+    ) {
+        require(secret.isNotEmpty() && secret.size <= MAX_PROVIDER_KEY_BYTES) {
+            "Provider credential size is invalid"
+        }
+        val filesRoot = context.applicationContext.filesDir.canonicalFile
+        val target = secureFile(filesRoot, "$SECRETS_DIRECTORY/${provider.fileName}")
+        val wrapped = wrap(secret)
+        try {
+            writeAtomically(target, wrapped)
+        } finally {
+            wrapped.fill(0)
+        }
+    }
+
+    private fun parseConfiguredRoot(configJson: ByteArray): File = try {
+        val config = JSONObject(String(configJson, StandardCharsets.UTF_8))
+        File(config.getString("app_data_dir")).canonicalFile
+    } catch (failure: Exception) {
+        throw SecurityBootstrapException("runtime_config_invalid", failure)
+    }
+
+    private fun configureRemoteToolsIfPresent(
+        gateway: RustNativeGateway,
+        filesRoot: File,
+    ) {
+        val braveFile = secureFile(filesRoot, "$SECRETS_DIRECTORY/${RemoteProvider.Brave.fileName}")
+        val tavilyFile = secureFile(filesRoot, "$SECRETS_DIRECTORY/${RemoteProvider.Tavily.fileName}")
+        if (!braveFile.exists() && !tavilyFile.exists()) return
+        if (!braveFile.isFile || !tavilyFile.isFile) {
+            throw SecurityBootstrapException("remote_tool_credentials_incomplete")
+        }
+        val brave = unwrapSecretFile(braveFile)
+        val tavily = unwrapSecretFile(tavilyFile)
+        try {
+            val response = gateway.configureRemoteTools(brave, tavily)
+            val accepted = runCatching {
+                JSONObject(String(response, StandardCharsets.UTF_8)).optBoolean("accepted", false)
+            }.getOrDefault(false)
+            if (!accepted) {
+                throw SecurityBootstrapException("remote_tool_credentials_rejected")
+            }
+        } finally {
+            brave.fill(0)
+            tavily.fill(0)
         }
     }
 
@@ -87,31 +134,35 @@ object SecureRuntimeFactory {
     }
 
     private fun unwrapDatabaseKey(keyFile: File): ByteArray {
+        val raw = unwrapSecretFile(keyFile)
+        if (raw.size != DATABASE_KEY_BYTES) {
+            raw.fill(0)
+            throw SecurityBootstrapException("database_key_length_invalid")
+        }
+        return raw
+    }
+
+    private fun unwrapSecretFile(file: File): ByteArray {
         val wrapped = try {
-            Files.readAllBytes(keyFile.toPath())
+            Files.readAllBytes(file.toPath())
         } catch (failure: Exception) {
-            throw SecurityBootstrapException("database_key_read_failed", failure)
+            throw SecurityBootstrapException("wrapped_secret_read_failed", failure)
         }
         if (wrapped.size !in MIN_ENVELOPE_BYTES..MAX_ENVELOPE_BYTES) {
             wrapped.fill(0)
-            throw SecurityBootstrapException("database_key_envelope_invalid")
+            throw SecurityBootstrapException("wrapped_secret_envelope_invalid")
         }
         return try {
-            unwrap(wrapped).also { raw ->
-                if (raw.size != DATABASE_KEY_BYTES) {
-                    raw.fill(0)
-                    throw SecurityBootstrapException("database_key_length_invalid")
-                }
-            }
+            unwrap(wrapped)
         } finally {
             wrapped.fill(0)
         }
     }
 
-    private fun wrap(rawKey: ByteArray): ByteArray {
+    private fun wrap(plaintext: ByteArray): ByteArray {
         val cipher = Cipher.getInstance(KEY_TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateWrappingKey())
-        val ciphertext = cipher.doFinal(rawKey)
+        val ciphertext = cipher.doFinal(plaintext)
         val iv = cipher.iv
         if (iv.size !in MIN_GCM_IV_BYTES..MAX_GCM_IV_BYTES) {
             ciphertext.fill(0)
@@ -132,17 +183,16 @@ object SecureRuntimeFactory {
 
     private fun unwrap(envelope: ByteArray): ByteArray {
         if (envelope.size < MIN_ENVELOPE_BYTES || envelope[0] != ENVELOPE_VERSION) {
-            throw SecurityBootstrapException("database_key_envelope_invalid")
+            throw SecurityBootstrapException("wrapped_secret_envelope_invalid")
         }
         val ivSize = envelope[1].toInt() and 0xff
         if (ivSize !in MIN_GCM_IV_BYTES..MAX_GCM_IV_BYTES || envelope.size <= 2 + ivSize) {
-            throw SecurityBootstrapException("database_key_envelope_invalid")
+            throw SecurityBootstrapException("wrapped_secret_envelope_invalid")
         }
         val iv = envelope.copyOfRange(2, 2 + ivSize)
         val ciphertext = envelope.copyOfRange(2 + ivSize, envelope.size)
         return try {
-            val keyStore = androidKeyStore()
-            val wrappingKey = keyStore.getKey(WRAP_ALIAS, null) as? SecretKey
+            val wrappingKey = androidKeyStore().getKey(WRAP_ALIAS, null) as? SecretKey
                 ?: throw SecurityBootstrapException("keystore_key_missing")
             Cipher.getInstance(KEY_TRANSFORMATION).run {
                 init(Cipher.DECRYPT_MODE, wrappingKey, GCMParameterSpec(GCM_TAG_BITS, iv))
@@ -151,7 +201,7 @@ object SecureRuntimeFactory {
         } catch (failure: SecurityBootstrapException) {
             throw failure
         } catch (failure: Exception) {
-            throw SecurityBootstrapException("database_key_unwrap_failed", failure)
+            throw SecurityBootstrapException("wrapped_secret_unwrap_failed", failure)
         } finally {
             iv.fill(0)
             ciphertext.fill(0)
@@ -182,6 +232,17 @@ object SecureRuntimeFactory {
         load(null)
     }
 
+    private fun secureFile(filesRoot: File, relativePath: String): File {
+        val file = File(filesRoot, relativePath).canonicalFile
+        ensureInsideFilesDir(file, filesRoot)
+        file.parentFile?.let { parent ->
+            if (!parent.exists() && !parent.mkdirs()) {
+                throw SecurityBootstrapException("secure_storage_unavailable")
+            }
+        }
+        return file
+    }
+
     private fun writeAtomically(target: File, bytes: ByteArray) {
         val parent = target.parentFile
             ?: throw SecurityBootstrapException("secure_storage_unavailable")
@@ -207,7 +268,7 @@ object SecureRuntimeFactory {
             }
         } catch (failure: Exception) {
             temporary.delete()
-            throw SecurityBootstrapException("database_key_persist_failed", failure)
+            throw SecurityBootstrapException("secure_storage_write_failed", failure)
         }
     }
 
@@ -228,13 +289,15 @@ object SecureRuntimeFactory {
 
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val WRAP_ALIAS = "mukei.database.wrap.v1"
-    private const val DATABASE_KEY_FILE = "mukei/secrets/db_key.enc"
+    private const val SECRETS_DIRECTORY = "mukei/secrets"
+    private const val DATABASE_KEY_FILE = "$SECRETS_DIRECTORY/db_key.enc"
     private const val DATABASE_KEY_BYTES = 32
+    private const val MAX_PROVIDER_KEY_BYTES = 16 * 1024
     private const val KEY_TRANSFORMATION = "AES/GCM/NoPadding"
     private const val GCM_TAG_BITS = 128
     private const val MIN_GCM_IV_BYTES = 12
     private const val MAX_GCM_IV_BYTES = 32
     private const val ENVELOPE_VERSION: Byte = 1
     private const val MIN_ENVELOPE_BYTES = 3
-    private const val MAX_ENVELOPE_BYTES = 512
+    private const val MAX_ENVELOPE_BYTES = MAX_PROVIDER_KEY_BYTES + 128
 }
