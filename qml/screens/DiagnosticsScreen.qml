@@ -14,6 +14,7 @@ Page {
 
     readonly property var diagnosticRows: [
         { label: qsTr("Runtime"), value: DiagnosticsStore.snapshot.runtime_phase || LifecycleStore.state },
+        { label: qsTr("Last startup stage"), value: LifecycleStore.previousState || LifecycleStore.state },
         { label: qsTr("Ready"), value: DiagnosticsStore.snapshot.ready === true ? qsTr("Yes") : qsTr("No") },
         { label: qsTr("Active operations"), value: String(OperationStore.activeCount) },
         { label: qsTr("Conversations"), value: String(ConversationStore.count) },
@@ -132,7 +133,7 @@ Page {
                 }
                 PrimaryButton {
                     text: DiagnosticsStore.exporting ? qsTr("Exporting…") : qsTr("Create safe report")
-                    enabled: !DiagnosticsStore.exporting && LifecycleStore.interactive
+                    enabled: !DiagnosticsStore.exporting
                     onClicked: IntentDispatcher.dispatch({ type: "diagnostics.export" })
                 }
                 Item { Layout.fillWidth: true }

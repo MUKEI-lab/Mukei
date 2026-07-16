@@ -24,7 +24,7 @@ QtObject {
             navigationRejected(route, "unknown_route")
             return false
         }
-        if (lifecycleLocked && ["boot", "unlock", "welcome", "security", "compatibility"].indexOf(route) < 0) {
+        if (lifecycleLocked && ["boot", "unlock", "welcome", "security", "diagnostics", "compatibility"].indexOf(route) < 0) {
             navigationRejected(route, "lifecycle_locked")
             return false
         }

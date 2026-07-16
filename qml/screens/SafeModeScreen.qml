@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import "../architecture"
+import "../stores"
 import "../theme"
 import "../components"
 
@@ -40,13 +42,28 @@ What now?")
         PrimaryButton {
             Layout.fillWidth: true
             text: qsTr("Continue Anyway")
+            onClicked: {
+                ErrorStore.dismiss()
+                LifecycleStore.setLocalState("degraded", qsTr("Mukei is open in limited mode because native startup did not finish."))
+                NavigationStore.syncWithLifecycle(LifecycleStore.state)
+            }
         }
         DestructiveButton {
             Layout.fillWidth: true
             text: qsTr("Reset All Data")
+            onClicked: ErrorStore.push({
+                code: "ERR_RESET_REQUIRES_REINSTALL",
+                severity: "error",
+                recoverable: true,
+                user_message: qsTr("Automatic reset is not available in this build. Uninstall Mukei, then install the corrected APK.")
+            }, "ERR_RESET_REQUIRES_REINSTALL")
         }
         GhostButton {
             text: qsTr("View Crash Log")
+            onClicked: {
+                ErrorStore.dismiss()
+                NavigationStore.navigate("diagnostics", ({ from: "safe_mode" }), false)
+            }
         }
         Item {
             Layout.fillHeight: true
