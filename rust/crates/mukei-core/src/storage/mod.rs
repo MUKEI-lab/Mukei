@@ -3,6 +3,8 @@
 //! Every asynchronous database call is routed through the pooled blocking
 //! boundary. SQLCipher keys are supplied only by the Android secure bootstrap.
 
+pub mod file_policy;
+
 #[cfg(feature = "rusqlite")]
 pub mod audit_log;
 #[cfg(feature = "rusqlite")]
@@ -25,6 +27,11 @@ pub mod saf;
 pub mod settings;
 #[cfg(feature = "rusqlite")]
 pub mod ui_session;
+
+pub use file_policy::{
+    admit_file_name, AllowedFileName, FileAdmissionError, FileAdmissionRule,
+    ALLOWED_EXACT_NAMES, ALLOWED_EXTENSIONS, FILE_POLICY_VERSION, MAX_FILENAME_BYTES,
+};
 
 #[cfg(feature = "rusqlite")]
 pub use audit_log::{AuditChainStatus, AuditEntry, AuditLogReader, AuditLogWriter};
