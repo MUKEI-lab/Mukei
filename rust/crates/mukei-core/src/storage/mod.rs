@@ -4,6 +4,7 @@
 //! boundary. SQLCipher keys are supplied only by the Android secure bootstrap.
 
 pub mod file_policy;
+pub mod universal;
 
 #[cfg(feature = "rusqlite")]
 pub mod audit_log;
@@ -31,6 +32,12 @@ pub mod ui_session;
 pub use file_policy::{
     admit_file_name, AllowedFileName, FileAdmissionError, FileAdmissionRule,
     ALLOWED_EXACT_NAMES, ALLOWED_EXTENSIONS, FILE_POLICY_VERSION, MAX_FILENAME_BYTES,
+};
+pub use universal::{
+    ChatId, DuplicatePolicy, FileVersionId, ImportTarget, ImportTransactionId,
+    PlannedDirectory, StorageDomainError, StorageNodeId, StorageNodeKind, StorageNodeState,
+    StorageObjectId, StorageScopeId, StorageScopeType, SystemDirectoryRole,
+    WorkspaceAccessContext, WorkspaceId, WorkspaceLayout, UNIVERSAL_STORAGE_NAME,
 };
 
 #[cfg(feature = "rusqlite")]
