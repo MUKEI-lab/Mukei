@@ -30,6 +30,8 @@ pub mod saf;
 #[cfg(feature = "rusqlite")]
 pub mod settings;
 #[cfg(feature = "rusqlite")]
+pub mod trash_repository;
+#[cfg(feature = "rusqlite")]
 pub mod ui_session;
 #[cfg(feature = "rusqlite")]
 pub mod universal_repository;
@@ -87,6 +89,8 @@ pub use saas::{
 pub use saf::{DocumentProjection, SafCleanupPlan, SafRegistry, SafTokenRow};
 #[cfg(feature = "rusqlite")]
 pub use settings::{PreferenceRecord, PreferenceValue, SecretRefRecord, SettingsRepository};
+#[cfg(feature = "rusqlite")]
+pub use trash_repository::{RestoreReceipt, TrashReceipt, TrashRepository};
 #[cfg(feature = "rusqlite")]
 pub use ui_session::{
     UiDraftRecord, UiSessionRecord, UiSessionRepository, DEFAULT_UI_PROFILE,
