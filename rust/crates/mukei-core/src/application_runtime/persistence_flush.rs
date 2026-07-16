@@ -1,5 +1,19 @@
 impl FeatureState {
     async fn flush_projections(&self) -> Result<(), MukeiError> {
+        // Serialize with snapshot enqueueing, wait until every previously queued
+        // write has completed, then persist one authoritative final snapshot.
+        let _enqueue = self
+            .persistence_enqueue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (barrier_sender, barrier_receiver) = tokio::sync::oneshot::channel();
+        self.persistence_sender
+            .send(PersistenceCommand::Barrier(barrier_sender))
+            .map_err(|_| MukeiError::Internal("projection writer unavailable".into()))?;
+        barrier_receiver
+            .await
+            .map_err(|_| MukeiError::Internal("projection writer stopped before flush".into()))?;
+
         let store = self
             .projection_store
             .read()
@@ -40,10 +54,34 @@ impl FeatureState {
             })
             .collect::<Vec<_>>();
 
-        store.save("operations", serde_json::to_value(operations).map_err(|error| MukeiError::Internal(error.to_string()))?).await?;
-        store.save("models", serde_json::to_value(models).map_err(|error| MukeiError::Internal(error.to_string()))?).await?;
-        store.save("documents", serde_json::to_value(documents).map_err(|error| MukeiError::Internal(error.to_string()))?).await?;
-        store.save("conversations", serde_json::to_value(conversations).map_err(|error| MukeiError::Internal(error.to_string()))?).await?;
+        store
+            .save(
+                "operations",
+                serde_json::to_value(operations)
+                    .map_err(|error| MukeiError::Internal(error.to_string()))?,
+            )
+            .await?;
+        store
+            .save(
+                "models",
+                serde_json::to_value(models)
+                    .map_err(|error| MukeiError::Internal(error.to_string()))?,
+            )
+            .await?;
+        store
+            .save(
+                "documents",
+                serde_json::to_value(documents)
+                    .map_err(|error| MukeiError::Internal(error.to_string()))?,
+            )
+            .await?;
+        store
+            .save(
+                "conversations",
+                serde_json::to_value(conversations)
+                    .map_err(|error| MukeiError::Internal(error.to_string()))?,
+            )
+            .await?;
         Ok(())
     }
 }
