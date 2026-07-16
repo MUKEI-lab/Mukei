@@ -31,13 +31,16 @@ TestCase {
         NavigationStore.history = []
     }
 
+    function activate(control) {
+        verify(control !== null, "Control must be discoverable")
+        verify(control.enabled, "Control must be enabled")
+        control.clicked()
+    }
+
     function test_safe_mode_continue_opens_limited_chat() {
         var page = createTemporaryObject(safeModeComponent, testCase)
         verify(page !== null)
-        var button = findChild(page, "safeModeContinueButton")
-        verify(button !== null, "Continue button must be discoverable")
-
-        mouseClick(button)
+        activate(findChild(page, "safeModeContinueButton"))
 
         tryCompare(LifecycleStore, "state", "degraded")
         compare(NavigationStore.lifecycleLocked, false)
@@ -48,10 +51,7 @@ TestCase {
     function test_safe_mode_diagnostics_route_is_available_while_locked() {
         var page = createTemporaryObject(safeModeComponent, testCase)
         verify(page !== null)
-        var button = findChild(page, "safeModeDiagnosticsButton")
-        verify(button !== null, "Diagnostics button must be discoverable")
-
-        mouseClick(button)
+        activate(findChild(page, "safeModeDiagnosticsButton"))
 
         compare(NavigationStore.lifecycleLocked, true)
         compare(NavigationStore.currentRoute, "diagnostics")
@@ -61,10 +61,7 @@ TestCase {
     function test_safe_mode_reset_never_silently_ignores_the_tap() {
         var page = createTemporaryObject(safeModeComponent, testCase)
         verify(page !== null)
-        var button = findChild(page, "safeModeResetButton")
-        verify(button !== null, "Reset button must be discoverable")
-
-        mouseClick(button)
+        activate(findChild(page, "safeModeResetButton"))
 
         verify(ErrorStore.hasError)
         compare(ErrorStore.currentError.code, "ERR_RESET_REQUIRES_REINSTALL")
