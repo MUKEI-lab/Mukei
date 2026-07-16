@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[2]
 APP = ROOT / "qml/architecture/AppCoordinator.qml"
 LIFE = ROOT / "qml/stores/LifecycleStore.qml"
 RUST = ROOT / "rust/crates/mukei-bridge/src/lib.rs"
+PROTOCOL = ROOT / "rust/crates/mukei-bridge/src/protocol.rs"
 
 
 def replace_once(text, old, new, marker):
@@ -52,6 +53,44 @@ def patch_app(text):
         if (runtimeSource && runtimeSource.autoInitialize === true) {
 ''', 'startupWatchdog.restart()')
     text = replace_once(text,
+'''        LifecycleStore.setLocalState("bootstrapping", "")
+        NavigationStore.syncWithLifecycle(LifecycleStore.state)
+        startupWatchdog.restart()
+        if (runtimeSource && runtimeSource.autoInitialize === true) {
+            IntentDispatcher.dispatch({
+                type: "app.initialize",
+                configPath: runtimeSource.configPath
+            })
+        } else {
+''',
+'''        LifecycleStore.setLocalState("bootstrapping", "")
+        NavigationStore.syncWithLifecycle(LifecycleStore.state)
+        startupWatchdog.restart()
+        if (runtimeSource && runtimeSource.autoInitialize === true) {
+            LifecycleStore.setLocalState(
+                        "initialize_submitted",
+                        qsTr("The production frontend submitted the secure startup command."))
+            var accepted = IntentDispatcher.dispatch({
+                type: "app.initialize",
+                configPath: runtimeSource.configPath
+            })
+            if (accepted && !LifecycleStore.ready && !LifecycleStore.quarantined) {
+                LifecycleStore.setLocalState(
+                            "initialize_acknowledged",
+                            qsTr("The local runtime accepted the startup command and is scheduling native initialization."))
+            } else if (!accepted) {
+                startupWatchdog.stop()
+                var detail = qsTr("The local runtime rejected the startup command before native initialization began.")
+                LifecycleStore.setLocalState("fatal_error", detail)
+                NavigationStore.syncWithLifecycle(LifecycleStore.state)
+                ErrorStore.push({ code: "ERR_STARTUP_COMMAND_REJECTED", severity: "fatal",
+                                  recoverable: true, user_message: detail,
+                                  suggested_action: "collect_diagnostics" },
+                                "ERR_STARTUP_COMMAND_REJECTED")
+            }
+        } else {
+''', '"initialize_acknowledged"')
+    text = replace_once(text,
 '''        ErrorStore.applyEvent(event)
 
         if ((event.command_type === "recovery.resume" || event.command_type === "recovery.regenerate")
@@ -92,20 +131,24 @@ def patch_life(text):
 ''',
 '''        switch (value) {
         case "bootstrapping": return qsTr("Starting Mukei")
+        case "initialize_submitted": return qsTr("Submitting secure startup")
+        case "initialize_acknowledged": return qsTr("Starting native runtime")
         case "booting": return qsTr("Starting local runtime")
         case "loading_config": return qsTr("Loading private configuration")
         case "needs_database_key": return qsTr("Preparing secure storage")
-''', 'Loading private configuration')
+''', 'Submitting secure startup')
     text = replace_once(text,
 '''        switch (value) {
         case "needs_database_key": return qsTr("Waiting for the native secure-key provider. No private data is opened yet.")
 ''',
 '''        switch (value) {
         case "bootstrapping": return qsTr("Connecting the production frontend to the local runtime.")
+        case "initialize_submitted": return qsTr("The frontend has formed a validated protocol command for local initialization.")
+        case "initialize_acknowledged": return qsTr("The bridge accepted the command. The next expected signal is the native boot stage.")
         case "booting": return qsTr("The native runtime is starting on this device.")
         case "loading_config": return qsTr("Mukei is validating app-private paths and local configuration.")
         case "needs_database_key": return qsTr("Waiting for the native secure-key provider. No private data is opened yet.")
-''', 'validating app-private paths')
+''', 'The bridge accepted the command')
     return text
 
 
@@ -175,8 +218,56 @@ async fn persist_provider_secret_refs(
     return text
 
 
+def patch_protocol(text):
+    text = replace_once(text,
+'''/// Parse, structurally validate, policy-preflight, replay-check, and dispatch one command.
+pub(crate) fn submit_command_json(
+''',
+'''fn dispatch_on_owning_qt_thread(command_type: &CommandType) -> bool {
+    matches!(command_type, CommandType::AppInitialize)
+}
+
+/// Parse, structurally validate, policy-preflight, replay-check, and dispatch one command.
+pub(crate) fn submit_command_json(
+''', 'dispatch_on_owning_qt_thread')
+    text = replace_once(text,
+'''    // Return the acknowledgement from the acceptance boundary before execution can emit a
+    // completion event. Dispatch remains on the existing QObjects/runtime owner and adapts into
+    // the existing backend methods; no second runtime or domain implementation is introduced.
+    let qt = agent.as_ref().get_ref().qt_thread();
+''',
+'''    // Startup is submitted by QML on the owning Qt thread. A second queued Qt hop can be
+    // indefinitely delayed on some Android event-loop integrations, leaving the frontend at the
+    // acknowledgement boundary without ever entering MukeiAgent::initialize. Dispatch startup
+    // directly; initialize itself only schedules bounded native work and returns immediately.
+    if dispatch_on_owning_qt_thread(&command.command_type) {
+        dispatch_validated_command(agent, command, context);
+        return acknowledgement_json(acknowledgement);
+    }
+
+    // Other commands preserve the queued dispatch boundary so immediate acknowledgements remain
+    // independent from operation completion events.
+    let qt = agent.as_ref().get_ref().qt_thread();
+''', 'A second queued Qt hop can be')
+    text = replace_once(text,
+'''    #[test]
+    fn sol02_idempotent_replay_rebinds_transport_ids() {
+''',
+'''    #[test]
+    fn app_initialize_dispatches_without_a_second_qt_queue() {
+        assert!(dispatch_on_owning_qt_thread(&CommandType::AppInitialize));
+        assert!(!dispatch_on_owning_qt_thread(&CommandType::ChatSendMessage));
+    }
+
+    #[test]
+    fn sol02_idempotent_replay_rebinds_transport_ids() {
+''', 'app_initialize_dispatches_without_a_second_qt_queue')
+    return text
+
+
 APP.write_text(patch_app(APP.read_text()), encoding="utf-8")
 LIFE.write_text(patch_life(LIFE.read_text()), encoding="utf-8")
 RUST.write_text(patch_rust(RUST.read_text()), encoding="utf-8")
+PROTOCOL.write_text(patch_protocol(PROTOCOL.read_text()), encoding="utf-8")
 install_stabilization_batch()
 print("startup bootstrap source finalized")
