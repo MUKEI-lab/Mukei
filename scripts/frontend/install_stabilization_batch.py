@@ -6,8 +6,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 REQUIRED_FILES = [
+    "qml/tests/FakeProtocolAgent.qml",
     "qml/tests/tst_InteractionContracts.qml",
     "qml/tests/tst_StartupLifecycle.qml",
+    "qml/tests/tst_StartupPipeline.qml",
     "docs/FRONTEND_STABILIZATION_STRATEGY.md",
     "reports/frontend/INTERACTION_MATRIX.md",
 ]
