@@ -48,16 +48,13 @@ impl MukeiRuntime {
         let expected_sha = descriptor.expected_sha256.to_owned();
         let operation_id_for_task = operation_id.clone();
         self.async_runtime.handle().spawn(async move {
-            features.models.write().unwrap_or_else(|p| p.into_inner()).insert(
-                model_id.clone(),
-                ModelProjection {
-                    model_id: model_id.clone(),
-                    status: ModelStatus::Verifying,
-                    local_path: Some(path.to_string_lossy().into_owned()),
-                    progress: None,
-                    error_code: None,
-                },
-            );
+            features.insert_model(ModelProjection {
+                model_id: model_id.clone(),
+                status: ModelStatus::Verifying,
+                local_path: Some(path.to_string_lossy().into_owned()),
+                progress: None,
+                error_code: None,
+            });
             let generation = activation.begin_verification(&model_id, &expected_sha);
             let verify_path = path.clone();
             let verify_sha = expected_sha.clone();
@@ -85,6 +82,10 @@ impl MukeiRuntime {
                         &expected_sha,
                         crate::engine::ActivationFailureCategory::VerificationMismatch,
                     );
+                    features.update_model(&model_id, |model| {
+                        model.status = ModelStatus::Failed;
+                        model.error_code = Some(error.error_code().into());
+                    });
                     features.update_operation(
                         &operation_id_for_task,
                         OperationStatus::Failed,
@@ -102,6 +103,10 @@ impl MukeiRuntime {
                     return;
                 }
                 Err(error) => {
+                    features.update_model(&model_id, |model| {
+                        model.status = ModelStatus::Failed;
+                        model.error_code = Some("verification_join_failed".into());
+                    });
                     features.update_operation(
                         &operation_id_for_task,
                         OperationStatus::Failed,
@@ -152,14 +157,15 @@ impl MukeiRuntime {
                 );
                 return;
             }
-            if let Some(model) = features.models.write().unwrap_or_else(|p| p.into_inner()).get_mut(&model_id) {
+            features.update_model(&model_id, |model| {
                 model.status = ModelStatus::Activating;
-            }
+            });
             match activation.activate_verified(factory.as_ref()).await {
                 ActivationCommit::Ready => {
-                    if let Some(model) = features.models.write().unwrap_or_else(|p| p.into_inner()).get_mut(&model_id) {
+                    features.update_model(&model_id, |model| {
                         model.status = ModelStatus::Ready;
-                    }
+                        model.error_code = None;
+                    });
                     features.update_operation(
                         &operation_id_for_task,
                         OperationStatus::Completed,
@@ -183,10 +189,10 @@ impl MukeiRuntime {
                     );
                 }
                 other => {
-                    if let Some(model) = features.models.write().unwrap_or_else(|p| p.into_inner()).get_mut(&model_id) {
+                    features.update_model(&model_id, |model| {
                         model.status = ModelStatus::Failed;
                         model.error_code = Some(format!("activation_{other:?}"));
-                    }
+                    });
                     features.update_operation(
                         &operation_id_for_task,
                         OperationStatus::Failed,
@@ -206,5 +212,4 @@ impl MukeiRuntime {
         });
         acknowledgement
     }
-
 }
