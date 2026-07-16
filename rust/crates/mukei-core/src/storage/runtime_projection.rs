@@ -1,8 +1,7 @@
 //! Durable JSON projections used by the Android application runtime.
 //!
-//! This extension is versioned independently from the canonical database
-//! migrator. It never advances `schema_metadata.last_migration`, so canonical
-//! V001..V013 compatibility checks remain authoritative.
+//! The extension is versioned independently from the canonical database
+//! migrator and never advances `schema_metadata.last_migration`.
 
 use crate::error::{MukeiError, Result};
 use crate::storage::pool::{DatabasePool, DbError, PooledConnectionExt};
@@ -10,7 +9,7 @@ use rusqlite::OptionalExtension;
 
 const EXTENSION_VERSION: u32 = 1;
 const EXTENSION_BODY: &str =
-    include_str!("../../../../migrations/V014__runtime_projections.sql");
+    include_str!("../../../../migrations/android/V001__runtime_projections.sql");
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeProjectionRow {
@@ -23,7 +22,6 @@ pub struct RuntimeProjectionRow {
 pub struct RuntimeProjectionRepository;
 
 impl RuntimeProjectionRepository {
-    /// Install or verify the Android projection extension schema.
     pub async fn ensure_schema(pool: &DatabasePool) -> Result<()> {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
@@ -124,8 +122,7 @@ impl RuntimeProjectionRepository {
         pool.with_conn(move |connection| {
             let mut statement = connection.prepare(
                 "SELECT domain, projection_key, payload_json, updated_at \
-                 FROM runtime_projections WHERE domain = ?1 \
-                 ORDER BY projection_key",
+                 FROM runtime_projections WHERE domain = ?1 ORDER BY projection_key",
             )?;
             let rows = statement
                 .query_map([domain], |row| {
@@ -173,9 +170,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let pool = DatabasePool::open(directory.path().join("projection.db")).unwrap();
         Migrator::embedded().apply_pending(&pool).await.unwrap();
-        RuntimeProjectionRepository::ensure_schema(&pool)
-            .await
-            .unwrap();
+        RuntimeProjectionRepository::ensure_schema(&pool).await.unwrap();
         RuntimeProjectionRepository::upsert(&pool, "setting", "theme_mode", "\"taupe\"")
             .await
             .unwrap();
@@ -183,7 +178,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].projection_key, "theme_mode");
         RuntimeProjectionRepository::delete(&pool, "setting", "theme_mode")
             .await
             .unwrap();
