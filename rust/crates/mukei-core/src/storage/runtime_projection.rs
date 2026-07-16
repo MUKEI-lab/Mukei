@@ -3,8 +3,14 @@
 //! Domain objects remain typed inside `application_runtime`; this repository
 //! only persists their serialized authoritative projections in SQLCipher.
 
-use crate::error::Result;
+use crate::error::{MukeiError, Result};
 use crate::storage::pool::{DatabasePool, DbError, PooledConnectionExt};
+use rusqlite::OptionalExtension;
+
+const MIGRATION_VERSION: u32 = 14;
+const MIGRATION_NAME: &str = "V014__runtime_projections";
+const MIGRATION_BODY: &str =
+    include_str!("../../../../migrations/V014__runtime_projections.sql");
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeProjectionRow {
@@ -17,6 +23,56 @@ pub struct RuntimeProjectionRow {
 pub struct RuntimeProjectionRepository;
 
 impl RuntimeProjectionRepository {
+    /// Append the projection schema to the encrypted migration ledger.
+    ///
+    /// This is kept beside the repository so mobile builds can add the Android
+    /// projection table without depending on a source-tree migration directory.
+    pub async fn ensure_schema(pool: &DatabasePool) -> Result<()> {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(MIGRATION_BODY.as_bytes());
+        let bundled = crate::diagnostics::crash_logger::hex_helper(&hasher.finalize());
+        pool.with_conn(move |connection| {
+            let tx = connection.transaction()?;
+            let applied: Option<String> = tx
+                .query_row(
+                    "SELECT checksum FROM migrations_applied WHERE version = ?1",
+                    [MIGRATION_VERSION as i64],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .flatten();
+            if let Some(applied) = applied {
+                if applied != bundled {
+                    return Err(DbError::Domain(MukeiError::MigrationChecksumMismatch {
+                        version: MIGRATION_VERSION,
+                        applied,
+                        bundled,
+                    }));
+                }
+                tx.commit()?;
+                return Ok::<_, DbError>(());
+            }
+
+            tx.execute_batch(MIGRATION_BODY).map_err(|error| {
+                DbError::Domain(MukeiError::MigrationFailed(
+                    MIGRATION_VERSION,
+                    error.to_string(),
+                ))
+            })?;
+            tx.execute(
+                "INSERT INTO migrations_applied \
+                    (version, name, applied_at, checksum, execution_ms, success) \
+                 VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?3, 0, 1)",
+                rusqlite::params![MIGRATION_VERSION as i64, MIGRATION_NAME, bundled],
+            )?;
+            tx.commit()?;
+            Ok::<_, DbError>(())
+        })
+        .await?;
+        Ok(())
+    }
+
     pub async fn upsert(
         pool: &DatabasePool,
         domain: impl Into<String>,
@@ -95,14 +151,15 @@ fn validate_identity(domain: &str, key: &str) -> Result<()> {
         !value.trim().is_empty()
             && value.len() <= 256
             && value == value.trim()
-            && value
-                .chars()
-                .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | ':' | '/'))
+            && value.chars().all(|character| {
+                character.is_ascii_alphanumeric()
+                    || matches!(character, '-' | '_' | '.' | ':' | '/')
+            })
     };
     if valid(domain) && valid(key) {
         Ok(())
     } else {
-        Err(crate::error::MukeiError::ConfigInvalid {
+        Err(MukeiError::ConfigInvalid {
             field: "runtime_projection_identity".into(),
             reason: "domain and key must be bounded stable identifiers".into(),
         })
@@ -119,6 +176,9 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let pool = DatabasePool::open(directory.path().join("projection.db")).unwrap();
         Migrator::embedded().apply_pending(&pool).await.unwrap();
+        RuntimeProjectionRepository::ensure_schema(&pool)
+            .await
+            .unwrap();
         RuntimeProjectionRepository::upsert(&pool, "setting", "theme_mode", "\"taupe\"")
             .await
             .unwrap();
