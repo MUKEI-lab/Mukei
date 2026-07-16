@@ -8,6 +8,7 @@ import "../components"
 
 Page {
     id: root
+    objectName: "safeModeScreen"
 
     background: Rectangle {
         color: Theme.p.background
@@ -26,8 +27,7 @@ Page {
         }
         Text {
             Layout.fillWidth: true
-            text: qsTr("We've had a few crashes.
-What now?")
+            text: qsTr("We've had a few crashes.\nWhat now?")
             color: Theme.p.inkPrimary
             wrapMode: Text.Wrap
             Component.onCompleted: Type.apply(this, Type.display)
@@ -40,6 +40,7 @@ What now?")
             Component.onCompleted: Type.apply(this, Type.bodyUI)
         }
         PrimaryButton {
+            objectName: "safeModeContinueButton"
             Layout.fillWidth: true
             text: qsTr("Continue Anyway")
             onClicked: {
@@ -49,6 +50,7 @@ What now?")
             }
         }
         DestructiveButton {
+            objectName: "safeModeResetButton"
             Layout.fillWidth: true
             text: qsTr("Reset All Data")
             onClicked: ErrorStore.push({
@@ -59,6 +61,7 @@ What now?")
             }, "ERR_RESET_REQUIRES_REINSTALL")
         }
         GhostButton {
+            objectName: "safeModeDiagnosticsButton"
             text: qsTr("View Crash Log")
             onClicked: {
                 ErrorStore.dismiss()
