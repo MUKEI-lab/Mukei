@@ -4,7 +4,7 @@ import java.io.Closeable
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Narrow Kotlin boundary for the Rust runtime.
+ * Narrow Kotlin boundary for the process-scoped Rust runtime.
  *
  * Feature modules depend on this interface and never call [NativeBindings]
  * directly. All returned payloads are bounded Protocol V2 UTF-8 JSON bytes.
@@ -24,6 +24,9 @@ interface MukeiNativeGateway : Closeable {
 
     /** Requests one authoritative Protocol V2 snapshot. */
     fun requestSnapshot(domain: String): ByteArray
+
+    /** Gracefully stops native work while keeping the handle available for final reads. */
+    fun shutdown(): ByteArray
 }
 
 class RustNativeGateway private constructor(
@@ -64,9 +67,18 @@ class RustNativeGateway private constructor(
         return NativeBindings.requestSnapshot(nativeHandle, domain)
     }
 
+    override fun shutdown(): ByteArray {
+        checkOpen()
+        return NativeBindings.shutdownRuntime(nativeHandle)
+    }
+
     override fun close() {
         if (closed.compareAndSet(false, true)) {
-            NativeBindings.destroyRuntime(nativeHandle)
+            try {
+                NativeBindings.shutdownRuntime(nativeHandle)
+            } finally {
+                NativeBindings.destroyRuntime(nativeHandle)
+            }
         }
     }
 
@@ -90,6 +102,8 @@ internal object NativeBindings {
     }
 
     external fun createRuntime(configJson: ByteArray): Long
+
+    external fun shutdownRuntime(handle: Long): ByteArray
 
     external fun destroyRuntime(handle: Long)
 

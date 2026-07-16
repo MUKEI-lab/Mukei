@@ -39,7 +39,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.4.1"
-      - name: Check Rust JNI scaffold
+      - name: Test platform-neutral Rust runtime
+        working-directory: rust
+        run: cargo test -p mukei-core --lib
+      - name: Test JNI runtime registry
+        working-directory: rust
+        run: cargo test -p mukei-android-jni --lib
+      - name: Check Android JNI library
         working-directory: rust
         run: cargo check -p mukei-android-jni
       - name: Compile Kotlin scaffold

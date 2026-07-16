@@ -1,12 +1,13 @@
 //! Platform-neutral application runtime owned by the native process.
 //!
-//! The runtime is the only application-level entry point used by transport
-//! crates. It owns lifecycle state, command validation, replay protection,
-//! a bounded event queue, snapshots, and deterministic shutdown.
+//! Transport adapters submit typed Protocol V2 commands, drain bounded event
+//! batches, request authoritative snapshots, and trigger deterministic shutdown.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TryRecvError};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::{
+    sync_channel, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError,
+};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
@@ -15,16 +16,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
 use tokio::runtime::{Builder, Runtime};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::ui_protocol::{
-    validate_command, CommandAcknowledgementV2, CommandEnvelopeV2, CommandType, EventEnvelopeV2,
-    ProtocolCapabilitySnapshot, RejectionReason, ValidatedCommand, ValidatedCommandPayload,
+    validate_command, AcknowledgementStatus, CommandAcknowledgementV2, CommandEnvelopeV2,
+    CommandType, EventEnvelopeV2, ProtocolCapabilitySnapshot, RejectionReason, ValidatedCommand,
+    ValidatedCommandPayload,
 };
 
 const DEFAULT_EVENT_CAPACITY: usize = 512;
 const MAX_EVENT_CAPACITY: usize = 4096;
 const MAX_DRAIN_BATCH: usize = 256;
+const CAP_EVENT_GAP_REPORTING: &str = "event_gap_reporting";
 
 /// Configuration required to allocate one native runtime.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,7 +41,7 @@ pub struct RuntimeConfig {
     /// Maximum blocking threads used by storage and model work.
     #[serde(default = "default_blocking_threads")]
     pub max_blocking_threads: usize,
-    /// Capacity of the bounded UI event queue.
+    /// Capacity of the bounded application event queue.
     #[serde(default = "default_event_capacity")]
     pub event_capacity: usize,
 }
@@ -84,7 +88,7 @@ pub enum RuntimeState {
     Created,
     /// Initialization command is being processed.
     Initializing,
-    /// Runtime can accept supported commands.
+    /// Runtime can accept implemented domain commands.
     Ready,
     /// Shutdown has started.
     Stopping,
@@ -100,11 +104,11 @@ pub enum RuntimeState {
 pub enum RuntimeSnapshotDomain {
     /// Runtime lifecycle and session metadata.
     Application,
-    /// Current in-memory Android-shell settings projection.
+    /// Current product settings projection.
     Settings,
     /// Protocol capability contract.
     Protocol,
-    /// Operation/replay registry summary.
+    /// Operation and replay registry summary.
     Operations,
 }
 
@@ -136,6 +140,15 @@ pub struct RuntimeSnapshotEnvelope {
     pub payload: Value,
 }
 
+/// One bounded event-drain result.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EventDrain {
+    /// Ordered events returned to the transport.
+    pub events: Vec<EventEnvelopeV2>,
+    /// Whether more queued or gap-report events remain.
+    pub has_more: bool,
+}
+
 /// Runtime construction and lifecycle failures.
 #[derive(Error, Debug)]
 pub enum RuntimeError {
@@ -163,6 +176,8 @@ struct EventBus {
     sender: SyncSender<EventEnvelopeV2>,
     receiver: Mutex<Receiver<EventEnvelopeV2>>,
     sequences: Mutex<HashMap<String, u64>>,
+    queued: AtomicUsize,
+    dropped: AtomicU64,
 }
 
 impl EventBus {
@@ -172,6 +187,42 @@ impl EventBus {
             sender,
             receiver: Mutex::new(receiver),
             sequences: Mutex::new(HashMap::new()),
+            queued: AtomicUsize::new(0),
+            dropped: AtomicU64::new(0),
+        }
+    }
+
+    fn next_sequence(&self, stream_id: &str) -> u64 {
+        let mut sequences = self
+            .sequences
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let sequence = sequences.entry(stream_id.to_owned()).or_insert(0);
+        *sequence = sequence.saturating_add(1);
+        *sequence
+    }
+
+    fn build_event(
+        &self,
+        stream_id: &str,
+        event_type: &str,
+        payload: Value,
+        command: Option<&CommandEnvelopeV2>,
+        operation_id: Option<String>,
+    ) -> EventEnvelopeV2 {
+        EventEnvelopeV2 {
+            protocol_version: crate::ui_protocol::ProtocolVersion::CURRENT,
+            event_id: Uuid::new_v4().to_string(),
+            stream_id: stream_id.to_owned(),
+            sequence: self.next_sequence(stream_id),
+            event_type: event_type.to_owned(),
+            emitted_at: Utc::now(),
+            correlation_id: command.map(|value| value.correlation_id.clone()),
+            operation_id,
+            request_id: command.map(|value| value.request_id.clone()),
+            command_id: command.map(|value| value.command_id.clone()),
+            command_type: command.map(|value| value.command_type.clone()),
+            payload,
         }
     }
 
@@ -183,66 +234,96 @@ impl EventBus {
         command: Option<&CommandEnvelopeV2>,
         operation_id: Option<String>,
     ) {
-        let sequence = {
-            let mut sequences = self
-                .sequences
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let entry = sequences.entry(stream_id.to_owned()).or_insert(0);
-            *entry += 1;
-            *entry
-        };
-
-        let event = EventEnvelopeV2 {
-            protocol_version: crate::ui_protocol::ProtocolVersion::CURRENT,
-            event_id: Uuid::new_v4().to_string(),
-            stream_id: stream_id.to_owned(),
-            sequence,
-            event_type: event_type.to_owned(),
-            emitted_at: Utc::now(),
-            correlation_id: command.map(|value| value.correlation_id.clone()),
-            operation_id,
-            request_id: command.map(|value| value.request_id.clone()),
-            command_id: command.map(|value| value.command_id.clone()),
-            command_type: command.map(|value| value.command_type.clone()),
-            payload,
-        };
-
-        // A full bounded queue is a backpressure signal. The transport can
-        // recover through snapshots; the runtime must never block domain work.
-        let _ = self.sender.try_send(event);
+        let event = self.build_event(stream_id, event_type, payload, command, operation_id);
+        match self.sender.try_send(event) {
+            Ok(()) => {
+                self.queued.fetch_add(1, Ordering::Release);
+            }
+            Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {
+                self.dropped.fetch_add(1, Ordering::Relaxed);
+            }
+        }
     }
 
-    fn drain(&self, limit: usize, timeout: Duration) -> Vec<EventEnvelopeV2> {
+    fn decrement_queued(&self) {
+        let _ = self.queued.fetch_update(
+            Ordering::AcqRel,
+            Ordering::Acquire,
+            |value| Some(value.saturating_sub(1)),
+        );
+    }
+
+    fn drain(&self, limit: usize, timeout: Duration) -> EventDrain {
         let limit = limit.clamp(1, MAX_DRAIN_BATCH);
-        let receiver = self
-            .receiver
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut events = Vec::with_capacity(limit);
-
-        let first = if timeout.is_zero() {
-            match receiver.try_recv() {
-                Ok(event) => Some(event),
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,
-            }
-        } else {
-            match receiver.recv_timeout(timeout) {
-                Ok(event) => Some(event),
-                Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => None,
-            }
-        };
-
-        if let Some(event) = first {
-            events.push(event);
+        let dropped = self.dropped.swap(0, Ordering::AcqRel);
+        if dropped > 0 {
+            events.push(self.build_event(
+                "application:events",
+                "runtime.event_gap",
+                json!({
+                    "dropped_events": dropped,
+                    "recovery": "request_authoritative_snapshots",
+                }),
+                None,
+                None,
+            ));
         }
-        while events.len() < limit {
-            match receiver.try_recv() {
-                Ok(event) => events.push(event),
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+
+        if events.len() < limit {
+            let receiver = self
+                .receiver
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let first = if timeout.is_zero() {
+                match receiver.try_recv() {
+                    Ok(event) => Some(event),
+                    Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,
+                }
+            } else {
+                match receiver.recv_timeout(timeout) {
+                    Ok(event) => Some(event),
+                    Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => None,
+                }
+            };
+            if let Some(event) = first {
+                self.decrement_queued();
+                events.push(event);
+            }
+            while events.len() < limit {
+                match receiver.try_recv() {
+                    Ok(event) => {
+                        self.decrement_queued();
+                        events.push(event);
+                    }
+                    Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+                }
             }
         }
-        events
+
+        EventDrain {
+            events,
+            has_more: self.queued.load(Ordering::Acquire) > 0
+                || self.dropped.load(Ordering::Acquire) > 0,
+        }
+    }
+}
+
+struct CommandRouter;
+
+impl CommandRouter {
+    fn dispatch(
+        runtime: &MukeiRuntime,
+        command: &ValidatedCommand,
+    ) -> CommandAcknowledgementV2 {
+        match command.command_type {
+            CommandType::AppInitialize => runtime.initialize(command),
+            CommandType::SettingsUpdate => runtime.update_setting(command),
+            _ => CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::CapabilityUnavailable,
+            ),
+        }
     }
 }
 
@@ -252,6 +333,7 @@ pub struct MukeiRuntime {
     config: RuntimeConfig,
     state: RwLock<RuntimeState>,
     async_runtime: Runtime,
+    cancellation: CancellationToken,
     events: Arc<EventBus>,
     settings: RwLock<HashMap<String, Value>>,
     replay: Mutex<HashMap<String, ReplayRecord>>,
@@ -274,6 +356,7 @@ impl MukeiRuntime {
             config,
             state: RwLock::new(RuntimeState::Created),
             async_runtime,
+            cancellation: CancellationToken::new(),
             events,
             settings: RwLock::new(HashMap::new()),
             replay: Mutex::new(HashMap::new()),
@@ -302,9 +385,13 @@ impl MukeiRuntime {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// Protocol capabilities implemented by the current native runtime.
+    /// Protocol capabilities genuinely implemented by this runtime.
     pub fn capabilities(&self) -> ProtocolCapabilitySnapshot {
-        ProtocolCapabilitySnapshot::current()
+        ProtocolCapabilitySnapshot::for_commands(&[
+            CommandType::AppInitialize,
+            CommandType::SettingsUpdate,
+        ])
+        .with_transport(CAP_EVENT_GAP_REPORTING)
     }
 
     /// Validate and submit one command.
@@ -315,24 +402,14 @@ impl MukeiRuntime {
                 RejectionReason::BackendUnavailable,
             );
         }
-
         let validated = match validate_command(envelope.clone()) {
             Ok(value) => value,
             Err(reason) => return CommandAcknowledgementV2::rejected(Some(&envelope), reason),
         };
-
         if let Some(acknowledgement) = self.replay_lookup(&validated) {
             return acknowledgement;
         }
-
-        let acknowledgement = match validated.command_type {
-            CommandType::AppInitialize => self.initialize(&validated),
-            CommandType::SettingsUpdate => self.update_setting(&validated),
-            _ => CommandAcknowledgementV2::rejected(
-                Some(&validated.envelope),
-                RejectionReason::CapabilityUnavailable,
-            ),
-        };
+        let acknowledgement = CommandRouter::dispatch(self, &validated);
         self.remember_replay(&validated, &acknowledgement);
         acknowledgement
     }
@@ -343,6 +420,12 @@ impl MukeiRuntime {
                 .state
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if *state == RuntimeState::Ready {
+                return CommandAcknowledgementV2::rejected(
+                    Some(&command.envelope),
+                    RejectionReason::BusyConflict,
+                );
+            }
             if matches!(*state, RuntimeState::Stopping | RuntimeState::Stopped) {
                 return CommandAcknowledgementV2::rejected(
                     Some(&command.envelope),
@@ -362,7 +445,6 @@ impl MukeiRuntime {
             Some(&command.envelope),
             Some(operation_id.clone()),
         );
-
         *self
             .state
             .write()
@@ -425,22 +507,36 @@ impl MukeiRuntime {
         acknowledgement
     }
 
+    fn fingerprint(command: &ValidatedCommand) -> Option<Vec<u8>> {
+        serde_json::to_vec(&json!({
+            "command_type": command.envelope.command_type,
+            "operation_id": command.envelope.operation_id,
+            "scope": command.envelope.scope,
+            "payload": command.envelope.payload,
+        }))
+        .ok()
+    }
+
     fn replay_lookup(&self, command: &ValidatedCommand) -> Option<CommandAcknowledgementV2> {
         let key = command.envelope.idempotency_key.as_ref()?;
-        let fingerprint = serde_json::to_vec(&command.envelope).ok()?;
+        let fingerprint = Self::fingerprint(command)?;
         let replay = self
             .replay
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         replay.get(key).map(|record| {
-            if record.fingerprint == fingerprint {
-                record.acknowledgement.clone()
-            } else {
-                CommandAcknowledgementV2::rejected(
+            if record.fingerprint != fingerprint {
+                return CommandAcknowledgementV2::rejected(
                     Some(&command.envelope),
                     RejectionReason::DuplicateReplayConflict,
-                )
+                );
             }
+            let mut acknowledgement = record.acknowledgement.clone();
+            acknowledgement.command_id = command.envelope.command_id.clone();
+            acknowledgement.request_id = command.envelope.request_id.clone();
+            acknowledgement.correlation_id = command.envelope.correlation_id.clone();
+            acknowledgement.timestamp = Utc::now();
+            acknowledgement
         })
     }
 
@@ -452,7 +548,7 @@ impl MukeiRuntime {
         let Some(key) = command.envelope.idempotency_key.as_ref() else {
             return;
         };
-        let Ok(fingerprint) = serde_json::to_vec(&command.envelope) else {
+        let Some(fingerprint) = Self::fingerprint(command) else {
             return;
         };
         self.replay
@@ -466,7 +562,7 @@ impl MukeiRuntime {
     }
 
     /// Drain a bounded event batch. One transport consumer should own this call.
-    pub fn drain_events(&self, limit: usize, timeout: Duration) -> Vec<EventEnvelopeV2> {
+    pub fn drain_events(&self, limit: usize, timeout: Duration) -> EventDrain {
         self.events.drain(limit, timeout)
     }
 
@@ -483,6 +579,7 @@ impl MukeiRuntime {
                 "state": self.state(),
                 "runtime_session_id": self.session_id,
                 "app_data_dir": self.config.app_data_dir,
+                "cancelled": self.cancellation.is_cancelled(),
             }),
             RuntimeSnapshotDomain::Settings => json!({
                 "values": self
@@ -526,17 +623,26 @@ impl MukeiRuntime {
             None,
             None,
         );
+        self.cancellation.cancel();
         self.async_runtime.handle().spawn(async {});
         *self
             .state
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = RuntimeState::Stopped;
+        self.events.emit(
+            "application:lifecycle",
+            "runtime.stopped",
+            json!({ "runtime_session_id": self.session_id }),
+            None,
+            None,
+        );
     }
 }
 
 impl Drop for MukeiRuntime {
     fn drop(&mut self) {
         self.closed.store(true, Ordering::Release);
+        self.cancellation.cancel();
     }
 }
 
@@ -545,14 +651,18 @@ mod tests {
     use super::*;
     use crate::ui_protocol::{CommandScope, ProtocolVersion};
 
-    fn runtime() -> MukeiRuntime {
+    fn runtime_with_capacity(event_capacity: usize) -> MukeiRuntime {
         MukeiRuntime::create(RuntimeConfig {
             app_data_dir: "/tmp/mukei-test".into(),
             worker_threads: 1,
             max_blocking_threads: 2,
-            event_capacity: 64,
+            event_capacity,
         })
         .expect("runtime")
+    }
+
+    fn runtime() -> MukeiRuntime {
+        runtime_with_capacity(64)
     }
 
     fn initialize_command() -> CommandEnvelopeV2 {
@@ -575,27 +685,74 @@ mod tests {
         let runtime = runtime();
         let acknowledgement = runtime.submit(initialize_command());
         assert_eq!(runtime.state(), RuntimeState::Ready);
-        assert!(acknowledgement.operation_id.is_some());
+        assert_eq!(acknowledgement.status, AcknowledgementStatus::Accepted);
         assert!(!runtime
             .drain_events(16, Duration::from_millis(1))
+            .events
             .is_empty());
     }
 
     #[test]
-    fn rejects_unimplemented_domain_commands() {
+    fn capabilities_only_advertise_implemented_commands() {
+        let capabilities = runtime().capabilities().capabilities;
+        assert!(capabilities.contains(&"command:app.initialize".to_owned()));
+        assert!(capabilities.contains(&"command:settings.update".to_owned()));
+        assert!(!capabilities.contains(&"command:chat.send_message".to_owned()));
+        assert!(capabilities.contains(&CAP_EVENT_GAP_REPORTING.to_owned()));
+    }
+
+    #[test]
+    fn event_bus_reports_overflow_and_more_state() {
+        let bus = EventBus::new(1);
+        bus.emit("test", "test.one", json!({}), None, None);
+        bus.emit("test", "test.two", json!({}), None, None);
+        let first = bus.drain(1, Duration::ZERO);
+        assert_eq!(first.events[0].event_type, "runtime.event_gap");
+        assert!(first.has_more);
+        let second = bus.drain(1, Duration::ZERO);
+        assert_eq!(second.events[0].event_type, "test.one");
+        assert!(!second.has_more);
+    }
+
+    #[test]
+    fn idempotent_replay_rebinds_request_correlation() {
         let runtime = runtime();
         runtime.submit(initialize_command());
-        let mut command = initialize_command();
-        command.command_id = "cmd-chat".into();
-        command.request_id = "req-chat".into();
-        command.correlation_id = "corr-chat".into();
-        command.command_type = "chat.send_message".into();
-        command.idempotency_key = Some("idem-chat".into());
-        command.payload = json!({ "text": "hello" });
-        let acknowledgement = runtime.submit(command);
+        let mut first = initialize_command();
+        first.command_id = "cmd-chat-one".into();
+        first.request_id = "req-chat-one".into();
+        first.correlation_id = "corr-chat-one".into();
+        first.command_type = "chat.send_message".into();
+        first.idempotency_key = Some("idem-chat".into());
+        first.payload = json!({ "text": "hello" });
+        let first_ack = runtime.submit(first.clone());
         assert_eq!(
-            acknowledgement.rejection_reason,
+            first_ack.rejection_reason,
             Some(RejectionReason::CapabilityUnavailable)
         );
+
+        let mut replay = first;
+        replay.command_id = "cmd-chat-two".into();
+        replay.request_id = "req-chat-two".into();
+        replay.correlation_id = "corr-chat-two".into();
+        let replay_ack = runtime.submit(replay.clone());
+        assert_eq!(replay_ack.command_id, replay.command_id);
+        assert_eq!(replay_ack.request_id, replay.request_id);
+        assert_eq!(replay_ack.correlation_id, replay.correlation_id);
+        assert_eq!(
+            replay_ack.rejection_reason,
+            Some(RejectionReason::CapabilityUnavailable)
+        );
+    }
+
+    #[test]
+    fn shutdown_is_idempotent_and_snapshot_remains_available() {
+        let runtime = runtime();
+        runtime.shutdown();
+        runtime.shutdown();
+        assert_eq!(runtime.state(), RuntimeState::Stopped);
+        assert!(runtime
+            .snapshot(RuntimeSnapshotDomain::Application)
+            .is_ok());
     }
 }

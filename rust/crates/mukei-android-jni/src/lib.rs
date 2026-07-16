@@ -81,6 +81,21 @@ fn runtime_snapshot_domain(domain: SnapshotDomainV2) -> RuntimeSnapshotDomain {
     }
 }
 
+fn snapshot_response(runtime: &MukeiRuntime, domain: SnapshotDomainV2) -> Vec<u8> {
+    let snapshot = match runtime.snapshot(runtime_snapshot_domain(domain)) {
+        Ok(snapshot) => snapshot,
+        Err(error) => return error_payload("snapshot_unavailable", &error.to_string()),
+    };
+    serialize(&SnapshotEnvelopeV2 {
+        protocol_version: ProtocolVersion::CURRENT,
+        runtime_session_id: snapshot.runtime_session_id,
+        domain,
+        schema_version: snapshot.schema_version,
+        generated_at: snapshot.generated_at,
+        payload: snapshot.payload,
+    })
+}
+
 #[no_mangle]
 pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_createRuntime(
     mut env: JNIEnv<'_>,
@@ -112,6 +127,22 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_cr
         }
     }))
     .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_shutdownRuntime(
+    mut env: JNIEnv<'_>,
+    _this: JObject<'_>,
+    handle: jlong,
+) -> jbyteArray {
+    let response = guarded_bytes(|| {
+        let Some(runtime) = runtime_entry(handle) else {
+            return invalid_handle_payload();
+        };
+        runtime.shutdown();
+        snapshot_response(&runtime, SnapshotDomainV2::Application)
+    });
+    to_java_bytes(&mut env, &response)
 }
 
 #[no_mangle]
@@ -210,7 +241,7 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_dr
                 "The event batch size or timeout is outside the supported bounds.",
             );
         }
-        let events = runtime.drain_events(
+        let drain = runtime.drain_events(
             maximum_events as usize,
             Duration::from_millis(timeout_milliseconds as u64),
         );
@@ -218,8 +249,8 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_dr
             protocol_version: ProtocolVersion::CURRENT,
             runtime_session_id: runtime.session_id().to_owned(),
             drained_at: chrono::Utc::now(),
-            events,
-            has_more: false,
+            events: drain.events,
+            has_more: drain.has_more,
         })
     });
     to_java_bytes(&mut env, &response)
@@ -240,24 +271,13 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_re
             Ok(value) => value.into(),
             Err(_) => return error_payload("invalid_domain", "The domain string is unreadable."),
         };
-        let Some(protocol_domain) = SnapshotDomainV2::parse(domain.trim()) else {
+        let Some(domain) = SnapshotDomainV2::parse(domain.trim()) else {
             return error_payload(
                 "unsupported_snapshot_domain",
                 "The requested snapshot domain is not supported.",
             );
         };
-        let snapshot = match runtime.snapshot(runtime_snapshot_domain(protocol_domain)) {
-            Ok(snapshot) => snapshot,
-            Err(error) => return error_payload("snapshot_unavailable", &error.to_string()),
-        };
-        serialize(&SnapshotEnvelopeV2 {
-            protocol_version: ProtocolVersion::CURRENT,
-            runtime_session_id: snapshot.runtime_session_id,
-            domain: protocol_domain,
-            schema_version: snapshot.schema_version,
-            generated_at: snapshot.generated_at,
-            payload: snapshot.payload,
-        })
+        snapshot_response(&runtime, domain)
     });
     to_java_bytes(&mut env, &response)
 }
