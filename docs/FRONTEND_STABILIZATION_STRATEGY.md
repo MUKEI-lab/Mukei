@@ -27,14 +27,22 @@ Current implementation:
 - Diagnostics controls have stable object IDs.
 - Composer editor, attach, and send controls have stable object IDs.
 - Recovery interaction tests and startup lifecycle tests are installed in the existing Qt QuickTest suite.
+- A report-only static interaction audit is published by CI while the baseline is being cleaned.
 
 ## Batch B — startup state machine
 
 The required observable sequence is:
 
-`bootstrapping → booting → loading_config → secure-key stages → opening_database → ready/degraded`
+`bootstrapping → initialize_submitted → initialize_acknowledged → booting → loading_config → secure-key stages → opening_database → ready/degraded`
 
 Each boundary must produce a structured stage or classified error. The global watchdog is only a final safety net.
+
+Current implementation:
+
+- Protocol-critical stores are explicitly injected into `IntentDispatcher`; startup no longer depends on cyclic implicit singleton resolution.
+- `app.initialize` is dispatched on the owning Qt thread without a second queued Qt hop.
+- Snake-case and camelCase event signals are covered by a deterministic fake Protocol V2 agent.
+- CTest preserves full failure evidence and `LastTest.log`.
 
 ## Batch C — feature workflows
 
@@ -50,6 +58,8 @@ A phone APK is produced only when:
 - emulator cold launch and core navigation pass
 - APK validation and signing pass
 
+A manual Android 35 x86_64 emulator workflow exists for the milestone gate; it is not triggered for every source commit.
+
 ## Current milestone gate
 
-The next physical-device APK requires Batch A and the startup state-machine contract to pass. It is not triggered by an individual button change.
+The next physical-device APK requires Batch A, the startup state-machine contract, and the Android emulator smoke gate to pass. It is not triggered by an individual button change.
