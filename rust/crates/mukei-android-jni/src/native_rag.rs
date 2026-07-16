@@ -6,8 +6,8 @@ use mukei_core::application_runtime::{RagIngestResult, RuntimeRagService};
 use mukei_core::error::{MukeiError, Result};
 use mukei_core::rag::{
     CandleMiniLmEmbedder, ChunkResolver, Chunker, Embedder, IndexMetadata, ResolvedChunk,
-    RetrievalRequest, RetrievalScope, Retriever, RuntimeProjectionStore, StoreHeader,
-    StructuredRetriever, VectorStore, ALL_MINILM_L6_V2_MANIFEST, STORE_FORMAT_VERSION,
+    RetrievalRequest, RetrievalScope, Retriever, StoreHeader, StructuredRetriever, VectorStore,
+    ALL_MINILM_L6_V2_MANIFEST, STORE_FORMAT_VERSION,
 };
 use mukei_core::storage::{DatabasePool, DbError, PooledConnectionExt};
 use tokio::sync::Mutex;
@@ -17,6 +17,7 @@ const MAX_DOCUMENT_BYTES: u64 = 32 * 1024 * 1024;
 
 struct SqlChunkResolver {
     pool: Arc<DatabasePool>,
+    embedder_id: String,
 }
 
 #[async_trait]
@@ -28,6 +29,7 @@ impl ChunkResolver for SqlChunkResolver {
     ) -> Result<Vec<ResolvedChunk>> {
         let ids = ids.to_vec();
         let scope = request.scope.clone();
+        let embedder_id = self.embedder_id.clone();
         self.pool
             .with_conn(move |connection| {
                 let mut output = Vec::new();
@@ -38,27 +40,22 @@ impl ChunkResolver for SqlChunkResolver {
                 for id in ids {
                     let row = statement.query_row([id.to_string()], |row| {
                         let chunk_uuid: String = row.get(0)?;
+                        let document_id: Option<String> = row.get(2)?;
+                        let dimension: i64 = row.get(6)?;
                         Ok(ResolvedChunk {
                             chunk_id: chunk_uuid.parse::<u64>().unwrap_or(id),
-                            document_id: row.get::<_, Option<String>>(2)?,
+                            document_id: document_id.clone(),
                             content: row.get(1)?,
-                            source_id: row.get(2)?,
+                            source_id: document_id,
                             conversation_id: row.get(3)?,
                             message_id: row.get(4)?,
-                            ordinal: row.get::<_, Option<i64>>(5)?.map(|value| value as u32),
+                            ordinal: Some(row.get::<_, i64>(5)? as u32),
                             scope: scope.clone(),
                             authorization_marker: None,
-                            index_metadata: row.get::<_, Option<i64>>(6)?.map(|dimension| {
-                                IndexMetadata {
-                                    format_version: STORE_FORMAT_VERSION,
-                                    embedder_id: ALL_MINILM_L6_V2_MANIFEST
-                                        .files
-                                        .iter()
-                                        .find(|file| file.filename == "model.safetensors")
-                                        .map(|file| format!("minilm-candle:sha256:{}", file.sha256))
-                                        .unwrap_or_else(|| "unknown".into()),
-                                    embedding_dim: dimension as u32,
-                                }
+                            index_metadata: Some(IndexMetadata {
+                                format_version: STORE_FORMAT_VERSION,
+                                embedder_id: embedder_id.clone(),
+                                embedding_dim: dimension as u32,
                             }),
                         })
                     });
@@ -102,6 +99,7 @@ impl AndroidRagService {
         }
         let resolver: Arc<dyn ChunkResolver> = Arc::new(SqlChunkResolver {
             pool: Arc::clone(&pool),
+            embedder_id: embedder.embedder_id().to_owned(),
         });
         let retriever = Arc::new(Retriever::new(
             Arc::clone(&embedder),
@@ -161,7 +159,9 @@ impl RuntimeRagService for AndroidRagService {
         let metadata = std::fs::metadata(&canonical)
             .map_err(|error| MukeiError::FileReadFailed(error.to_string()))?;
         if metadata.len() > MAX_DOCUMENT_BYTES {
-            return Err(MukeiError::FileReadFailed("document exceeds indexing limit".into()));
+            return Err(MukeiError::FileReadFailed(
+                "document exceeds indexing limit".into(),
+            ));
         }
         let content = tokio::task::spawn_blocking(move || std::fs::read_to_string(canonical))
             .await
@@ -169,7 +169,9 @@ impl RuntimeRagService for AndroidRagService {
             .map_err(|error| MukeiError::FileReadFailed(error.to_string()))?;
         let chunks = Chunker::default().split(&content);
         if chunks.is_empty() {
-            return Err(MukeiError::FileReadFailed("document contains no indexable text".into()));
+            return Err(MukeiError::FileReadFailed(
+                "document contains no indexable text".into(),
+            ));
         }
 
         let old_ids = self
@@ -187,12 +189,18 @@ impl RuntimeRagService for AndroidRagService {
                 }
             })
             .await?;
-        self.vector_store.shred_many(&old_ids);
 
         let mut staged = Vec::with_capacity(chunks.len());
         for chunk in chunks {
-            let id = (Uuid::new_v4().as_u128() & u128::from(u64::MAX)) as u64;
-            let embedding = self.embedder.embed(&chunk.text).await?;
+            let id = ((Uuid::new_v4().as_u128() & u128::from(u64::MAX)) as u64).max(1);
+            let embedding = match self.embedder.embed(&chunk.text).await {
+                Ok(value) => value,
+                Err(error) => {
+                    let ids = staged.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+                    self.vector_store.shred_many(&ids);
+                    return Err(error);
+                }
+            };
             self.vector_store.add_scoped(
                 id,
                 embedding.0,
@@ -210,7 +218,10 @@ impl RuntimeRagService for AndroidRagService {
                 let staged = staged.clone();
                 move |connection| {
                     let transaction = connection.transaction()?;
-                    transaction.execute("DELETE FROM chunks WHERE file_token = ?1", [&document_id])?;
+                    transaction.execute(
+                        "DELETE FROM chunks WHERE file_token = ?1",
+                        [&document_id],
+                    )?;
                     {
                         let mut statement = transaction.prepare(
                             "INSERT INTO chunks \
@@ -239,6 +250,7 @@ impl RuntimeRagService for AndroidRagService {
             self.vector_store.shred_many(&ids);
             return Err(error);
         }
+        self.vector_store.shred_many(&old_ids);
         self.persist_vectors().await?;
         Ok(RagIngestResult {
             chunk_count: staged.len(),
@@ -252,7 +264,11 @@ impl RuntimeRagService for AndroidRagService {
             .retrieve_structured(&request)
             .await
             .map_err(|error| MukeiError::ToolExecutionFailed(error.to_string()))?;
-        Ok(response.results.into_iter().map(|chunk| chunk.content).collect())
+        Ok(response
+            .results
+            .into_iter()
+            .map(|chunk| chunk.content)
+            .collect())
     }
 
     async fn revoke_document(&self, document_id: &str) -> Result<usize> {
@@ -261,13 +277,20 @@ impl RuntimeRagService for AndroidRagService {
         let ids = self
             .pool
             .with_conn(move |connection| {
-                let mut statement =
-                    connection.prepare("SELECT chunk_uuid FROM chunks WHERE file_token = ?1")?;
-                let ids = statement
-                    .query_map([&document_id_owned], |row| row.get::<_, String>(0))?
-                    .filter_map(|row| row.ok().and_then(|value| value.parse::<u64>().ok()))
-                    .collect::<Vec<_>>();
-                connection.execute("DELETE FROM chunks WHERE file_token = ?1", [&document_id_owned])?;
+                let transaction = connection.transaction()?;
+                let ids = {
+                    let mut statement = transaction
+                        .prepare("SELECT chunk_uuid FROM chunks WHERE file_token = ?1")?;
+                    statement
+                        .query_map([&document_id_owned], |row| row.get::<_, String>(0))?
+                        .filter_map(|row| row.ok().and_then(|value| value.parse::<u64>().ok()))
+                        .collect::<Vec<_>>()
+                };
+                transaction.execute(
+                    "DELETE FROM chunks WHERE file_token = ?1",
+                    [&document_id_owned],
+                )?;
+                transaction.commit()?;
                 Ok::<_, DbError>(ids)
             })
             .await?;
