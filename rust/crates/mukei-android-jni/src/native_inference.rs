@@ -15,7 +15,7 @@ use mukei_core::engine::{
     VerifiedModelDescriptor,
 };
 use mukei_core::error::{MukeiError, Result};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 const EXPECTED_ABI_VERSION: u32 = 1;
@@ -119,6 +119,7 @@ impl AndroidLlamaBackendFactory {
 
 struct NativeLlamaBackend {
     model: Arc<NativeModelHandle>,
+    generation_gate: Arc<Semaphore>,
     max_new_tokens: u32,
 }
 
@@ -136,14 +137,27 @@ impl NativeLlamaBackend {
         if max_tokens == 0 {
             return Err(MukeiError::WatchdogExceeded { kind: "tokens" });
         }
+        let gate_cancel = cancel.clone();
+        let permit = tokio::select! {
+            permit = Arc::clone(&self.generation_gate).acquire_owned() => permit
+                .map_err(|_| MukeiError::ModelLoadFailed("native generation gate closed".to_string()))?,
+            _ = gate_cancel.cancelled() => {
+                return Ok(InferenceOutcome {
+                    assistant_text: String::new(),
+                    used_tokens: 0,
+                    stop_reason: StopReason::UserStopped,
+                });
+            }
+        };
         let model = Arc::clone(&self.model);
         let prompt = prompt.as_bytes().to_vec();
         let requested_limit = u32::try_from(max_tokens).unwrap_or(u32::MAX);
         let max_new_tokens = self.max_new_tokens.min(requested_limit);
         let generation = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             let mut state = CallbackState {
-                sender: token_sender,
-                cancel,
+                sender: token_sender;
+                cancel;
                 pending: Vec::new(),
                 assistant_text: String::new(),
                 callback_error: None,
@@ -201,6 +215,34 @@ impl NativeLlamaBackend {
 }
 
 #[async_trait]
+impl InferenceBackend for NativeLlamaBackend {
+    fn identity(&self) -> BackendIdentity {
+        BackendIdentity::production("android_llama_cpp")
+    }
+
+    async fn run(
+        &self,
+        prompt: &str,
+        cancel: CancellationToken,
+        token_sender: mpsc::Sender<String>,
+    ) -> Result<InferenceOutcome> {
+        self.run_with_limit(prompt, cancel, token_sender, u64::MAX)
+            .await
+    }
+
+    async fn run_bounded(
+        &self,
+        prompt: &str,
+        cancel: CancellationToken,
+        token_sender: mpsc::Sender<String>,
+        max_tokens: u64,
+    ) -> Result<InferenceOutcome> {
+        self.run_with_limit(prompt, cancel, token_sender, max_tokens)
+            .await
+    }
+}
+
+#[async_trait]
 impl InferenceBackendFactory for AndroidLlamaBackendFactory {
     async fn activate(
         &self,
@@ -246,6 +288,7 @@ impl InferenceBackendFactory for AndroidLlamaBackendFactory {
         .map_err(|error| MukeiError::BlockingJoinFailed(error.to_string()))??;
         Ok(Arc::new(NativeLlamaBackend {
             model: Arc::new(handle),
+            generation_gate: Arc::new(Semaphore::new(1)),
             max_new_tokens,
         }))
     }
