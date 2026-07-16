@@ -18,6 +18,7 @@ INSERT OR IGNORE INTO storage_schema_metadata (
 
 CREATE TABLE IF NOT EXISTS storage_scopes (
     scope_id       TEXT PRIMARY KEY,
+    workspace_id   TEXT,
     scope_type     TEXT NOT NULL CHECK (scope_type IN ('universal', 'workspace')),
     owner_chat_id  TEXT,
     root_node_id   TEXT NOT NULL,
@@ -28,9 +29,14 @@ CREATE TABLE IF NOT EXISTS storage_scopes (
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL,
     CHECK (
-        (scope_type = 'universal' AND owner_chat_id IS NULL)
+        (scope_type = 'universal' AND workspace_id IS NULL AND owner_chat_id IS NULL)
         OR
-        (scope_type = 'workspace' AND owner_chat_id IS NOT NULL AND length(trim(owner_chat_id)) > 0)
+        (
+            scope_type = 'workspace'
+            AND workspace_id IS NOT NULL
+            AND owner_chat_id IS NOT NULL
+            AND length(trim(owner_chat_id)) > 0
+        )
     )
 );
 
@@ -41,6 +47,10 @@ WHERE scope_type = 'universal' AND state != 'deleted';
 CREATE UNIQUE INDEX IF NOT EXISTS storage_one_workspace_per_chat
 ON storage_scopes(owner_chat_id)
 WHERE scope_type = 'workspace' AND state != 'deleted';
+
+CREATE UNIQUE INDEX IF NOT EXISTS storage_unique_workspace_id
+ON storage_scopes(workspace_id)
+WHERE workspace_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS storage_objects (
     object_id          TEXT PRIMARY KEY,
@@ -139,18 +149,18 @@ ON storage_nodes(current_version_id)
 WHERE current_version_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS import_transactions (
-    transaction_id        TEXT PRIMARY KEY,
-    target_scope_id       TEXT NOT NULL,
-    target_parent_node_id TEXT NOT NULL,
+    transaction_id         TEXT PRIMARY KEY,
+    target_scope_id        TEXT NOT NULL,
+    target_parent_node_id  TEXT NOT NULL,
     source_uri_fingerprint TEXT,
-    original_filename     TEXT NOT NULL,
-    staging_relative_path TEXT NOT NULL UNIQUE,
-    expected_size         INTEGER CHECK (expected_size IS NULL OR expected_size >= 0),
-    bytes_written         INTEGER NOT NULL DEFAULT 0 CHECK (bytes_written >= 0),
-    detected_extension    TEXT,
-    detected_mime         TEXT,
-    detected_encoding     TEXT,
-    state                 TEXT NOT NULL CHECK (
+    original_filename      TEXT NOT NULL,
+    staging_relative_path  TEXT NOT NULL UNIQUE,
+    expected_size          INTEGER CHECK (expected_size IS NULL OR expected_size >= 0),
+    bytes_written          INTEGER NOT NULL DEFAULT 0 CHECK (bytes_written >= 0),
+    detected_extension     TEXT,
+    detected_mime          TEXT,
+    detected_encoding      TEXT,
+    state                  TEXT NOT NULL CHECK (
         state IN (
             'created',
             'validating',
@@ -167,11 +177,11 @@ CREATE TABLE IF NOT EXISTS import_transactions (
             'recovering'
         )
     ),
-    error_code            TEXT,
-    error_details         TEXT,
-    created_at            TEXT NOT NULL,
-    updated_at            TEXT NOT NULL,
-    completed_at          TEXT,
+    error_code             TEXT,
+    error_details          TEXT,
+    created_at             TEXT NOT NULL,
+    updated_at             TEXT NOT NULL,
+    completed_at           TEXT,
     FOREIGN KEY (target_scope_id) REFERENCES storage_scopes(scope_id) ON DELETE RESTRICT,
     FOREIGN KEY (target_parent_node_id) REFERENCES storage_nodes(node_id) ON DELETE RESTRICT,
     CHECK (expected_size IS NULL OR bytes_written <= expected_size OR state IN ('failed', 'recovering')),
