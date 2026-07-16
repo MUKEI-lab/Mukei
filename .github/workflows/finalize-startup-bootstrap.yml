@@ -5,6 +5,7 @@ on:
     branches: [ "agent/full-qml-fixed-build-2026-07-15" ]
     paths:
       - "scripts/frontend/finalize-startup-bootstrap.py"
+      - "scripts/frontend/finalize-safe-mode-actions.py"
       - ".github/workflows/finalize-startup-bootstrap.yml"
   workflow_dispatch:
 
@@ -23,7 +24,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Apply physical-device startup fixes
-        run: python3 scripts/frontend/finalize-startup-bootstrap.py
+        run: |
+          python3 scripts/frontend/finalize-startup-bootstrap.py
+          python3 scripts/frontend/finalize-safe-mode-actions.py
       - name: Commit canonical source
         shell: bash
         run: |
@@ -33,12 +36,15 @@ jobs:
           git add \
             qml/architecture/AppCoordinator.qml \
             qml/stores/LifecycleStore.qml \
+            qml/screens/SafeModeScreen.qml \
+            qml/stores/NavigationStore.qml \
+            qml/screens/DiagnosticsScreen.qml \
             rust/crates/mukei-bridge/src/lib.rs
           if git diff --cached --quiet; then
             echo "Startup source already finalized."
             exit 0
           fi
-          git commit -m "fix(startup): bound Android secure bootstrap"
+          git commit -m "fix(startup): wire safe-mode recovery actions"
           git fetch origin "${GITHUB_REF_NAME}"
           git rebase "origin/${GITHUB_REF_NAME}"
           git push --force-with-lease origin HEAD:"${GITHUB_REF_NAME}"
