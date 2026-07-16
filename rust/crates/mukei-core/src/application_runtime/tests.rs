@@ -89,9 +89,7 @@ mod tests {
     fn projection_writer_preserves_fifo_order() {
         let runtime = runtime();
         let store = Arc::new(DelayedProjectionStore::new());
-        runtime
-            .features
-            .attach_projection_store(store.clone());
+        runtime.features.attach_projection_store(store.clone());
 
         runtime
             .features
@@ -108,14 +106,21 @@ mod tests {
             .expect("projection writer");
         runtime
             .async_runtime
-            .block_on(barrier_receiver)
+            .block_on(tokio::time::timeout(
+                Duration::from_secs(2),
+                barrier_receiver,
+            ))
+            .expect("projection barrier timeout")
             .expect("projection barrier");
 
         let writes = store
             .writes
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        assert_eq!(writes.as_slice(), &[json!({"revision": 1}), json!({"revision": 2})]);
+        assert_eq!(
+            writes.as_slice(),
+            &[json!({"revision": 1}), json!({"revision": 2})]
+        );
     }
 
     #[test]
@@ -169,6 +174,8 @@ mod tests {
         runtime.shutdown();
         runtime.shutdown();
         assert_eq!(runtime.state(), RuntimeState::Stopped);
-        assert!(runtime.snapshot(RuntimeSnapshotDomain::Application).is_ok());
+        assert!(runtime
+            .snapshot(RuntimeSnapshotDomain::Application)
+            .is_ok());
     }
 }
