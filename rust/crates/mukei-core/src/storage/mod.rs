@@ -28,6 +28,8 @@ pub mod saf;
 pub mod settings;
 #[cfg(feature = "rusqlite")]
 pub mod ui_session;
+#[cfg(feature = "rusqlite")]
+pub mod universal_repository;
 
 pub use file_policy::{
     admit_file_name, AllowedFileName, FileAdmissionError, FileAdmissionRule,
@@ -77,6 +79,11 @@ pub use settings::{PreferenceRecord, PreferenceValue, SecretRefRecord, SettingsR
 pub use ui_session::{
     UiDraftRecord, UiSessionRecord, UiSessionRepository, DEFAULT_UI_PROFILE,
     UI_SESSION_SCHEMA_VERSION,
+};
+#[cfg(feature = "rusqlite")]
+pub use universal_repository::{
+    PersistedSystemDirectory, PersistedUniversalStorage, PersistedWorkspace,
+    UniversalStorageRepository,
 };
 
 #[cfg(feature = "tokio")]
