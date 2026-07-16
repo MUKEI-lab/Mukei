@@ -15,6 +15,8 @@
 pub use tokio;
 
 // Public, platform-neutral contracts.
+#[cfg(feature = "tokio")]
+pub mod application_runtime;
 pub mod boundary;
 pub mod error;
 pub mod guard;
@@ -52,6 +54,11 @@ pub use crate::error::{ErrorClass, MukeiError, Result};
 
 /// Common imports for native transport crates.
 pub mod prelude {
+    #[cfg(feature = "tokio")]
+    pub use crate::application_runtime::{
+        MukeiRuntime, RuntimeConfig, RuntimeError, RuntimeSnapshotDomain,
+        RuntimeSnapshotEnvelope, RuntimeState,
+    };
     pub use crate::boundary::{
         BoundaryStateChange, LoadingStage, RuntimeSnapshot, StreamTagDetector, TagEvents,
     };
