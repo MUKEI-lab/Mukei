@@ -80,8 +80,8 @@ impl UniversalStorageRepository {
 
                 transaction.execute(
                     "INSERT INTO storage_scopes \
-                        (scope_id, scope_type, owner_chat_id, root_node_id, display_name, state, created_at, updated_at) \
-                     VALUES (?1, 'universal', NULL, ?2, ?3, 'active', ?4, ?4)",
+                        (scope_id, workspace_id, scope_type, owner_chat_id, root_node_id, display_name, state, created_at, updated_at) \
+                     VALUES (?1, NULL, 'universal', NULL, ?2, ?3, 'active', ?4, ?4)",
                     rusqlite::params![
                         scope_id.to_string(),
                         root_node_id.to_string(),
@@ -135,7 +135,7 @@ impl UniversalStorageRepository {
 
             let existing: Option<(String, String, String)> = transaction
                 .query_row(
-                    "SELECT scope_id, root_node_id, display_name FROM storage_scopes \
+                    "SELECT workspace_id, scope_id, root_node_id FROM storage_scopes \
                      WHERE scope_type = 'workspace' AND owner_chat_id = ?1 AND state != 'deleted' LIMIT 1",
                     [chat_id.as_str()],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
@@ -143,27 +143,26 @@ impl UniversalStorageRepository {
                 .optional()?;
 
             let (workspace_id, scope_id, root_node_id) =
-                if let Some((scope_id, root_node_id, display_name)) = existing {
-                    let workspace_id = parse_workspace_display_id(&display_name)?;
+                if let Some((workspace_id, scope_id, root_node_id)) = existing {
                     (
-                        workspace_id,
+                        parse_workspace_id(workspace_id)?,
                         parse_scope_id(scope_id)?,
                         parse_node_id(root_node_id)?,
                     )
                 } else {
                     let plan = WorkspaceLayout::plan(chat_id.clone());
                     let now = chrono::Utc::now().to_rfc3339();
-                    let workspace_display_id = workspace_display_id(plan.workspace_id);
 
                     transaction.execute(
                         "INSERT INTO storage_scopes \
-                            (scope_id, scope_type, owner_chat_id, root_node_id, display_name, state, created_at, updated_at) \
-                         VALUES (?1, 'workspace', ?2, ?3, ?4, 'active', ?5, ?5)",
+                            (scope_id, workspace_id, scope_type, owner_chat_id, root_node_id, display_name, state, created_at, updated_at) \
+                         VALUES (?1, ?2, 'workspace', ?3, ?4, ?5, 'active', ?6, ?6)",
                         rusqlite::params![
                             plan.scope_id.to_string(),
+                            plan.workspace_id.to_string(),
                             plan.chat_id.as_str(),
                             plan.root_node_id.to_string(),
-                            workspace_display_id,
+                            SystemDirectoryRole::ScopeRoot.display_name(),
                             &now,
                         ],
                     )?;
@@ -323,23 +322,16 @@ fn parse_node_id(value: String) -> std::result::Result<StorageNodeId, DbError> {
     Ok(StorageNodeId(parse_uuid("node_id", &value)?))
 }
 
+fn parse_workspace_id(value: String) -> std::result::Result<WorkspaceId, DbError> {
+    Ok(WorkspaceId(parse_uuid("workspace_id", &value)?))
+}
+
 fn parse_uuid(field: &str, value: &str) -> std::result::Result<Uuid, DbError> {
     Uuid::parse_str(value).map_err(|_| {
         DbError::Domain(MukeiError::Invariant(format!(
             "stored {field} is not a valid UUID"
         )))
     })
-}
-
-fn workspace_display_id(workspace_id: WorkspaceId) -> String {
-    format!("workspace:{}", workspace_id)
-}
-
-fn parse_workspace_display_id(value: &str) -> std::result::Result<WorkspaceId, DbError> {
-    let encoded = value
-        .strip_prefix("workspace:")
-        .ok_or_else(|| DbError::Domain(MukeiError::Invariant("workspace identifier is missing".into())))?;
-    Ok(WorkspaceId(parse_uuid("workspace_id", encoded)?))
 }
 
 fn role_as_str(role: SystemDirectoryRole) -> &'static str {
