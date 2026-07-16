@@ -24,7 +24,7 @@ mod secure_runtime {
     impl PanicSink for AndroidPanicSink {
         fn on_panic(&self, fingerprint: &CrashFingerprint, _reason: &str) {
             tracing::error!(
-                target = "mukei::android::panic",
+                target: "mukei::android::panic",
                 fingerprint = %fingerprint,
                 "native panic contained and persisted locally"
             );
