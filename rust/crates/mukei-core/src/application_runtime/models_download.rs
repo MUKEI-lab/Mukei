@@ -43,20 +43,13 @@ impl MukeiRuntime {
             };
             let destination = config.models_dir.join(descriptor.filename);
             let (acknowledgement, operation_id, token) = self.accept_operation(command);
-            self.features
-                .models
-                .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .insert(
-                    payload.model_id.clone(),
-                    ModelProjection {
-                        model_id: payload.model_id.clone(),
-                        status: ModelStatus::Downloading,
-                        local_path: None,
-                        progress: Some(0.0),
-                        error_code: None,
-                    },
-                );
+            self.features.insert_model(ModelProjection {
+                model_id: payload.model_id.clone(),
+                status: ModelStatus::Downloading,
+                local_path: None,
+                progress: Some(0.0),
+                error_code: None,
+            });
             let features = Arc::clone(&self.features);
             let events = Arc::clone(&self.events);
             let command_envelope = command.envelope.clone();
@@ -94,9 +87,9 @@ impl MukeiRuntime {
                                         None,
                                         json!({"bytes_downloaded": bytes_downloaded}),
                                     );
-                                    if let Some(model) = features.models.write().unwrap_or_else(|p| p.into_inner()).get_mut(&model_id) {
+                                    features.update_model(&model_id, |model| {
                                         model.progress = Some(progress);
-                                    }
+                                    });
                                     events.emit(
                                         &format!("operation:{}", operation_id_for_task),
                                         "model.download.progress",
@@ -106,17 +99,18 @@ impl MukeiRuntime {
                                     );
                                 }
                                 crate::storage::model_download::DownloadEvent::Complete { final_path } => {
-                                    if let Some(model) = features.models.write().unwrap_or_else(|p| p.into_inner()).get_mut(&model_id) {
+                                    features.update_model(&model_id, |model| {
                                         model.status = ModelStatus::Installed;
                                         model.local_path = Some(final_path.to_string_lossy().into_owned());
                                         model.progress = Some(1.0);
-                                    }
+                                        model.error_code = None;
+                                    });
                                 }
                                 crate::storage::model_download::DownloadEvent::Error { code, .. } => {
-                                    if let Some(model) = features.models.write().unwrap_or_else(|p| p.into_inner()).get_mut(&model_id) {
+                                    features.update_model(&model_id, |model| {
                                         model.status = ModelStatus::Failed;
                                         model.error_code = Some(code.to_owned());
-                                    }
+                                    });
                                 }
                             }
                         }
@@ -140,16 +134,29 @@ impl MukeiRuntime {
                         );
                     }
                     Err(error) => {
+                        let status = if matches!(error, MukeiError::Cancelled) {
+                            OperationStatus::Cancelled
+                        } else {
+                            OperationStatus::Failed
+                        };
+                        features.update_model(&model_id, |model| {
+                            model.status = ModelStatus::Failed;
+                            model.error_code = Some(error.error_code().into());
+                        });
                         features.update_operation(
                             &operation_id_for_task,
-                            if matches!(error, MukeiError::Cancelled) { OperationStatus::Cancelled } else { OperationStatus::Failed },
+                            status,
                             None,
                             Some(error.error_code().into()),
                             Value::Null,
                         );
                         events.emit(
                             &format!("operation:{}", operation_id_for_task),
-                            "operation.failed",
+                            if matches!(status, OperationStatus::Cancelled) {
+                                "operation.cancelled"
+                            } else {
+                                "operation.failed"
+                            },
                             json!({"code": error.error_code(), "model_id": model_id}),
                             Some(&command_envelope),
                             Some(operation_id_for_task),
@@ -160,5 +167,4 @@ impl MukeiRuntime {
             acknowledgement
         }
     }
-
 }
