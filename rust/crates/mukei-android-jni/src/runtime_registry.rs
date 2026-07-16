@@ -40,7 +40,6 @@ struct RuntimeSlot {
     runtime: Arc<MukeiRuntime>,
 }
 
-/// Synchronized registry state. The outer JNI module owns the mutex.
 #[derive(Default)]
 pub(crate) struct RuntimeRegistry {
     next_slot: u32,
@@ -50,7 +49,6 @@ pub(crate) struct RuntimeRegistry {
 }
 
 impl RuntimeRegistry {
-    /// Allocate a fresh opaque handle for one runtime.
     pub(crate) fn insert(&mut self, runtime: Arc<MukeiRuntime>) -> Option<jlong> {
         let slot = match self.free_slots.pop() {
             Some(slot) => slot,
@@ -63,16 +61,11 @@ impl RuntimeRegistry {
                 next
             }
         };
-
         let generation = self
             .generations
             .entry(slot)
             .and_modify(|value| {
-                *value = if *value >= MAX_GENERATION {
-                    1
-                } else {
-                    *value + 1
-                };
+                *value = if *value >= MAX_GENERATION { 1 } else { *value + 1 };
             })
             .or_insert(1);
         let handle = RuntimeHandle::new(slot, *generation)?;
@@ -86,7 +79,6 @@ impl RuntimeRegistry {
         Some(handle.encode())
     }
 
-    /// Resolve a handle only when both slot and generation match.
     pub(crate) fn get(&self, raw: jlong) -> Option<Arc<MukeiRuntime>> {
         let handle = RuntimeHandle::decode(raw)?;
         let slot = self.entries.get(&handle.slot)?;
@@ -96,7 +88,6 @@ impl RuntimeRegistry {
         Some(Arc::clone(&slot.runtime))
     }
 
-    /// Remove one active runtime. Stale and duplicate handles return `None`.
     pub(crate) fn remove(&mut self, raw: jlong) -> Option<Arc<MukeiRuntime>> {
         let handle = RuntimeHandle::decode(raw)?;
         let slot = self.entries.get(&handle.slot)?;
@@ -115,6 +106,7 @@ impl RuntimeRegistry {
 }
 
 include!("secure_runtime_jni.rs");
+include!("remote_tools_jni.rs");
 
 #[cfg(test)]
 mod tests {
