@@ -18,9 +18,11 @@ runtime_development = []
 runtime_test = []
 native_inference = []
 secure_runtime = ["mukei-core/sqlcipher"]
+rag_runtime = ["mukei-core/candle", "mukei-core/usearch_hnsw"]
 runtime_production = [
     "native_inference",
     "secure_runtime",
+    "rag_runtime",
     "mukei-core/network",
 ]
 runtime_hardening = ["mukei-core/runtime_hardening"]
@@ -39,3 +41,5 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 zeroize = { workspace = true }
 getrandom = { workspace = true }
+uuid = { workspace = true }
+rusqlite = { workspace = true }
