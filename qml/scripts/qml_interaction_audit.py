@@ -29,7 +29,7 @@ CONTROL_TYPES = {
     "MenuItem",
 }
 HANDLER_RE = re.compile(
-    r"\bon(?:Clicked|Triggered|Toggled|Activated|Accepted|Pressed|Released|CheckedChanged)\s*:"
+    r"\bon(?:Clicked|Committed|Triggered|Toggled|Activated|Accepted|Pressed|Released|CheckedChanged)\s*:"
 )
 OBJECT_NAME_RE = re.compile(r'\bobjectName\s*:\s*"([^"]+)"')
 CONTROL_START_RE = re.compile(
