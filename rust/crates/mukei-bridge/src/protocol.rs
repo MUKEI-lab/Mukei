@@ -495,6 +495,10 @@ fn context_key_for_command(command: &ValidatedCommand, operation_id: &str) -> St
     }
 }
 
+fn dispatch_on_owning_qt_thread(command_type: &CommandType) -> bool {
+    matches!(command_type, CommandType::AppInitialize)
+}
+
 /// Parse, structurally validate, policy-preflight, replay-check, and dispatch one command.
 pub(crate) fn submit_command_json(
     agent: Pin<&mut ffi::MukeiAgent>,
@@ -576,9 +580,17 @@ pub(crate) fn submit_command_json(
         state.remember_idempotency(&command, &acknowledgement);
     }
 
-    // Return the acknowledgement from the acceptance boundary before execution can emit a
-    // completion event. Dispatch remains on the existing QObjects/runtime owner and adapts into
-    // the existing backend methods; no second runtime or domain implementation is introduced.
+    // Startup is submitted by QML on the owning Qt thread. A second queued Qt hop can be
+    // indefinitely delayed on some Android event-loop integrations, leaving the frontend at the
+    // acknowledgement boundary without ever entering MukeiAgent::initialize. Dispatch startup
+    // directly; initialize itself only schedules bounded native work and returns immediately.
+    if dispatch_on_owning_qt_thread(&command.command_type) {
+        dispatch_validated_command(agent, command, context);
+        return acknowledgement_json(acknowledgement);
+    }
+
+    // Other commands preserve the queued dispatch boundary so immediate acknowledgements remain
+    // independent from operation completion events.
     let qt = agent.as_ref().get_ref().qt_thread();
     let dispatch_command = command.clone();
     let dispatch_context = context.clone();
@@ -1086,6 +1098,12 @@ mod sol02_tests {
             }),
             payload: serde_json::json!({"text": text}),
         }
+    }
+
+    #[test]
+    fn app_initialize_dispatches_without_a_second_qt_queue() {
+        assert!(dispatch_on_owning_qt_thread(&CommandType::AppInitialize));
+        assert!(!dispatch_on_owning_qt_thread(&CommandType::ChatSendMessage));
     }
 
     #[test]
