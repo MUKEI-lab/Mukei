@@ -1,0 +1,164 @@
+name: android-emulator-smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-emulator-smoke-${{ github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: "6.8.3"
+  ANDROID_NDK_VERSION: "26.1.10909125"
+  ANDROID_BUILD_TOOLS_VERSION: "35.0.1"
+
+jobs:
+  ui-shell-smoke:
+    name: Stub UI shell on Android 35 emulator
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install host tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build p7zip-full libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
+          python -m pip install --upgrade pip
+          python -m pip install "aqtinstall==3.3.*" "py7zr==1.1.*"
+
+      - name: Install Android SDK, emulator and NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          SDKMANAGER="${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          yes | "${SDKMANAGER}" --licenses >/dev/null 2>&1 || true
+          "${SDKMANAGER}" \
+            "platform-tools" \
+            "emulator" \
+            "platforms;android-35" \
+            "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
+            "ndk;${ANDROID_NDK_VERSION}" \
+            "system-images;android-35;google_apis;x86_64"
+          echo "ANDROID_HOME=${SDK_ROOT}" >> "${GITHUB_ENV}"
+          echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "${GITHUB_ENV}"
+          echo "ANDROID_NDK_ROOT=${SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "${GITHUB_ENV}"
+          echo "${SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}" >> "${GITHUB_PATH}"
+
+      - name: Install Qt Android x86_64 and host kits
+        shell: bash
+        run: |
+          set -euo pipefail
+          QT_INSTALL_ROOT="${RUNNER_TEMP}/Qt"
+          aqt install-qt \
+            linux android "${QT_VERSION}" android_x86_64 \
+            --autodesktop \
+            --outputdir "${QT_INSTALL_ROOT}" \
+            --external 7z
+          QT_ANDROID_ROOT="${QT_INSTALL_ROOT}/${QT_VERSION}/android_x86_64"
+          QT_HOST_ROOT="${QT_INSTALL_ROOT}/${QT_VERSION}/gcc_64"
+          test -x "${QT_ANDROID_ROOT}/bin/qt-cmake"
+          echo "QT_ANDROID_ROOT=${QT_ANDROID_ROOT}" >> "${GITHUB_ENV}"
+          echo "QT_HOST_ROOT=${QT_HOST_ROOT}" >> "${GITHUB_ENV}"
+
+      - name: Build deterministic stub UI APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/android/prepare-branding.py verify
+          STATE="${RUNNER_TEMP}/branding-state.json"
+          python3 scripts/android/prepare-branding.py materialize --repo-root "${GITHUB_WORKSPACE}" --state "${STATE}"
+          trap 'python3 scripts/android/prepare-branding.py cleanup --repo-root "${GITHUB_WORKSPACE}" --state "${STATE}" || true' EXIT
+
+          BUILD_DIR="${RUNNER_TEMP}/mukei-emulator-build"
+          "${QT_ANDROID_ROOT}/bin/qt-cmake" \
+            -S qml \
+            -B "${BUILD_DIR}" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DANDROID_ABI=x86_64 \
+            -DANDROID_PLATFORM=android-35 \
+            -DANDROID_SDK_ROOT="${ANDROID_SDK_ROOT}" \
+            -DANDROID_NDK_ROOT="${ANDROID_NDK_ROOT}" \
+            -DQT_HOST_PATH="${QT_HOST_ROOT}" \
+            -DQT_ANDROID_BUILD_ALL_ABIS=OFF \
+            -DMUKEI_USE_REAL_BRIDGE=OFF \
+            -DMUKEI_USE_NATIVE_INFERENCE=OFF
+          cmake --build "${BUILD_DIR}" --target mukei --parallel 2
+          cmake --build "${BUILD_DIR}" --target mukei_make_apk --parallel 2
+
+          APK="$(find "${BUILD_DIR}" -type f -name '*.apk' -print | sort | tail -n 1)"
+          test -n "${APK}"
+          mkdir -p dist/emulator
+          cp "${APK}" dist/emulator/mukei-ui-shell-emulator.apk
+          python3 scripts/android/prepare-branding.py cleanup --repo-root "${GITHUB_WORKSPACE}" --state "${STATE}"
+          trap - EXIT
+
+      - name: Launch and exercise core navigation
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: |
+            set -euo pipefail
+            mkdir -p dist/emulator/evidence
+            adb install -r dist/emulator/mukei-ui-shell-emulator.apk
+            adb logcat -c
+            adb shell am force-stop app.mukei
+            adb shell am start -W -n app.mukei/org.qtproject.qt.android.bindings.QtActivity
+            sleep 10
+            PID="$(adb shell pidof app.mukei | tr -d '\r')"
+            test -n "${PID}"
+            adb exec-out screencap -p > dist/emulator/evidence/01-chat.png
+
+            # Pixel 6 profile is 1080px wide. Exercise the top-right Settings target.
+            adb shell input tap 990 180
+            sleep 2
+            adb exec-out screencap -p > dist/emulator/evidence/02-settings.png
+            adb shell uiautomator dump /sdcard/mukei-window.xml >/dev/null
+            adb pull /sdcard/mukei-window.xml dist/emulator/evidence/window.xml >/dev/null
+
+            adb shell input keyevent 4
+            sleep 1
+            adb exec-out screencap -p > dist/emulator/evidence/03-back.png
+            adb logcat -d -v threadtime > dist/emulator/evidence/logcat.txt
+            test -n "$(adb shell pidof app.mukei | tr -d '\r')"
+
+      - name: Upload emulator evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mukei-android-emulator-smoke-evidence
+          path: dist/emulator
+          if-no-files-found: error
+          retention-days: 14
