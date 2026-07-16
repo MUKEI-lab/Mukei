@@ -3,6 +3,7 @@ use std::path::Path;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use zeroize::Zeroizing;
 
 use crate::error::MukeiError;
 
@@ -33,4 +34,9 @@ pub trait RuntimeRagService: Send + Sync {
     async fn retrieve(&self, query: &str, top_k: usize) -> Result<Vec<String>, MukeiError>;
 
     async fn revoke_document(&self, document_id: &str) -> Result<usize, MukeiError>;
+}
+
+struct RemoteToolSecrets {
+    brave_key: Zeroizing<String>,
+    tavily_key: Zeroizing<String>,
 }
