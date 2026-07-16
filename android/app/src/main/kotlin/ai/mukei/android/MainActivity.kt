@@ -24,14 +24,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MukeiTheme {
-                MukeiApp()
+                MukeiApp(BackendRuntimeHost.state)
             }
         }
     }
 }
 
 @Composable
-private fun MukeiApp() {
+private fun MukeiApp(backendState: BackendRuntimeHost.State) {
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
@@ -54,10 +54,22 @@ private fun MukeiApp() {
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            LinearProgressIndicator()
+            if (backendState is BackendRuntimeHost.State.Starting) {
+                LinearProgressIndicator()
+            }
             Text(
-                text = "Protocol ${ProtocolVersion.CURRENT.major}.${ProtocolVersion.CURRENT.minor} · native runtime pending",
+                text = when (backendState) {
+                    BackendRuntimeHost.State.Starting -> "Starting encrypted native runtime"
+                    is BackendRuntimeHost.State.Ready -> "Backend ready · ${backendState.securitySummary}"
+                    is BackendRuntimeHost.State.Failed -> "Backend unavailable · ${backendState.code}"
+                    BackendRuntimeHost.State.Stopped -> "Backend stopped"
+                },
                 style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Protocol ${ProtocolVersion.CURRENT.major}.${ProtocolVersion.CURRENT.minor}",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
