@@ -11,7 +11,6 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.KeyStore
-import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -21,12 +20,11 @@ import org.json.JSONObject
 /**
  * Creates a production runtime backed by SQLCipher and Android Keystore.
  *
- * The raw 32-byte database key exists only in short-lived byte arrays. At rest,
- * only an AES-GCM envelope is stored below app-private files storage. The AES
- * wrapping key is non-exportable and remains inside Android Keystore.
+ * Rust owns raw SQLCipher key generation. Kotlin only wraps or unwraps the
+ * transient key with a non-exportable Android Keystore AES-GCM key. At rest,
+ * only the authenticated ciphertext envelope is stored below app-private files.
  */
 object SecureRuntimeFactory {
-    /** Opens or creates the wrapped database key and constructs the secure JNI runtime. */
     @Synchronized
     fun open(
         context: Context,
@@ -64,7 +62,15 @@ object SecureRuntimeFactory {
     }
 
     private fun createAndPersistDatabaseKey(keyFile: File): ByteArray {
-        val rawKey = ByteArray(DATABASE_KEY_BYTES).also(SecureRandom()::nextBytes)
+        val rawKey = try {
+            NativeBindings.generateDatabaseKey()
+        } catch (failure: Throwable) {
+            throw SecurityBootstrapException("database_key_generation_failed", failure)
+        }
+        if (rawKey.size != DATABASE_KEY_BYTES) {
+            rawKey.fill(0)
+            throw SecurityBootstrapException("database_key_generation_failed")
+        }
         return try {
             val wrapped = wrap(rawKey)
             try {
@@ -180,10 +186,7 @@ object SecureRuntimeFactory {
         val parent = target.parentFile
             ?: throw SecurityBootstrapException("secure_storage_unavailable")
         val temporary = File(parent, ".${target.name}.partial").canonicalFile
-        ensureInsideFilesDir(
-            temporary,
-            parent.parentFile?.canonicalFile ?: parent.canonicalFile,
-        )
+        ensureInsideFilesDir(temporary, parent.canonicalFile)
         try {
             FileOutputStream(temporary).use { output ->
                 output.write(bytes)
