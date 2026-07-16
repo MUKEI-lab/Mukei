@@ -39,12 +39,13 @@ jobs:
             qml/screens/SafeModeScreen.qml \
             qml/stores/NavigationStore.qml \
             qml/screens/DiagnosticsScreen.qml \
-            rust/crates/mukei-bridge/src/lib.rs
+            rust/crates/mukei-bridge/src/lib.rs \
+            rust/crates/mukei-bridge/src/protocol.rs
           if git diff --cached --quiet; then
             echo "Startup source already finalized."
             exit 0
           fi
-          git commit -m "fix(startup): wire safe-mode recovery actions"
+          git commit -m "fix(startup): finalize observable protocol dispatch"
           git fetch origin "${GITHUB_REF_NAME}"
           git rebase "origin/${GITHUB_REF_NAME}"
           git push --force-with-lease origin HEAD:"${GITHUB_REF_NAME}"
