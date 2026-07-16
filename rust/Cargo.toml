@@ -17,7 +17,7 @@ exclude = [
 [workspace.package]
 version = "0.7.5"
 edition = "2021"
-rust-version = "1.78"
+rust-version = "1.82"
 license = "Apache-2.0"
 authors = ["Mukei AI Architecture Pass"]
 
