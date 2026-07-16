@@ -114,6 +114,8 @@ impl RuntimeRegistry {
     }
 }
 
+include!("secure_runtime_jni.rs");
+
 #[cfg(test)]
 mod tests {
     use super::*;

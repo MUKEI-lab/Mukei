@@ -13,6 +13,9 @@ interface MukeiNativeGateway : Closeable {
     /** Returns the negotiated native runtime and transport contract. */
     fun protocolCapabilities(): ByteArray
 
+    /** Returns the local-only security/bootstrap state for this runtime. */
+    fun securityStatus(): ByteArray
+
     /** Submits one Protocol V2 command envelope. */
     fun submitCommand(commandJson: ByteArray): ByteArray
 
@@ -40,12 +43,18 @@ interface MukeiNativeGateway : Closeable {
 
 class RustNativeGateway private constructor(
     private val nativeHandle: Long,
+    private val secureRuntime: Boolean,
 ) : MukeiNativeGateway {
     private val closed = AtomicBoolean(false)
 
     override fun protocolCapabilities(): ByteArray {
         checkOpen()
         return NativeBindings.protocolCapabilities(nativeHandle)
+    }
+
+    override fun securityStatus(): ByteArray {
+        checkOpen()
+        return NativeBindings.securityStatus(nativeHandle)
     }
 
     override fun submitCommand(commandJson: ByteArray): ByteArray {
@@ -109,7 +118,11 @@ class RustNativeGateway private constructor(
             try {
                 NativeBindings.shutdownRuntime(nativeHandle)
             } finally {
-                NativeBindings.destroyRuntime(nativeHandle)
+                if (secureRuntime) {
+                    NativeBindings.destroySecureRuntime(nativeHandle)
+                } else {
+                    NativeBindings.destroyRuntime(nativeHandle)
+                }
             }
         }
     }
@@ -123,7 +136,18 @@ class RustNativeGateway private constructor(
             require(configJson.isNotEmpty()) { "Runtime configuration must not be empty" }
             val handle = NativeBindings.createRuntime(configJson)
             check(handle > 0L) { "Native runtime creation failed" }
-            return RustNativeGateway(handle)
+            return RustNativeGateway(handle, secureRuntime = false)
+        }
+
+        fun createSecure(
+            configJson: ByteArray,
+            databaseKey: ByteArray,
+        ): RustNativeGateway {
+            require(configJson.isNotEmpty()) { "Runtime configuration must not be empty" }
+            require(databaseKey.size == 32) { "SQLCipher key must be exactly 32 bytes" }
+            val handle = NativeBindings.createSecureRuntime(configJson, databaseKey)
+            check(handle > 0L) { "Secure native runtime creation failed" }
+            return RustNativeGateway(handle, secureRuntime = true)
         }
     }
 }
@@ -135,11 +159,20 @@ internal object NativeBindings {
 
     external fun createRuntime(configJson: ByteArray): Long
 
+    external fun createSecureRuntime(
+        configJson: ByteArray,
+        databaseKey: ByteArray,
+    ): Long
+
     external fun shutdownRuntime(handle: Long): ByteArray
 
     external fun destroyRuntime(handle: Long)
 
+    external fun destroySecureRuntime(handle: Long)
+
     external fun protocolCapabilities(handle: Long): ByteArray
+
+    external fun securityStatus(handle: Long): ByteArray
 
     external fun submitCommand(
         handle: Long,

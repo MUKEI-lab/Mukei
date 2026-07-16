@@ -17,13 +17,14 @@ default = ["runtime_development"]
 runtime_development = []
 runtime_test = []
 native_inference = []
+secure_runtime = ["mukei-core/sqlcipher"]
+# Android production uses the Mukei-owned llama capsule through
+# `native_inference`; enabling the legacy llama-cpp-rs feature here would build
+# a second inference stack and break the single-capsule provenance contract.
 runtime_production = [
     "native_inference",
-    "mukei-core/llama_cpp",
-    "mukei-core/sqlcipher",
+    "secure_runtime",
     "mukei-core/network",
-    "mukei-core/candle",
-    "mukei-core/usearch_hnsw",
 ]
 runtime_hardening = ["mukei-core/runtime_hardening"]
 
@@ -39,3 +40,4 @@ chrono = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
+zeroize = { workspace = true }
