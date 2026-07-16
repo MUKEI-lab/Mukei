@@ -1,4 +1,4 @@
-//! TRD §5.4 — cached hardware snapshot tool.
+//! Cached hardware snapshot tool.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,6 +11,7 @@ use parking_lot::RwLock;
 use serde_json::Value;
 
 use crate::error::{MukeiError, Result};
+use crate::tools::sentinel::{wrap_external_data, ExternalDataSource};
 use crate::tools::Tool;
 
 #[derive(Default)]
@@ -48,11 +49,9 @@ impl Tool for HardwareTool {
             }
         }
 
-        let join = crate::runtime::spawn_blocking_tool(build_payload);
-        let payload = join
+        let payload = crate::runtime::spawn_blocking_tool(build_payload)
             .await
-            .map_err(|e| MukeiError::BlockingJoinFailed(e.to_string()))??;
-
+            .map_err(|error| MukeiError::BlockingJoinFailed(error.to_string()))??;
         *CACHE.write() = Some(CachedHardwareInfo {
             turn_generation: turn,
             payload: payload.clone(),
@@ -68,16 +67,16 @@ fn build_payload() -> Result<String> {
     map.insert(
         "logical_cpus",
         std::thread::available_parallelism()
-            .map(|n| n.get().to_string())
+            .map(|value| value.get().to_string())
             .unwrap_or_else(|_| "unknown".to_string()),
     );
 
     if let Ok(cpuinfo) = fs::read_to_string("/proc/cpuinfo") {
         let model = cpuinfo
             .lines()
-            .find_map(|line| line.split_once(':').map(|(k, v)| (k.trim(), v.trim())))
-            .filter(|(k, _)| *k == "model name" || *k == "Hardware" || *k == "Processor")
-            .map(|(_, v)| v.to_string())
+            .find_map(|line| line.split_once(':').map(|(key, value)| (key.trim(), value.trim())))
+            .filter(|(key, _)| *key == "model name" || *key == "Hardware" || *key == "Processor")
+            .map(|(_, value)| value.to_string())
             .unwrap_or_else(|| "unknown".to_string());
         map.insert("cpu_model", model);
     }
@@ -91,12 +90,9 @@ fn build_payload() -> Result<String> {
         }
     }
 
-    let json =
-        serde_json::to_string_pretty(&map).map_err(|e| MukeiError::Internal(e.to_string()))?;
-    Ok(format!(
-        "<external_data source=\"get_hardware_info\" trust=\"local_device\">\n{}\n</external_data>",
-        json
-    ))
+    let json = serde_json::to_string_pretty(&map)
+        .map_err(|error| MukeiError::Internal(error.to_string()))?;
+    Ok(wrap_external_data(ExternalDataSource::Hardware, &json))
 }
 
 #[cfg(test)]
@@ -104,9 +100,11 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn returns_external_data_wrapper() {
-        let tool = HardwareTool;
-        let value = tool.run(serde_json::json!({})).await.unwrap();
-        assert!(value.contains("<external_data"));
+    async fn returns_canonical_external_data_wrapper() {
+        let value = HardwareTool
+            .run(serde_json::json!({}))
+            .await
+            .unwrap();
+        assert!(value.starts_with("<external_data source=\"hardware\" trust=\"untrusted\">"));
     }
 }
