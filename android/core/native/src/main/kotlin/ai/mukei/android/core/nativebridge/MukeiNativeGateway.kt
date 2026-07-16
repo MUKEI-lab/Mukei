@@ -3,12 +3,6 @@ package ai.mukei.android.core.nativebridge
 import java.io.Closeable
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * Narrow Kotlin boundary for the process-scoped Rust runtime.
- *
- * Feature modules depend on this interface and never call [NativeBindings]
- * directly. All returned payloads are bounded Protocol V2 UTF-8 JSON bytes.
- */
 interface MukeiNativeGateway : Closeable {
     fun protocolCapabilities(): ByteArray
     fun securityStatus(): ByteArray
@@ -43,6 +37,16 @@ class RustNativeGateway private constructor(
     override fun securityStatus(): ByteArray {
         checkOpen()
         return NativeBindings.securityStatus(nativeHandle)
+    }
+
+    fun configureRemoteTools(
+        braveKey: ByteArray,
+        tavilyKey: ByteArray,
+    ): ByteArray {
+        checkOpen()
+        require(braveKey.isNotEmpty() && braveKey.size <= MAX_PROVIDER_KEY_BYTES)
+        require(tavilyKey.isNotEmpty() && tavilyKey.size <= MAX_PROVIDER_KEY_BYTES)
+        return NativeBindings.configureRemoteTools(nativeHandle, braveKey, tavilyKey)
     }
 
     override fun submitCommand(commandJson: ByteArray): ByteArray {
@@ -116,6 +120,8 @@ class RustNativeGateway private constructor(
     }
 
     companion object {
+        private const val MAX_PROVIDER_KEY_BYTES = 16 * 1024
+
         fun create(configJson: ByteArray): RustNativeGateway {
             require(configJson.isNotEmpty()) { "Runtime configuration must not be empty" }
             val handle = NativeBindings.createRuntime(configJson)
@@ -148,6 +154,12 @@ internal object NativeBindings {
         configJson: ByteArray,
         databaseKey: ByteArray,
     ): Long
+
+    external fun configureRemoteTools(
+        handle: Long,
+        braveKey: ByteArray,
+        tavilyKey: ByteArray,
+    ): ByteArray
 
     external fun shutdownRuntime(handle: Long): ByteArray
     external fun destroyRuntime(handle: Long)
