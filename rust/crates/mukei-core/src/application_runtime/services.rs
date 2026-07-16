@@ -14,6 +14,16 @@ impl MukeiRuntime {
         if let Some(value) = self.async_runtime.block_on(store.load("settings"))? {
             let settings: HashMap<String, Value> = serde_json::from_value(value)
                 .map_err(|_| MukeiError::DatabaseCorruption)?;
+            if let Some(policy) = settings
+                .get("remote_feature_policy")
+                .and_then(Value::as_str)
+                .and_then(|value| value.parse::<crate::tools::RemoteFeaturePolicy>().ok())
+            {
+                *self
+                    .remote_policy
+                    .write()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = policy;
+            }
             *self
                 .settings
                 .write()
@@ -39,14 +49,10 @@ impl MukeiRuntime {
     }
 
     /// Install transient, already-unwrapped provider credentials.
-    ///
-    /// Credentials are never persisted by core. The active policy remains
-    /// local-only unless a validated settings command explicitly enables remote
-    /// access.
     pub fn configure_remote_tools(
         &self,
-        brave_key: Zeroizing<String>,
-        tavily_key: Zeroizing<String>,
+        brave_key: zeroize::Zeroizing<String>,
+        tavily_key: zeroize::Zeroizing<String>,
     ) -> Result<(), MukeiError> {
         if brave_key.trim().is_empty() || tavily_key.trim().is_empty() {
             return Err(MukeiError::ConfigInvalid {
@@ -72,10 +78,7 @@ impl MukeiRuntime {
         Ok(())
     }
 
-    fn set_remote_policy(
-        &self,
-        policy: crate::tools::RemoteFeaturePolicy,
-    ) {
+    fn set_remote_policy(&self, policy: crate::tools::RemoteFeaturePolicy) {
         *self
             .remote_policy
             .write()
@@ -136,8 +139,8 @@ impl MukeiRuntime {
                     if matches!(remote_policy, crate::tools::RemoteFeaturePolicy::RemoteAllowed) =>
                 {
                     ToolRegistry::with_web_search_secrets_and_policy(
-                        Zeroizing::new(secrets.brave_key.as_str().to_owned()),
-                        Zeroizing::new(secrets.tavily_key.as_str().to_owned()),
+                        zeroize::Zeroizing::new(secrets.brave_key.as_str().to_owned()),
+                        zeroize::Zeroizing::new(secrets.tavily_key.as_str().to_owned()),
                         remote_policy,
                     )
                 }
