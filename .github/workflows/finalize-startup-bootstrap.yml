@@ -6,6 +6,7 @@ on:
     paths:
       - "scripts/frontend/finalize-startup-bootstrap.py"
       - "scripts/frontend/finalize-safe-mode-actions.py"
+      - "scripts/frontend/finalize-rag-prompt.py"
       - ".github/workflows/finalize-startup-bootstrap.yml"
   workflow_dispatch:
 
@@ -27,6 +28,7 @@ jobs:
         run: |
           python3 scripts/frontend/finalize-startup-bootstrap.py
           python3 scripts/frontend/finalize-safe-mode-actions.py
+          python3 scripts/frontend/finalize-rag-prompt.py
       - name: Commit canonical source
         shell: bash
         run: |
@@ -39,15 +41,14 @@ jobs:
             qml/screens/SafeModeScreen.qml \
             qml/stores/NavigationStore.qml \
             qml/screens/DiagnosticsScreen.qml \
+            qml/screens/RagRebuildPromptScreen.qml \
             rust/crates/mukei-bridge/src/lib.rs \
             rust/crates/mukei-bridge/src/protocol.rs
           if git diff --cached --quiet; then
-            echo "Startup source already finalized."
+            echo "Frontend startup source already finalized."
             exit 0
           fi
-          git commit -m "fix(startup): finalize observable protocol dispatch"
+          git commit -m "fix(frontend): finalize observable startup actions"
           git fetch origin "${GITHUB_REF_NAME}"
           git rebase "origin/${GITHUB_REF_NAME}"
           git push --force-with-lease origin HEAD:"${GITHUB_REF_NAME}"
-
-# Re-run marker: canonical protocol dispatch after explicit QML dependency injection.
