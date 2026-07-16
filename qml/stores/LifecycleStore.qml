@@ -40,6 +40,8 @@ QtObject {
     function titleForState(value) {
         switch (value) {
         case "bootstrapping": return qsTr("Starting Mukei")
+        case "initialize_submitted": return qsTr("Submitting secure startup")
+        case "initialize_acknowledged": return qsTr("Starting native runtime")
         case "booting": return qsTr("Starting local runtime")
         case "loading_config": return qsTr("Loading private configuration")
         case "needs_database_key": return qsTr("Preparing secure storage")
@@ -72,6 +74,8 @@ QtObject {
             return safeDetail
         switch (value) {
         case "bootstrapping": return qsTr("Connecting the production frontend to the local runtime.")
+        case "initialize_submitted": return qsTr("The frontend has formed a validated protocol command for local initialization.")
+        case "initialize_acknowledged": return qsTr("The bridge accepted the command. The next expected signal is the native boot stage.")
         case "booting": return qsTr("The native runtime is starting on this device.")
         case "loading_config": return qsTr("Mukei is validating app-private paths and local configuration.")
         case "needs_database_key": return qsTr("Waiting for the native secure-key provider. No private data is opened yet.")
