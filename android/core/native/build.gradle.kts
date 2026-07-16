@@ -5,6 +5,7 @@ plugins {
 android {
     namespace = "ai.mukei.android.core.nativebridge"
     compileSdk = 37
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         minSdk = 26
