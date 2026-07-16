@@ -45,6 +45,13 @@ impl MukeiRuntime {
         let operation_id_for_task = operation_id.clone();
         self.async_runtime.handle().spawn(async move {
             if token.is_cancelled() {
+                features.update_operation(
+                    &operation_id_for_task,
+                    OperationStatus::Cancelled,
+                    None,
+                    Some("cancelled".into()),
+                    Value::Null,
+                );
                 return;
             }
             let result = tokio::task::spawn_blocking(move || {
@@ -57,11 +64,7 @@ impl MukeiRuntime {
             .await;
             match result {
                 Ok(Ok(())) => {
-                    features
-                        .models
-                        .write()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        .remove(&model_id);
+                    features.remove_model(&model_id);
                     features.update_operation(
                         &operation_id_for_task,
                         OperationStatus::Completed,
@@ -113,5 +116,4 @@ impl MukeiRuntime {
         });
         acknowledgement
     }
-
 }
