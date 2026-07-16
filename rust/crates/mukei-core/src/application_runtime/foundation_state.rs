@@ -71,6 +71,15 @@ struct ConversationProjection {
     messages: Vec<ChatMessage>,
 }
 
+enum PersistenceCommand {
+    Save {
+        store: Arc<dyn RuntimeProjectionStore>,
+        key: &'static str,
+        value: Value,
+    },
+    Barrier(tokio::sync::oneshot::Sender<()>),
+}
+
 struct FeatureState {
     operations: RwLock<HashMap<String, OperationRecord>>,
     operation_tokens: Mutex<HashMap<String, CancellationToken>>,
@@ -78,11 +87,33 @@ struct FeatureState {
     models: RwLock<HashMap<String, ModelProjection>>,
     documents: RwLock<HashMap<String, DocumentProjection>>,
     projection_store: RwLock<Option<Arc<dyn RuntimeProjectionStore>>>,
-    runtime_handle: tokio::runtime::Handle,
+    persistence_sender: mpsc::UnboundedSender<PersistenceCommand>,
+    persistence_enqueue: Mutex<()>,
 }
 
 impl FeatureState {
     fn new(runtime_handle: tokio::runtime::Handle) -> Self {
+        let (persistence_sender, mut persistence_receiver) =
+            mpsc::unbounded_channel::<PersistenceCommand>();
+        runtime_handle.spawn(async move {
+            while let Some(command) = persistence_receiver.recv().await {
+                match command {
+                    PersistenceCommand::Save { store, key, value } => {
+                        if let Err(error) = store.save(key, value).await {
+                            tracing::error!(
+                                code = error.error_code(),
+                                projection = key,
+                                "projection save failed"
+                            );
+                        }
+                    }
+                    PersistenceCommand::Barrier(acknowledgement) => {
+                        let _ = acknowledgement.send(());
+                    }
+                }
+            }
+        });
+
         Self {
             operations: RwLock::new(HashMap::new()),
             operation_tokens: Mutex::new(HashMap::new()),
@@ -90,7 +121,8 @@ impl FeatureState {
             models: RwLock::new(HashMap::new()),
             documents: RwLock::new(HashMap::new()),
             projection_store: RwLock::new(None),
-            runtime_handle,
+            persistence_sender,
+            persistence_enqueue: Mutex::new(()),
         }
     }
 
@@ -110,10 +142,13 @@ impl FeatureState {
         let Some(store) = store else { return Ok(()); };
 
         if let Some(value) = store.load("operations").await? {
-            let mut records: Vec<OperationRecord> = serde_json::from_value(value)
-                .map_err(|error| MukeiError::DatabaseCorruption)?;
+            let mut records: Vec<OperationRecord> =
+                serde_json::from_value(value).map_err(|_| MukeiError::DatabaseCorruption)?;
             for record in &mut records {
-                if matches!(record.status, OperationStatus::Accepted | OperationStatus::Running) {
+                if matches!(
+                    record.status,
+                    OperationStatus::Accepted | OperationStatus::Running
+                ) {
                     record.status = OperationStatus::Failed;
                     record.updated_at = Utc::now();
                     record.detail = Some("interrupted_by_process_death".into());
@@ -128,30 +163,35 @@ impl FeatureState {
                 .collect();
         }
         if let Some(value) = store.load("models").await? {
-            let records: Vec<ModelProjection> = serde_json::from_value(value)
-                .map_err(|_| MukeiError::DatabaseCorruption)?;
+            let records: Vec<ModelProjection> =
+                serde_json::from_value(value).map_err(|_| MukeiError::DatabaseCorruption)?;
             *self.models.write().unwrap_or_else(|p| p.into_inner()) = records
                 .into_iter()
                 .map(|record| (record.model_id.clone(), record))
                 .collect();
         }
         if let Some(value) = store.load("documents").await? {
-            let records: Vec<DocumentProjection> = serde_json::from_value(value)
-                .map_err(|_| MukeiError::DatabaseCorruption)?;
+            let records: Vec<DocumentProjection> =
+                serde_json::from_value(value).map_err(|_| MukeiError::DatabaseCorruption)?;
             *self.documents.write().unwrap_or_else(|p| p.into_inner()) = records
                 .into_iter()
                 .map(|record| (record.document_id.clone(), record))
                 .collect();
         }
         if let Some(value) = store.load("conversations").await? {
-            let records: Vec<ConversationProjection> = serde_json::from_value(value)
-                .map_err(|_| MukeiError::DatabaseCorruption)?;
+            let records: Vec<ConversationProjection> =
+                serde_json::from_value(value).map_err(|_| MukeiError::DatabaseCorruption)?;
             *self
                 .conversations
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = records
                 .into_iter()
-                .map(|record| ((record.conversation_id, record.branch_id), record.messages))
+                .map(|record| {
+                    (
+                        (record.conversation_id, record.branch_id),
+                        record.messages,
+                    )
+                })
                 .collect();
         }
         self.persist_operations();
@@ -165,14 +205,20 @@ impl FeatureState {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
         let Some(store) = store else { return; };
-        self.runtime_handle.spawn(async move {
-            if let Err(error) = store.save(key, value).await {
-                tracing::error!(code = error.error_code(), projection = key, "projection save failed");
-            }
-        });
+        if self
+            .persistence_sender
+            .send(PersistenceCommand::Save { store, key, value })
+            .is_err()
+        {
+            tracing::error!(projection = key, "projection writer unavailable");
+        }
     }
 
     fn persist_operations(&self) {
+        let _enqueue = self
+            .persistence_enqueue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let records = self
             .operations
             .read()
@@ -186,6 +232,10 @@ impl FeatureState {
     }
 
     fn persist_models(&self) {
+        let _enqueue = self
+            .persistence_enqueue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let records = self
             .models
             .read()
@@ -199,6 +249,10 @@ impl FeatureState {
     }
 
     fn persist_documents(&self) {
+        let _enqueue = self
+            .persistence_enqueue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let records = self
             .documents
             .read()
@@ -212,16 +266,22 @@ impl FeatureState {
     }
 
     fn persist_conversations(&self) {
+        let _enqueue = self
+            .persistence_enqueue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let records = self
             .conversations
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .iter()
-            .map(|((conversation_id, branch_id), messages)| ConversationProjection {
-                conversation_id: conversation_id.clone(),
-                branch_id: branch_id.clone(),
-                messages: messages.clone(),
-            })
+            .map(
+                |((conversation_id, branch_id), messages)| ConversationProjection {
+                    conversation_id: conversation_id.clone(),
+                    branch_id: branch_id.clone(),
+                    messages: messages.clone(),
+                },
+            )
             .collect::<Vec<_>>();
         if let Ok(value) = serde_json::to_value(records) {
             self.persist_value("conversations", value);
@@ -377,10 +437,15 @@ impl FeatureState {
             .conversations
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(messages) = conversations.get_mut(&(conversation.to_owned(), branch.to_owned())) else {
+        let Some(messages) =
+            conversations.get_mut(&(conversation.to_owned(), branch.to_owned()))
+        else {
             return false;
         };
-        let Some(index) = messages.iter().rposition(|message| message.role == Role::Assistant) else {
+        let Some(index) = messages
+            .iter()
+            .rposition(|message| message.role == Role::Assistant)
+        else {
             return false;
         };
         messages.remove(index);
@@ -399,7 +464,9 @@ impl FeatureState {
 
     fn update_model(&self, model_id: &str, update: impl FnOnce(&mut ModelProjection)) -> bool {
         let mut models = self.models.write().unwrap_or_else(|p| p.into_inner());
-        let Some(model) = models.get_mut(model_id) else { return false; };
+        let Some(model) = models.get_mut(model_id) else {
+            return false;
+        };
         update(model);
         drop(models);
         self.persist_models();
@@ -438,7 +505,9 @@ impl FeatureState {
         update: impl FnOnce(&mut DocumentProjection),
     ) -> bool {
         let mut documents = self.documents.write().unwrap_or_else(|p| p.into_inner());
-        let Some(document) = documents.get_mut(document_id) else { return false; };
+        let Some(document) = documents.get_mut(document_id) else {
+            return false;
+        };
         update(document);
         drop(documents);
         self.persist_documents();
@@ -470,7 +539,10 @@ impl FeatureState {
             .values()
             .filter(|record| {
                 record.command_type == command_type
-                    && matches!(record.status, OperationStatus::Accepted | OperationStatus::Running)
+                    && matches!(
+                        record.status,
+                        OperationStatus::Accepted | OperationStatus::Running
+                    )
             })
             .map(|record| record.operation_id.clone())
             .collect()
