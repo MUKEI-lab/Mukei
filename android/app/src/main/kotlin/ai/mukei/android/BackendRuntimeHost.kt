@@ -68,8 +68,12 @@ object BackendRuntimeHost {
         private set
 
     fun addEventListener(listener: EventBatchListener): Closeable {
-        eventListeners += listener
-        return Closeable { eventListeners -= listener }
+        eventListeners.add(listener)
+        return object : Closeable {
+            override fun close() {
+                eventListeners.remove(listener)
+            }
+        }
     }
 
     fun start(context: Context) {
@@ -246,7 +250,9 @@ object BackendRuntimeHost {
     private fun dispatch(batch: RuntimeEventBatch) {
         if (batch.events.isEmpty()) return
         val lastType = runCatching {
-            JSONObject(batch.events.last()).optString("event_type").ifBlank { null }
+            JSONObject(batch.events.last())
+                .optString("event_type")
+                .takeIf { it.isNotBlank() }
         }.getOrNull()
         mainHandler.post {
             eventStatus = eventStatus.copy(
