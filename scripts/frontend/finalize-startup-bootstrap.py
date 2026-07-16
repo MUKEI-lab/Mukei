@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
 
+from install_stabilization_batch import main as install_stabilization_batch
+
 ROOT = Path(__file__).resolve().parents[2]
 APP = ROOT / "qml/architecture/AppCoordinator.qml"
 LIFE = ROOT / "qml/stores/LifecycleStore.qml"
@@ -176,4 +178,5 @@ async fn persist_provider_secret_refs(
 APP.write_text(patch_app(APP.read_text()), encoding="utf-8")
 LIFE.write_text(patch_life(LIFE.read_text()), encoding="utf-8")
 RUST.write_text(patch_rust(RUST.read_text()), encoding="utf-8")
+install_stabilization_batch()
 print("startup bootstrap source finalized")
