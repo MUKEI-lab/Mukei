@@ -1,11 +1,13 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import "../architecture"
 import "../theme"
 import "../components"
 
 Page {
     id: root
+    objectName: "ragRebuildPromptScreen"
 
     background: Rectangle {
         color: Theme.p.background
@@ -35,12 +37,24 @@ Page {
             wrapMode: Text.Wrap
             Component.onCompleted: Type.apply(this, Type.bodyUI)
         }
+        Text {
+            Layout.fillWidth: true
+            text: qsTr("Rebuild is not available in this runtime yet. No indexing action will be simulated or started silently.")
+            color: Theme.p.inkSecondary
+            wrapMode: Text.Wrap
+            Component.onCompleted: Type.apply(this, Type.bodySmall)
+        }
         RowLayout {
             PrimaryButton {
-                text: qsTr("Rebuild now")
+                objectName: "ragRebuildUnavailableButton"
+                // interaction-audit: exempt — awaiting a supported local rebuild operation.
+                text: qsTr("Rebuild unavailable")
+                enabled: false
             }
             GhostButton {
+                objectName: "ragRebuildSkipButton"
                 text: qsTr("Skip for now")
+                onClicked: IntentDispatcher.dispatch({ type: "navigation.back" })
             }
         }
         Item {
