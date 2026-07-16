@@ -33,6 +33,8 @@ pub mod settings;
 pub mod ui_session;
 #[cfg(feature = "rusqlite")]
 pub mod universal_repository;
+#[cfg(feature = "rusqlite")]
+pub mod version_repository;
 
 pub use file_policy::{
     admit_file_name, AllowedFileName, FileAdmissionError, FileAdmissionRule,
@@ -94,6 +96,10 @@ pub use ui_session::{
 pub use universal_repository::{
     PersistedSystemDirectory, PersistedUniversalStorage, PersistedWorkspace,
     UniversalStorageRepository,
+};
+#[cfg(feature = "rusqlite")]
+pub use version_repository::{
+    FileVersionRepository, NewFileVersion, PersistedFileVersion, VersionCreator,
 };
 
 #[cfg(feature = "tokio")]
