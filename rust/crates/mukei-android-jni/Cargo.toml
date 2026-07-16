@@ -16,7 +16,9 @@ path = "src/lib.rs"
 default = ["runtime_development"]
 runtime_development = []
 runtime_test = []
+native_inference = []
 runtime_production = [
+    "native_inference",
     "mukei-core/llama_cpp",
     "mukei-core/sqlcipher",
     "mukei-core/network",
@@ -27,10 +29,13 @@ runtime_hardening = ["mukei-core/runtime_hardening"]
 
 [dependencies]
 mukei-core = { path = "../mukei-core", default-features = false, features = ["std", "tokio"] }
+async-trait = { workspace = true }
 jni = { workspace = true }
 once_cell = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }

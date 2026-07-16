@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
 
 mod runtime_registry;
+#[cfg(feature = "native_inference")]
+mod native_inference;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr::null_mut;
@@ -11,7 +13,10 @@ use jni::objects::{JByteArray, JObject, JString};
 use jni::sys::{jbyteArray, jint, jlong};
 use jni::JNIEnv;
 use mukei_core::application_runtime::{
-    MukeiRuntime, RuntimeConfig, RuntimeSnapshotDomain,
+    MukeiRuntime, RuntimeConfig, RuntimeServices, RuntimeSnapshotDomain,
+};
+use mukei_core::platform::{
+    PlatformResponse, MAX_PLATFORM_DRAIN_ITEMS,
 };
 use mukei_core::ui_protocol::{
     ClientKind, CommandAcknowledgementV2, CommandEnvelopeV2, EventBatchV2,
@@ -26,12 +31,44 @@ use serde_json::json;
 use runtime_registry::RuntimeRegistry;
 
 const MAX_DRAIN_TIMEOUT_MS: jlong = 30_000;
+const MAX_PLATFORM_RESPONSE_BYTES: usize = 512 * 1024;
 
 static RUNTIMES: Lazy<Mutex<RuntimeRegistry>> =
     Lazy::new(|| Mutex::new(RuntimeRegistry::default()));
 
 fn runtime_entry(handle: jlong) -> Option<Arc<MukeiRuntime>> {
     RUNTIMES.lock().get(handle)
+}
+
+#[cfg(feature = "native_inference")]
+fn runtime_services(config: &RuntimeConfig) -> RuntimeServices {
+    use std::path::Path;
+
+    if !native_inference::implementation_available() {
+        return RuntimeServices::default();
+    }
+    let product = mukei_core::config::MukeiConfig::default_for_data_root(Path::new(
+        &config.app_data_dir,
+    ));
+    let max_new_tokens = product
+        .watchdog
+        .max_token_budget
+        .clamp(1, u64::from(u32::MAX)) as u32;
+    RuntimeServices {
+        backend_factory: Some(Arc::new(
+            native_inference::AndroidLlamaBackendFactory::new(
+                product.n_ctx,
+                product.n_threads,
+                product.gpu_layers,
+                max_new_tokens,
+            ),
+        )),
+    }
+}
+
+#[cfg(not(feature = "native_inference"))]
+fn runtime_services(_config: &RuntimeConfig) -> RuntimeServices {
+    RuntimeServices::default()
 }
 
 fn panic_payload() -> Vec<u8> {
@@ -114,7 +151,8 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_cr
             Ok(value) => value,
             Err(_) => return 0,
         };
-        let runtime = match MukeiRuntime::create(config) {
+        let services = runtime_services(&config);
+        let runtime = match MukeiRuntime::create_with_services(config, services) {
             Ok(runtime) => Arc::new(runtime),
             Err(_) => return 0,
         };
@@ -175,7 +213,7 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_pr
             protocol: runtime
                 .capabilities()
                 .with_transport(CAP_ANDROID_JNI_TRANSPORT),
-            snapshot_schema_version: 1,
+            snapshot_schema_version: 2,
         })
     });
     to_java_bytes(&mut env, &response)
@@ -252,6 +290,72 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_dr
             events: drain.events,
             has_more: drain.has_more,
         })
+    });
+    to_java_bytes(&mut env, &response)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_drainPlatformRequests(
+    mut env: JNIEnv<'_>,
+    _this: JObject<'_>,
+    handle: jlong,
+    maximum_requests: jint,
+    timeout_milliseconds: jlong,
+) -> jbyteArray {
+    let response = guarded_bytes(|| {
+        let Some(runtime) = runtime_entry(handle) else {
+            return invalid_handle_payload();
+        };
+        if !(1..=MAX_PLATFORM_DRAIN_ITEMS as jint).contains(&maximum_requests)
+            || !(0..=MAX_DRAIN_TIMEOUT_MS).contains(&timeout_milliseconds)
+        {
+            return error_payload(
+                "invalid_platform_drain_request",
+                "The platform batch size or timeout is outside the supported bounds.",
+            );
+        }
+        serialize(&runtime.drain_platform_requests(
+            maximum_requests as usize,
+            Duration::from_millis(timeout_milliseconds as u64),
+        ))
+    });
+    to_java_bytes(&mut env, &response)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_submitPlatformResponse(
+    mut env: JNIEnv<'_>,
+    _this: JObject<'_>,
+    handle: jlong,
+    response_json: JByteArray<'_>,
+) -> jbyteArray {
+    let response = guarded_bytes(|| {
+        let Some(runtime) = runtime_entry(handle) else {
+            return invalid_handle_payload();
+        };
+        let response_bytes = match env.convert_byte_array(&response_json) {
+            Ok(bytes) => bytes,
+            Err(_) => return error_payload("invalid_platform_response", "Unreadable response bytes."),
+        };
+        if response_bytes.is_empty() || response_bytes.len() > MAX_PLATFORM_RESPONSE_BYTES {
+            return error_payload(
+                "invalid_platform_response",
+                "The platform response size is outside the supported bounds.",
+            );
+        }
+        let response: PlatformResponse = match serde_json::from_slice(&response_bytes) {
+            Ok(value) => value,
+            Err(_) => {
+                return error_payload(
+                    "invalid_platform_response",
+                    "The platform response is not valid Protocol JSON.",
+                )
+            }
+        };
+        match runtime.submit_platform_response(response) {
+            Ok(()) => serialize(&json!({"accepted": true})),
+            Err(error) => error_payload("platform_response_rejected", &error.to_string()),
+        }
     });
     to_java_bytes(&mut env, &response)
 }
