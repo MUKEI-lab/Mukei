@@ -182,4 +182,23 @@ jobs:
           if-no-files-found: error
           retention-days: 3
       - name: Run CTest
-        run: ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure
+        shell: bash
+        run: |
+          set +e
+          ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure 2>&1 | tee /tmp/mukei-ctest.log
+          status=${PIPESTATUS[0]}
+          set -e
+          mkdir -p /tmp/mukei-ctest-evidence
+          cp /tmp/mukei-ctest.log /tmp/mukei-ctest-evidence/ctest.log
+          if [[ -f "$CMAKE_BUILD_DIR/Testing/Temporary/LastTest.log" ]]; then
+            cp "$CMAKE_BUILD_DIR/Testing/Temporary/LastTest.log" /tmp/mukei-ctest-evidence/LastTest.log
+          fi
+          exit "$status"
+      - name: Upload CTest failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qml-ctest-failure
+          path: /tmp/mukei-ctest-evidence
+          if-no-files-found: error
+          retention-days: 7
