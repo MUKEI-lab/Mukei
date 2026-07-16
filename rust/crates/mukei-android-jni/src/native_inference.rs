@@ -156,8 +156,8 @@ impl NativeLlamaBackend {
         let generation = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             let mut state = CallbackState {
-                sender: token_sender;
-                cancel;
+                sender: token_sender,
+                cancel,
                 pending: Vec::new(),
                 assistant_text: String::new(),
                 callback_error: None,
