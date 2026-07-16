@@ -1,3 +1,27 @@
+use std::panic::{catch_unwind, AssertUnwindSafe};
+
+use jni::objects::JObject;
+use jni::sys::jbyteArray;
+use jni::JNIEnv;
+use zeroize::Zeroize;
+
+#[no_mangle]
+pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_generateDatabaseKey(
+    mut env: JNIEnv<'_>,
+    _this: JObject<'_>,
+) -> jbyteArray {
+    let mut key = [0_u8; 32];
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        getrandom::getrandom(&mut key).map_err(|_| ())?;
+        Ok::<_, ()>(super::to_java_bytes(&mut env, &key))
+    }))
+    .ok()
+    .and_then(Result::ok)
+    .unwrap_or(std::ptr::null_mut());
+    key.zeroize();
+    result
+}
+
 #[cfg(feature = "secure_runtime")]
 mod secure_runtime {
     use std::collections::HashMap;
@@ -5,17 +29,22 @@ mod secure_runtime {
     use std::path::{Component, Path};
     use std::sync::Arc;
 
+    use async_trait::async_trait;
     use jni::objects::{JByteArray, JObject};
     use jni::sys::{jbyteArray, jlong};
     use jni::JNIEnv;
-    use mukei_core::application_runtime::{MukeiRuntime, RuntimeConfig};
+    use mukei_core::application_runtime::{
+        MukeiRuntime, RuntimeConfig, RuntimeProjectionStore,
+    };
     use mukei_core::diagnostics::{
         install_panic_hook, CrashFingerprint, CrashSink, PanicSink,
     };
-    use mukei_core::storage::{DatabaseEncryptionStatus, DatabasePool, Migrator};
+    use mukei_core::storage::{
+        DatabaseEncryptionStatus, DatabasePool, Migrator, RuntimeProjectionRepository,
+    };
     use once_cell::sync::Lazy;
     use parking_lot::Mutex;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use zeroize::{Zeroize, Zeroizing};
 
     #[derive(Debug)]
@@ -28,6 +57,33 @@ mod secure_runtime {
                 fingerprint = %fingerprint,
                 "native panic contained and persisted locally"
             );
+        }
+    }
+
+    struct SqlcipherProjectionStore {
+        pool: Arc<DatabasePool>,
+    }
+
+    #[async_trait]
+    impl RuntimeProjectionStore for SqlcipherProjectionStore {
+        async fn load(&self, key: &str) -> Result<Option<Value>, mukei_core::MukeiError> {
+            let rows = RuntimeProjectionRepository::list_domain(&self.pool, "runtime").await?;
+            let Some(row) = rows.into_iter().find(|row| row.projection_key == key) else {
+                return Ok(None);
+            };
+            serde_json::from_str(&row.payload_json)
+                .map(Some)
+                .map_err(|_| mukei_core::MukeiError::DatabaseCorruption)
+        }
+
+        async fn save(&self, key: &str, value: Value) -> Result<(), mukei_core::MukeiError> {
+            let payload = serde_json::to_string(&value)
+                .map_err(|error| mukei_core::MukeiError::Internal(error.to_string()))?;
+            RuntimeProjectionRepository::upsert(&self.pool, "runtime", key, payload).await
+        }
+
+        async fn delete(&self, key: &str) -> Result<(), mukei_core::MukeiError> {
+            RuntimeProjectionRepository::delete(&self.pool, "runtime", key).await
         }
     }
 
@@ -107,16 +163,26 @@ mod secure_runtime {
                 return 0;
             }
 
-            let product = mukei_core::config::MukeiConfig::default_for_data_root(app_data_root);
             let config_path = app_data_root.join("mukei.toml");
-            if product.validate_android_storage_paths(&config_path).is_err() {
+            if !config_path.is_file() && mukei_core::config::write_default(&config_path).is_err() {
                 key_bytes.zeroize();
                 return 0;
             }
-            if product.ensure_storage_directories().is_err() {
+            let product = match mukei_core::config::MukeiConfig::load_and_validate(&config_path) {
+                Ok(value) => value,
+                Err(error) => {
+                    key_bytes.zeroize();
+                    mukei_core::diagnostics::logger::log_error(&error);
+                    return 0;
+                }
+            };
+            if product.validate_android_storage_paths(&config_path).is_err()
+                || product.ensure_storage_directories().is_err()
+            {
                 key_bytes.zeroize();
                 return 0;
             }
+
             let database = match DatabasePool::open_with_cipher_key_result(
                 &product.database_path,
                 Zeroizing::new(key_bytes),
@@ -127,10 +193,11 @@ mod secure_runtime {
                     return 0;
                 }
             };
-
             let encryption_status = database.encryption_status;
+            if encryption_status != DatabaseEncryptionStatus::Encrypted {
+                return 0;
+            }
             let database_pool = Arc::new(database.pool);
-            let migrator = Migrator::embedded();
             let migration_runtime = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -139,10 +206,12 @@ mod secure_runtime {
                 Err(_) => return 0,
             };
             let migration_result = migration_runtime.block_on(async {
+                let migrator = Migrator::embedded();
                 migrator
                     .create_pre_migration_backup(&database_pool, &product.database_path)
                     .await?;
                 migrator.apply_pending(&database_pool).await?;
+                RuntimeProjectionRepository::ensure_schema(&database_pool).await?;
                 Ok::<(), mukei_core::MukeiError>(())
             });
             if let Err(error) = migration_result {
@@ -155,6 +224,17 @@ mod secure_runtime {
                 Ok(runtime) => Arc::new(runtime),
                 Err(_) => return 0,
             };
+            let projection_store: Arc<dyn RuntimeProjectionStore> = Arc::new(
+                SqlcipherProjectionStore {
+                    pool: Arc::clone(&database_pool),
+                },
+            );
+            if let Err(error) = runtime.attach_projection_store(projection_store) {
+                mukei_core::diagnostics::logger::log_error(&error);
+                runtime.shutdown();
+                return 0;
+            }
+
             let handle = match super::super::RUNTIMES.lock().insert(Arc::clone(&runtime)) {
                 Some(handle) => handle,
                 None => {
@@ -196,6 +276,7 @@ mod secure_runtime {
                 "panic_hook": mukei_core::diagnostics::panic_hook::is_installed(),
                 "crash_sink": "app_private",
                 "telemetry": "local_only",
+                "projections": "encrypted",
             }))
         });
         super::super::to_java_bytes(&mut env, &response)
