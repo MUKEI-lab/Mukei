@@ -95,6 +95,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          set -o pipefail
+          mkdir -p dist/emulator/evidence
           python3 scripts/android/prepare-branding.py verify
           STATE="${RUNNER_TEMP}/branding-state.json"
           python3 scripts/android/prepare-branding.py materialize --repo-root "${GITHUB_WORKSPACE}" --state "${STATE}"
@@ -113,13 +115,23 @@ jobs:
             -DQT_HOST_PATH="${QT_HOST_ROOT}" \
             -DQT_ANDROID_BUILD_ALL_ABIS=OFF \
             -DMUKEI_USE_REAL_BRIDGE=OFF \
-            -DMUKEI_USE_NATIVE_INFERENCE=OFF
-          cmake --build "${BUILD_DIR}" --target mukei --parallel 2
-          cmake --build "${BUILD_DIR}" --target mukei_make_apk --parallel 2
+            -DMUKEI_USE_NATIVE_INFERENCE=OFF \
+            2>&1 | tee dist/emulator/evidence/configure.log
 
-          APK="$(find "${BUILD_DIR}" -type f -name '*.apk' -print | sort | tail -n 1)"
+          cmake --build "${BUILD_DIR}" --target help \
+            > dist/emulator/evidence/targets.txt 2>&1
+          grep -E '(^|[[:space:]])mukei(_make_apk)?($|[[:space:]])' \
+            dist/emulator/evidence/targets.txt || true
+
+          cmake --build "${BUILD_DIR}" --target mukei --parallel 2 \
+            2>&1 | tee dist/emulator/evidence/build-mukei.log
+          cmake --build "${BUILD_DIR}" --target mukei_make_apk --parallel 2 \
+            2>&1 | tee dist/emulator/evidence/package-apk.log
+
+          find "${BUILD_DIR}" -type f -name '*.apk' -print \
+            | sort | tee dist/emulator/evidence/apk-candidates.txt
+          APK="$(tail -n 1 dist/emulator/evidence/apk-candidates.txt)"
           test -n "${APK}"
-          mkdir -p dist/emulator
           cp "${APK}" dist/emulator/mukei-ui-shell-emulator.apk
           python3 scripts/android/prepare-branding.py cleanup --repo-root "${GITHUB_WORKSPACE}" --state "${STATE}"
           trap - EXIT
@@ -143,6 +155,7 @@ jobs:
             sleep 10
             PID="$(adb shell pidof app.mukei | tr -d '\r')"
             test -n "${PID}"
+            printf '%s\n' "${PID}" > dist/emulator/evidence/pid.txt
             adb exec-out screencap -p > dist/emulator/evidence/01-chat.png
 
             adb shell input tap 990 180
