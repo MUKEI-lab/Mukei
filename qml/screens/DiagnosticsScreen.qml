@@ -8,6 +8,7 @@ import "../components"
 
 Page {
     id: root
+    objectName: "diagnosticsScreen"
     background: Rectangle { color: Theme.p.background }
     Accessible.role: Accessible.Pane
     Accessible.name: qsTr("Diagnostics")
@@ -38,6 +39,7 @@ Page {
             RowLayout {
                 Layout.fillWidth: true
                 IconButton {
+                    objectName: "diagnosticsTopBackButton"
                     visible: ResponsiveStore.compact
                     iconSource: "qrc:/icons/back.svg"
                     text: qsTr("Back")
@@ -122,6 +124,7 @@ Page {
             RowLayout {
                 Layout.fillWidth: true
                 SecondaryButton {
+                    objectName: "diagnosticsRefreshButton"
                     text: qsTr("Refresh")
                     onClicked: {
                         IntentDispatcher.dispatch({ type: "models.refresh" })
@@ -132,12 +135,14 @@ Page {
                     }
                 }
                 PrimaryButton {
+                    objectName: "diagnosticsExportButton"
                     text: DiagnosticsStore.exporting ? qsTr("Exporting…") : qsTr("Create safe report")
                     enabled: !DiagnosticsStore.exporting
                     onClicked: IntentDispatcher.dispatch({ type: "diagnostics.export" })
                 }
                 Item { Layout.fillWidth: true }
                 GhostButton {
+                    objectName: "diagnosticsBackButton"
                     text: qsTr("Back")
                     onClicked: IntentDispatcher.dispatch({ type: "navigation.back" })
                 }
