@@ -48,6 +48,12 @@ jobs:
       - name: Check Android JNI library
         working-directory: rust
         run: cargo check -p mukei-android-jni
+      - name: Check production inference adapter
+        working-directory: rust
+        run: >-
+          cargo check -p mukei-android-jni
+          --no-default-features
+          --features native_inference
       - name: Compile Kotlin scaffold
         run: >-
           gradle -p android

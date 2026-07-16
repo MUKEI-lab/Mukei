@@ -22,10 +22,19 @@ interface MukeiNativeGateway : Closeable {
         timeoutMilliseconds: Long = 1_000,
     ): ByteArray
 
+    /** Drains Android-only service requests emitted by the Rust runtime. */
+    fun drainPlatformRequests(
+        maximumRequests: Int = 8,
+        timeoutMilliseconds: Long = 0,
+    ): ByteArray
+
+    /** Completes one Android-only service request. */
+    fun submitPlatformResponse(responseJson: ByteArray): ByteArray
+
     /** Requests one authoritative Protocol V2 snapshot. */
     fun requestSnapshot(domain: String): ByteArray
 
-    /** Gracefully stops native work while keeping the handle available for final reads. */
+    /** Gracefully stops native work while preserving the handle for final reads. */
     fun shutdown(): ByteArray
 }
 
@@ -59,6 +68,29 @@ class RustNativeGateway private constructor(
             maximumEvents,
             timeoutMilliseconds,
         )
+    }
+
+    override fun drainPlatformRequests(
+        maximumRequests: Int,
+        timeoutMilliseconds: Long,
+    ): ByteArray {
+        checkOpen()
+        require(maximumRequests in 1..32) { "maximumRequests must be between 1 and 32" }
+        require(timeoutMilliseconds in 0..30_000) {
+            "timeoutMilliseconds must be between 0 and 30000"
+        }
+        return NativeBindings.drainPlatformRequests(
+            nativeHandle,
+            maximumRequests,
+            timeoutMilliseconds,
+        )
+    }
+
+    override fun submitPlatformResponse(responseJson: ByteArray): ByteArray {
+        checkOpen()
+        require(responseJson.isNotEmpty()) { "Platform response must not be empty" }
+        require(responseJson.size <= 512 * 1024) { "Platform response is too large" }
+        return NativeBindings.submitPlatformResponse(nativeHandle, responseJson)
     }
 
     override fun requestSnapshot(domain: String): ByteArray {
@@ -118,6 +150,17 @@ internal object NativeBindings {
         handle: Long,
         maximumEvents: Int,
         timeoutMilliseconds: Long,
+    ): ByteArray
+
+    external fun drainPlatformRequests(
+        handle: Long,
+        maximumRequests: Int,
+        timeoutMilliseconds: Long,
+    ): ByteArray
+
+    external fun submitPlatformResponse(
+        handle: Long,
+        responseJson: ByteArray,
     ): ByteArray
 
     external fun requestSnapshot(
