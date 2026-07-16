@@ -99,11 +99,11 @@ mod tests {
             .persist_value("operations", json!({"revision": 2}));
 
         let (barrier_sender, barrier_receiver) = tokio::sync::oneshot::channel();
-        runtime
+        assert!(runtime
             .features
             .persistence_sender
             .send(PersistenceCommand::Barrier(barrier_sender))
-            .expect("projection writer");
+            .is_ok());
         runtime
             .async_runtime
             .block_on(tokio::time::timeout(
