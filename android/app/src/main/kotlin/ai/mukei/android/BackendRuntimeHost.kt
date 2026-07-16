@@ -68,12 +68,8 @@ object BackendRuntimeHost {
         private set
 
     fun addEventListener(listener: EventBatchListener): Closeable {
-        eventListeners.add(listener)
-        return object : Closeable {
-            override fun close() {
-                eventListeners.remove(listener)
-            }
-        }
+        eventListeners += listener
+        return Closeable { eventListeners -= listener }
     }
 
     fun start(context: Context) {
@@ -123,7 +119,6 @@ object BackendRuntimeHost {
                 val summary = listOf(
                     security.optString("sqlcipher", "unknown"),
                     security.optString("projections", "unknown"),
-                    security.optString("object_store", "unknown"),
                     security.optString("rag", "unknown"),
                     if (security.optBoolean("panic_hook", false)) {
                         "panic-contained"
@@ -250,9 +245,7 @@ object BackendRuntimeHost {
     private fun dispatch(batch: RuntimeEventBatch) {
         if (batch.events.isEmpty()) return
         val lastType = runCatching {
-            JSONObject(batch.events.last())
-                .optString("event_type")
-                .takeIf { it.isNotBlank() }
+            JSONObject(batch.events.last()).optString("event_type").ifBlank { null }
         }.getOrNull()
         mainHandler.post {
             eventStatus = eventStatus.copy(
