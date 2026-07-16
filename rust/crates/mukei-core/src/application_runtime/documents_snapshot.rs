@@ -15,7 +15,10 @@ impl MukeiRuntime {
         })
     }
 
-    pub fn snapshot(&self, domain: RuntimeSnapshotDomain) -> Result<RuntimeSnapshotEnvelope, RuntimeError> {
+    pub fn snapshot(
+        &self,
+        domain: RuntimeSnapshotDomain,
+    ) -> Result<RuntimeSnapshotEnvelope, RuntimeError> {
         if self.closed.load(Ordering::Acquire) && domain != RuntimeSnapshotDomain::Application {
             return Err(RuntimeError::Stopped);
         }
@@ -31,8 +34,11 @@ impl MukeiRuntime {
             RuntimeSnapshotDomain::Settings => json!({
                 "values": self.settings.read().unwrap_or_else(|p| p.into_inner()).clone(),
             }),
-            RuntimeSnapshotDomain::Protocol => serde_json::to_value(self.capabilities()).map_err(|_| RuntimeError::UnsupportedSnapshot)?,
-            RuntimeSnapshotDomain::Operations => self.features.snapshot(self.platform.snapshot()),
+            RuntimeSnapshotDomain::Protocol => serde_json::to_value(self.capabilities())
+                .map_err(|_| RuntimeError::UnsupportedSnapshot)?,
+            RuntimeSnapshotDomain::Operations => {
+                self.features.snapshot(self.platform.snapshot())
+            }
         };
         Ok(RuntimeSnapshotEnvelope {
             runtime_session_id: self.session_id.clone(),
@@ -45,13 +51,39 @@ impl MukeiRuntime {
 
     /// Begin deterministic shutdown. Repeated calls are idempotent.
     pub fn shutdown(&self) {
-        if self.closed.swap(true, Ordering::AcqRel) { return; }
+        if self.closed.swap(true, Ordering::AcqRel) {
+            return;
+        }
         *self.state.write().unwrap_or_else(|p| p.into_inner()) = RuntimeState::Stopping;
-        self.events.emit("application:lifecycle", "runtime.stopping", json!({"runtime_session_id": self.session_id}), None, None);
+        self.events.emit(
+            "application:lifecycle",
+            "runtime.stopping",
+            json!({"runtime_session_id": self.session_id}),
+            None,
+            None,
+        );
         self.cancellation.cancel();
         self.features.cancel_all();
         self.activation.deactivate();
+        if let Err(error) = self.async_runtime.block_on(self.features.flush_projections()) {
+            tracing::error!(
+                code = error.error_code(),
+                "encrypted projection flush failed during shutdown"
+            );
+        }
+        if let Err(error) = self.persist_settings_now() {
+            tracing::error!(
+                code = error.error_code(),
+                "encrypted settings flush failed during shutdown"
+            );
+        }
         *self.state.write().unwrap_or_else(|p| p.into_inner()) = RuntimeState::Stopped;
-        self.events.emit("application:lifecycle", "runtime.stopped", json!({"runtime_session_id": self.session_id}), None, None);
+        self.events.emit(
+            "application:lifecycle",
+            "runtime.stopped",
+            json!({"runtime_session_id": self.session_id}),
+            None,
+            None,
+        );
     }
 }
