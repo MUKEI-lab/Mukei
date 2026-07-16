@@ -1,5 +1,6 @@
 struct RuntimeContextBackend {
     features: Arc<FeatureState>,
+    rag_service: Option<Arc<dyn RuntimeRagService>>,
 }
 
 #[async_trait::async_trait]
@@ -19,8 +20,20 @@ impl ContextBackend for RuntimeContextBackend {
             .collect())
     }
 
-    async fn rag_lookup(&self, _query: &str, _top_k: usize) -> Result<Vec<String>, MukeiError> {
-        Ok(Vec::new())
+    async fn rag_lookup(&self, query: &str, top_k: usize) -> Result<Vec<String>, MukeiError> {
+        let Some(service) = self.rag_service.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let values = service.retrieve(query, top_k).await?;
+        Ok(values
+            .into_iter()
+            .map(|value| {
+                crate::tools::sentinel::wrap_external_data(
+                    crate::tools::sentinel::ExternalDataSource::Rag,
+                    &value,
+                )
+            })
+            .collect())
     }
 }
 
