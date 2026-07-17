@@ -1,4 +1,4 @@
-name: storage-critical-fix-runner
+name: storage-migration-registration
 
 on:
   push:
@@ -6,15 +6,13 @@ on:
       - temp/universal-storage-workspace-v0.1
     paths:
       - .github/workflows/storage-migration-registration.yml
-      - rust/crates/mukei-core/src/application_runtime/foundation_types.rs
-      - rust/crates/mukei-core/src/application_runtime/foundation_state.rs
       - rust/crates/mukei-core/src/storage/migrations.rs
       - rust/migrations/V014__universal_storage_and_workspaces.sql
       - rust/migrations/V015__workspace_scope_isolation_guards.sql
   workflow_dispatch:
 
 concurrency:
-  group: storage-critical-fix-runner
+  group: storage-migration-registration
   cancel-in-progress: false
 
 permissions:
@@ -39,17 +37,17 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.82.0
-      - name: Apply exact critical fixes
+      - name: Register V014 and V015 exactly once
         id: patch
         shell: python
         run: |
           from pathlib import Path
           import os
 
-          changed_files = []
+          path = Path('rust/crates/mukei-core/src/storage/migrations.rs')
+          source = path.read_text(encoding='utf-8')
+          changed = False
 
-          migrations_path = Path('rust/crates/mukei-core/src/storage/migrations.rs')
-          source = migrations_path.read_text(encoding='utf-8')
           if 'V014__universal_storage_and_workspaces' not in source or 'V015__workspace_scope_isolation_guards' not in source:
               marker = '''    (
                   13,
@@ -74,106 +72,52 @@ jobs:
               ),
           ];'''
               if marker not in source:
-                  raise SystemExit('Refusing migration patch: exact V013 marker not found')
+                  raise SystemExit('Refusing to patch: exact V013 embedded marker not found')
               source = source.replace(marker, replacement, 1)
-              changed_files.append(str(migrations_path))
+              changed = True
+
           old_ids = 'assert_eq!(ids, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);'
           new_ids = 'assert_eq!(ids, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);'
           if old_ids in source:
               source = source.replace(old_ids, new_ids, 1)
-              if str(migrations_path) not in changed_files:
-                  changed_files.append(str(migrations_path))
-          migrations_path.write_text(source, encoding='utf-8')
+              changed = True
 
-          types_path = Path('rust/crates/mukei-core/src/application_runtime/foundation_types.rs')
-          types = types_path.read_text(encoding='utf-8')
-          old_header = '''//! Platform-neutral application runtime owned by the native process.
-          //!
-          //! Protocol V2 commands are validated once, routed to feature handlers, tracked
-          //! as cancellable operations, projected through ordered events, and exposed via
-          //! authoritative snapshots. Android-only services are accessed through the
-          //! pull-based platform broker in [`crate::platform`].'''
-          new_header = '''// Platform-neutral application runtime owned by the native process.
-          //
-          // Protocol V2 commands are validated once, routed to feature handlers, tracked
-          // as cancellable operations, projected through ordered events, and exposed via
-          // authoritative snapshots. Android-only services are accessed through the
-          // pull-based platform broker in `crate::platform`.'''
-          if old_header in types:
-              types = types.replace(old_header, new_header, 1)
-              changed_files.append(str(types_path))
-          elif new_header not in types:
-              raise SystemExit('Refusing runtime patch: header marker not found')
-          old_import = 'validate_command, AcknowledgementStatus, CommandAcknowledgementV2, CommandEnvelopeV2,'
-          new_import = 'validate_command, CommandAcknowledgementV2, CommandEnvelopeV2,'
-          if old_import in types:
-              types = types.replace(old_import, new_import, 1)
-              if str(types_path) not in changed_files:
-                  changed_files.append(str(types_path))
-          elif new_import not in types:
-              raise SystemExit('Refusing runtime patch: unused import marker not found')
-          types_path.write_text(types, encoding='utf-8')
+          if changed:
+              path.write_text(source, encoding='utf-8')
 
-          state_path = Path('rust/crates/mukei-core/src/application_runtime/foundation_state.rs')
-          state = state_path.read_text(encoding='utf-8')
-          old_binding = '.map_err(|error| MukeiError::DatabaseCorruption)?;'
-          new_binding = '.map_err(|_| MukeiError::DatabaseCorruption)?;'
-          if old_binding in state:
-              state = state.replace(old_binding, new_binding, 1)
-              changed_files.append(str(state_path))
-          elif new_binding not in state:
-              raise SystemExit('Refusing runtime patch: unused binding marker not found')
-          state_path.write_text(state, encoding='utf-8')
-
-          changed = bool(changed_files)
           with open(Path(os.environ['GITHUB_OUTPUT']), 'a', encoding='utf-8') as output:
               output.write(f'changed={str(changed).lower()}\n')
-          print('changed files:', ', '.join(changed_files) if changed_files else 'none')
-      - name: Verify critical fixes
-        id: verify
+      - name: Verify mukei-core compiles with embedded storage migrations
         shell: bash
+        working-directory: rust
         run: |
-          set +e
-          mkdir -p ci-storage-critical-logs
-          cd rust
-
+          set -o pipefail
+          mkdir -p ../ci-migration-registration-logs
           cargo check -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets \
-            > ../ci-storage-critical-logs/check.log 2>&1
-          check_exit=$?
-          echo "check_exit=$check_exit" >> "$GITHUB_OUTPUT"
-
+            2>&1 | tee ../ci-migration-registration-logs/check.log
+      - name: Verify embedded migration contract
+        shell: bash
+        working-directory: rust
+        run: |
+          set -o pipefail
           cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite \
             --test universal_storage_embedded_migrations -- --nocapture \
-            > ../ci-storage-critical-logs/migrations.log 2>&1
-          migration_exit=$?
-          echo "migration_exit=$migration_exit" >> "$GITHUB_OUTPUT"
-
-          printf 'check=%s\nmigrations=%s\n' "$check_exit" "$migration_exit" \
-            > ../ci-storage-critical-logs/summary.txt
-          exit 0
-      - name: Upload critical-fix diagnostics
+            2>&1 | tee ../ci-migration-registration-logs/test.log
+      - name: Upload migration diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: storage-critical-fix-${{ github.sha }}
-          path: ci-storage-critical-logs
-          if-no-files-found: error
+          name: storage-migration-registration-${{ github.sha }}
+          path: ci-migration-registration-logs
+          if-no-files-found: warn
           retention-days: 7
-      - name: Enforce verification
-        shell: bash
-        run: |
-          test '${{ steps.verify.outputs.check_exit }}' = '0'
-          test '${{ steps.verify.outputs.migration_exit }}' = '0'
-      - name: Commit verified fixes
+      - name: Commit verified registration
         if: steps.patch.outputs.changed == 'true'
         run: |
           git config user.name "mukei-storage-bot"
           git config user.email "mukei-storage-bot@users.noreply.github.com"
-          git add \
-            rust/crates/mukei-core/src/application_runtime/foundation_types.rs \
-            rust/crates/mukei-core/src/application_runtime/foundation_state.rs \
-            rust/crates/mukei-core/src/storage/migrations.rs
-          git commit -m "fix(storage): unblock Cargo and embed storage migrations"
+          git add rust/crates/mukei-core/src/storage/migrations.rs
+          git commit -m "fix(storage): embed universal storage migrations"
           git push origin HEAD:temp/universal-storage-workspace-v0.1
       - name: Publish success status
         if: success()
@@ -185,8 +129,8 @@ jobs:
               repo: context.repo.repo,
               sha: context.sha,
               state: 'success',
-              context: 'storage-critical-fix-runner',
-              description: 'Critical compile and migration fixes verified',
+              context: 'storage-migration-registration',
+              description: 'V014/V015 embedded migration contract passed',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
       - name: Publish failure status
@@ -194,13 +138,12 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const description = `check=${{ steps.verify.outputs.check_exit || '?' }}, migrations=${{ steps.verify.outputs.migration_exit || '?' }}`;
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: context.sha,
               state: 'failure',
-              context: 'storage-critical-fix-runner',
-              description: description.slice(0, 140),
+              context: 'storage-migration-registration',
+              description: 'Embedded storage migration verification failed',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
