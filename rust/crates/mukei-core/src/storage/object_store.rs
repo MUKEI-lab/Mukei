@@ -41,6 +41,8 @@ pub enum ObjectStoreError {
     Encryption(String),
     #[error("object decryption failed: {0}")]
     Decryption(String),
+    #[error("encrypted object exceeds the supported size limit")]
+    ObjectTooLarge,
     #[error("encrypted object is malformed")]
     MalformedObject,
     #[error("encrypted object failed plaintext integrity verification")]
@@ -169,7 +171,17 @@ impl<C: ObjectCipher> ImmutableObjectStore<C> {
             .cipher
             .seal(plaintext, &associated_data)
             .map_err(ObjectStoreError::Encryption)?;
-        let encoded = encode_object(version, &digest, plaintext_size, &ciphertext);
+        let ciphertext_size = u64::try_from(ciphertext.len()).map_err(|_| ObjectStoreError::ObjectTooLarge)?;
+        if ciphertext_size > MAX_ENCODED_OBJECT_BYTES {
+            return Err(ObjectStoreError::ObjectTooLarge);
+        }
+        let encoded = encode_object(
+            version,
+            &digest,
+            plaintext_size,
+            ciphertext_size,
+            &ciphertext,
+        );
         let temporary_path = parent.join(format!(
             ".{}.{}.tmp",
             hex_digest(&digest),
@@ -284,9 +296,15 @@ fn associated_data(digest: &[u8; SHA256_LEN], size: u64, version: u32) -> Vec<u8
     output
 }
 
-fn encode_object(version: u32, digest: &[u8; SHA256_LEN], size: u64, ciphertext: &[u8]) -> Vec<u8> {
+fn encode_object(
+    version: u32,
+    digest: &[u8; SHA256_LEN],
+    size: u64,
+    ciphertext_size: u64,
+    ciphertext: &[u8],
+) -> Vec<u8> {
     let mut output = associated_data(digest, size, version);
-    output.extend_from_slice(&(ciphertext.len() as u64).to_be_bytes());
+    output.extend_from_slice(&ciphertext_size.to_be_bytes());
     output.extend_from_slice(ciphertext);
     output
 }
@@ -312,7 +330,9 @@ fn read_encoded_object(
     {
         return Err(ObjectStoreError::MalformedObject);
     }
-    let mut ciphertext = vec![0u8; encrypted_size as usize];
+    let ciphertext_size = usize::try_from(encrypted_size)
+        .map_err(|_| ObjectStoreError::MalformedObject)?;
+    let mut ciphertext = vec![0u8; ciphertext_size];
     file.read_exact(&mut ciphertext)
         .map_err(|_| ObjectStoreError::MalformedObject)?;
     Ok((version, digest, size, ciphertext))
@@ -369,6 +389,22 @@ mod tests {
         }
     }
 
+    struct OversizedCipher;
+
+    impl ObjectCipher for OversizedCipher {
+        fn version(&self) -> u32 {
+            1
+        }
+
+        fn seal(&self, _plaintext: &[u8], _associated_data: &[u8]) -> Result<Vec<u8>, String> {
+            Ok(vec![0; (MAX_ENCODED_OBJECT_BYTES + 1) as usize])
+        }
+
+        fn open(&self, _ciphertext: &[u8], _associated_data: &[u8]) -> Result<Vec<u8>, String> {
+            unreachable!("oversized ciphertext must never be published")
+        }
+    }
+
     #[test]
     fn aes_gcm_cipher_authenticates_ciphertext_and_associated_data() {
         let cipher = Aes256GcmObjectCipher::new([0x5a; 32]);
@@ -411,6 +447,18 @@ mod tests {
         let second = store.put(plaintext).unwrap();
         assert!(second.deduplicated);
         assert_eq!(first.relative_path, second.relative_path);
+    }
+
+    #[test]
+    fn rejects_oversized_ciphertext_before_filesystem_publication() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ImmutableObjectStore::open(directory.path(), OversizedCipher).unwrap();
+
+        assert!(matches!(
+            store.put(b"small plaintext"),
+            Err(ObjectStoreError::ObjectTooLarge)
+        ));
+        assert!(fs::read_dir(directory.path()).unwrap().next().is_none());
     }
 
     #[test]
