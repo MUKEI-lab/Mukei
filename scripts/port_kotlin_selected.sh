@@ -328,8 +328,8 @@ from pathlib import Path
 state_path = Path('rust/crates/mukei-core/src/application_runtime/foundation_state.rs')
 state = state_path.read_text(encoding='utf-8')
 state = state.replace(
-    '    Barrier(tokio::sync::oneshot::Sender<()>),
-',
+    '''    Barrier(tokio::sync::oneshot::Sender<()>),
+''',
     '',
     1,
 )
