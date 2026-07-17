@@ -103,4 +103,6 @@ tokio    = { workspace = true, features = ["macros", "rt-multi-thread", "time"] 
 # (GH #41) and idempotency (GH #35) tests in later batches.
 proptest = "1.5"
 loom     = "0.7"
-wiremock = "0.6"
+# 0.6.5 uses Rust 1.88 let-chains; pin the last release compatible with
+# the Android CI toolchain (Rust 1.86.0).
+wiremock = "=0.6.4"
