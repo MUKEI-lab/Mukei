@@ -163,6 +163,24 @@ text = text.replace(
 workflow.write_text(text, encoding='utf-8')
 PY
 
+python <<'PY'
+from pathlib import Path
+
+state = Path('rust/crates/mukei-core/src/application_runtime/foundation_state.rs')
+text = state.read_text(encoding='utf-8')
+unused_model = '''    fn model(&self, model_id: &str) -> Option<ModelProjection> {
+        self.models
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(model_id)
+            .cloned()
+    }
+
+'''
+text = text.replace(unused_model, '', 1)
+state.write_text(text, encoding='utf-8')
+PY
+
 rm -f .github/workflows/kotlin-selective-port-audit.yml \
       .github/workflows/kotlin-selective-port.yml \
       .github/workflows/kotlin-port-conflict-diagnostic.yml \
