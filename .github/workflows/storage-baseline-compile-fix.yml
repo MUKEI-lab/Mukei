@@ -6,8 +6,10 @@ on:
       - temp/universal-storage-workspace-v0.1
     paths:
       - .github/workflows/storage-baseline-compile-fix.yml
+      - rust/crates/mukei-core/src/lib.rs
       - rust/crates/mukei-core/src/application_runtime/foundation_types.rs
       - rust/crates/mukei-core/src/application_runtime/foundation_state.rs
+      - rust/crates/mukei-core/src/storage/runtime_projection.rs
   workflow_dispatch:
 
 concurrency:
@@ -43,10 +45,16 @@ jobs:
           from pathlib import Path
           import os
 
-          changed = False
+          changed_files = []
+
+          def write_if_changed(path: Path, before: str, after: str) -> None:
+              if before != after:
+                  path.write_text(after, encoding='utf-8')
+                  changed_files.append(str(path))
 
           types_path = Path('rust/crates/mukei-core/src/application_runtime/foundation_types.rs')
-          types = types_path.read_text(encoding='utf-8')
+          before = types_path.read_text(encoding='utf-8')
+          types = before
           old_header = '''//! Platform-neutral application runtime owned by the native process.
           //!
           //! Protocol V2 commands are validated once, routed to feature handlers, tracked
@@ -61,7 +69,6 @@ jobs:
           // pull-based platform broker in `crate::platform`.'''
           if old_header in types:
               types = types.replace(old_header, new_header, 1)
-              changed = True
           elif new_header not in types:
               raise SystemExit('Refusing to patch: foundation_types header marker not found')
 
@@ -69,24 +76,67 @@ jobs:
           new_import = 'validate_command, CommandAcknowledgementV2, CommandEnvelopeV2,'
           if old_import in types:
               types = types.replace(old_import, new_import, 1)
-              changed = True
           elif new_import not in types:
-              raise SystemExit('Refusing to patch: AcknowledgementStatus import marker not found')
-          types_path.write_text(types, encoding='utf-8')
+              raise SystemExit('Refusing to patch: protocol import marker not found')
+
+          test_import = '#[cfg(test)]\nuse crate::ui_protocol::AcknowledgementStatus;\n'
+          import_anchor = 'use crate::ui_protocol::{\n    validate_command, CommandAcknowledgementV2, CommandEnvelopeV2,'
+          if test_import not in types:
+              if import_anchor not in types:
+                  raise SystemExit('Refusing to patch: test import anchor not found')
+              close_anchor = '    ValidatedCommandPayload,\n};\n'
+              if close_anchor not in types:
+                  raise SystemExit('Refusing to patch: protocol import close marker not found')
+              types = types.replace(close_anchor, close_anchor + test_import, 1)
+          write_if_changed(types_path, before, types)
 
           state_path = Path('rust/crates/mukei-core/src/application_runtime/foundation_state.rs')
-          state = state_path.read_text(encoding='utf-8')
-          old_binding = '.map_err(|error| MukeiError::DatabaseCorruption)?;'
-          new_binding = '.map_err(|_| MukeiError::DatabaseCorruption)?;'
-          if old_binding in state:
-              state = state.replace(old_binding, new_binding, 1)
-              changed = True
-          elif new_binding not in state:
-              raise SystemExit('Refusing to patch: foundation_state error binding marker not found')
-          state_path.write_text(state, encoding='utf-8')
+          before = state_path.read_text(encoding='utf-8')
+          state = before.replace(
+              '.map_err(|error| MukeiError::DatabaseCorruption)?;',
+              '.map_err(|_| MukeiError::DatabaseCorruption)?;',
+              1,
+          )
+          model_block = '''    fn model(&self, model_id: &str) -> Option<ModelProjection> {
+              self.models
+                  .read()
+                  .unwrap_or_else(|p| p.into_inner())
+                  .get(model_id)
+                  .cloned()
+          }
+
+          '''
+          if model_block in state:
+              state = state.replace(model_block, '', 1)
+          elif 'fn model(&self, model_id: &str)' in state:
+              raise SystemExit('Refusing to patch: unexpected model accessor shape')
+          write_if_changed(state_path, before, state)
+
+          lib_path = Path('rust/crates/mukei-core/src/lib.rs')
+          before = lib_path.read_text(encoding='utf-8')
+          lib = before
+          old_module = '#[cfg(feature = "tokio")]\npub mod application_runtime;'
+          new_module = '#[cfg(feature = "tokio")]\n#[allow(missing_docs)]\npub mod application_runtime;'
+          if old_module in lib:
+              lib = lib.replace(old_module, new_module, 1)
+          elif new_module not in lib:
+              raise SystemExit('Refusing to patch: application_runtime module marker not found')
+          write_if_changed(lib_path, before, lib)
+
+          projection_path = Path('rust/crates/mukei-core/src/storage/runtime_projection.rs')
+          before = projection_path.read_text(encoding='utf-8')
+          projection = before
+          old_open = 'DatabasePool::open(directory.path().join("projection.db"))'
+          new_open = 'DatabasePool::open(&directory.path().join("projection.db"))'
+          if old_open in projection:
+              projection = projection.replace(old_open, new_open, 1)
+          elif new_open not in projection:
+              raise SystemExit('Refusing to patch: runtime projection open marker not found')
+          write_if_changed(projection_path, before, projection)
 
           with open(Path(os.environ['GITHUB_OUTPUT']), 'a', encoding='utf-8') as output:
-              output.write(f'changed={str(changed).lower()}\n')
+              output.write(f'changed={str(bool(changed_files)).lower()}\n')
+          print('changed files:', ', '.join(changed_files) if changed_files else 'none')
       - name: Verify mukei-core compile
         id: verify
         shell: bash
@@ -116,9 +166,11 @@ jobs:
           git config user.name "mukei-storage-bot"
           git config user.email "mukei-storage-bot@users.noreply.github.com"
           git add \
+            rust/crates/mukei-core/src/lib.rs \
             rust/crates/mukei-core/src/application_runtime/foundation_types.rs \
-            rust/crates/mukei-core/src/application_runtime/foundation_state.rs
-          git commit -m "fix(core): repair split runtime compile blockers"
+            rust/crates/mukei-core/src/application_runtime/foundation_state.rs \
+            rust/crates/mukei-core/src/storage/runtime_projection.rs
+          git commit -m "fix(core): repair mukei-core Cargo blockers"
           git push origin HEAD:temp/universal-storage-workspace-v0.1
       - name: Publish success status
         if: success()
@@ -131,7 +183,7 @@ jobs:
               sha: context.sha,
               state: 'success',
               context: 'storage-baseline-compile-fix',
-              description: 'Baseline mukei-core compile repaired',
+              description: 'mukei-core Cargo blockers repaired',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
       - name: Publish failure status
@@ -145,6 +197,6 @@ jobs:
               sha: context.sha,
               state: 'failure',
               context: 'storage-baseline-compile-fix',
-              description: `Baseline Cargo check exit=${{ steps.verify.outputs.code || '?' }}`.slice(0, 140),
+              description: `Cargo check exit=${{ steps.verify.outputs.code || '?' }}`.slice(0, 140),
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
