@@ -69,7 +69,7 @@ fn native_build_id() -> Option<String> {
 }
 
 pub(crate) fn implementation_available() -> bool {
-    unsafe { mukei_llama_abi_version() } == EXPECTED_ABI_VERSION
+    (unsafe { mukei_llama_abi_version() }) == EXPECTED_ABI_VERSION
         && native_build_id().as_deref() == Some(EXPECTED_BUILD_ID)
 }
 
