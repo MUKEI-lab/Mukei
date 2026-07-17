@@ -21,6 +21,7 @@ const SHA256_LEN: usize = 32;
 const AES_GCM_NONCE_LEN: usize = 12;
 const AES_GCM_TAG_LEN: usize = 16;
 const AES_GCM_CIPHER_VERSION: u32 = 1;
+const MAX_ENCODED_OBJECT_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredObject {
@@ -305,7 +306,10 @@ fn read_encoded_object(
     let size = u64::from_be_bytes(header[44..52].try_into().unwrap());
     let encrypted_size = u64::from_be_bytes(header[52..60].try_into().unwrap());
     let actual_remaining = file.metadata()?.len().saturating_sub(header.len() as u64);
-    if actual_remaining != encrypted_size || encrypted_size > usize::MAX as u64 {
+    if actual_remaining != encrypted_size
+        || encrypted_size > MAX_ENCODED_OBJECT_BYTES
+        || encrypted_size > usize::MAX as u64
+    {
         return Err(ObjectStoreError::MalformedObject);
     }
     let mut ciphertext = vec![0u8; encrypted_size as usize];
@@ -421,6 +425,24 @@ mod tests {
         assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
         assert_eq!(fs::read(&destination).unwrap(), b"winner");
         assert_eq!(fs::read(&temporary).unwrap(), b"new");
+    }
+
+    #[test]
+    fn rejects_oversized_sparse_object_before_ciphertext_allocation() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("oversized.mobj");
+        let digest = [0x42; SHA256_LEN];
+        let oversized = MAX_ENCODED_OBJECT_BYTES + 1;
+        let mut file = File::create(&path).unwrap();
+        file.write_all(&associated_data(&digest, 1, 1)).unwrap();
+        file.write_all(&oversized.to_be_bytes()).unwrap();
+        file.set_len(60 + oversized).unwrap();
+        file.sync_all().unwrap();
+
+        assert!(matches!(
+            read_encoded_object(&path),
+            Err(ObjectStoreError::MalformedObject)
+        ));
     }
 
     #[test]
