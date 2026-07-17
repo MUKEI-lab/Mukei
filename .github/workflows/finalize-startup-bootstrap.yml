@@ -24,11 +24,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Install stable Rust formatter
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
       - name: Apply physical-device startup fixes
         run: |
+          set -euo pipefail
           python3 scripts/frontend/finalize-startup-bootstrap.py
           python3 scripts/frontend/finalize-safe-mode-actions.py
           python3 scripts/frontend/finalize-rag-prompt.py
+          cargo fmt --manifest-path rust/Cargo.toml --all
       - name: Commit canonical source
         shell: bash
         run: |
