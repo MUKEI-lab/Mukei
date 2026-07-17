@@ -20,6 +20,12 @@ pub struct StagedCleanupReport {
     pub retained_non_files: usize,
 }
 
+#[derive(Clone, Debug)]
+struct TerminalStagedPath {
+    transaction_id: String,
+    relative_path: String,
+}
+
 pub struct StagedPlaintextCleanup;
 
 impl StagedPlaintextCleanup {
@@ -35,6 +41,11 @@ impl StagedPlaintextCleanup {
     /// Removes at most `limit` terminal journal entries. Bounding each sweep
     /// prevents an unexpectedly large or corrupted journal from monopolizing
     /// memory or a blocking worker during startup recovery.
+    ///
+    /// Every successfully examined row is moved to the back of the recovery
+    /// queue. Without this durable cursor advancement, old rows whose staged
+    /// files were already removed would occupy every bounded batch forever and
+    /// could starve newer residual plaintext.
     pub async fn sweep_terminal_batch(
         pool: &DatabasePool,
         staging_root: impl Into<PathBuf>,
@@ -47,37 +58,68 @@ impl StagedPlaintextCleanup {
         }
         let query_limit = i64::try_from(limit)
             .map_err(|_| MukeiError::Invariant("staged cleanup limit overflow".to_string()))?;
-        let relative_paths = pool
+        let staged_paths = pool
             .with_conn(move |connection| {
                 let mut statement = connection.prepare(
-                    "SELECT staging_relative_path FROM import_transactions \
+                    "SELECT transaction_id, staging_relative_path FROM import_transactions \
                      WHERE state IN ('completed', 'cancelled', 'failed') \
                      ORDER BY updated_at ASC, transaction_id ASC LIMIT ?1",
                 )?;
                 let paths = statement
-                    .query_map([query_limit], |row| row.get::<_, String>(0))?
+                    .query_map([query_limit], |row| {
+                        Ok(TerminalStagedPath {
+                            transaction_id: row.get(0)?,
+                            relative_path: row.get(1)?,
+                        })
+                    })?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 Ok::<_, DbError>(paths)
             })
             .await?;
 
         let staging_root = staging_root.into();
-        tokio::task::spawn_blocking(move || sweep_paths(&staging_root, relative_paths))
-            .await
-            .map_err(|error| MukeiError::BlockingJoinFailed(error.to_string()))?
+        let (report, examined_transaction_ids) =
+            tokio::task::spawn_blocking(move || sweep_paths(&staging_root, staged_paths))
+                .await
+                .map_err(|error| MukeiError::BlockingJoinFailed(error.to_string()))??;
+
+        if !examined_transaction_ids.is_empty() {
+            let advanced_at = chrono::Utc::now().to_rfc3339();
+            pool.with_conn(move |connection| {
+                let transaction = connection.transaction()?;
+                for transaction_id in examined_transaction_ids {
+                    transaction.execute(
+                        "UPDATE import_transactions SET updated_at = ?1 \
+                         WHERE transaction_id = ?2 \
+                           AND state IN ('completed', 'cancelled', 'failed')",
+                        rusqlite::params![&advanced_at, transaction_id],
+                    )?;
+                }
+                transaction.commit()?;
+                Ok::<_, DbError>(())
+            })
+            .await?;
+        }
+
+        Ok(report)
     }
 }
 
-fn sweep_paths(root: &Path, relative_paths: Vec<String>) -> Result<StagedCleanupReport> {
+fn sweep_paths(
+    root: &Path,
+    staged_paths: Vec<TerminalStagedPath>,
+) -> Result<(StagedCleanupReport, Vec<String>)> {
     fs::create_dir_all(root).map_err(cleanup_io_error)?;
     let canonical_root = fs::canonicalize(root).map_err(cleanup_io_error)?;
     let mut report = StagedCleanupReport::default();
+    let mut examined_transaction_ids = Vec::with_capacity(staged_paths.len());
 
-    for relative in relative_paths {
+    for staged_path in staged_paths {
         report.examined += 1;
-        let relative = Path::new(&relative);
+        let relative = Path::new(&staged_path.relative_path);
         if !is_safe_relative_path(relative) {
             report.unsafe_paths += 1;
+            examined_transaction_ids.push(staged_path.transaction_id);
             continue;
         }
 
@@ -86,6 +128,7 @@ fn sweep_paths(root: &Path, relative_paths: Vec<String>) -> Result<StagedCleanup
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 report.missing += 1;
+                examined_transaction_ids.push(staged_path.transaction_id);
                 continue;
             }
             Err(error) => return Err(cleanup_io_error(error)),
@@ -93,24 +136,28 @@ fn sweep_paths(root: &Path, relative_paths: Vec<String>) -> Result<StagedCleanup
 
         if metadata.file_type().is_symlink() {
             report.unsafe_paths += 1;
+            examined_transaction_ids.push(staged_path.transaction_id);
             continue;
         }
         if !metadata.is_file() {
             report.retained_non_files += 1;
+            examined_transaction_ids.push(staged_path.transaction_id);
             continue;
         }
 
         let canonical_candidate = fs::canonicalize(&candidate).map_err(cleanup_io_error)?;
         if !canonical_candidate.starts_with(&canonical_root) {
             report.unsafe_paths += 1;
+            examined_transaction_ids.push(staged_path.transaction_id);
             continue;
         }
 
         fs::remove_file(canonical_candidate).map_err(cleanup_io_error)?;
         report.removed += 1;
+        examined_transaction_ids.push(staged_path.transaction_id);
     }
 
-    Ok(report)
+    Ok((report, examined_transaction_ids))
 }
 
 fn cleanup_io_error(error: std::io::Error) -> MukeiError {
@@ -195,7 +242,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bounds_each_recovery_sweep() {
+    async fn bounds_each_recovery_sweep_without_starving_later_rows() {
         let root = tempfile::tempdir().unwrap();
         let staging = root.path().join("staging");
         fs::create_dir_all(&staging).unwrap();
@@ -213,16 +260,19 @@ mod tests {
         failed_import(&pool, &workspace, "first.txt", 5).await;
         failed_import(&pool, &workspace, "second.txt", 6).await;
 
-        let report = StagedPlaintextCleanup::sweep_terminal_batch(&pool, &staging, 1)
+        let first_report = StagedPlaintextCleanup::sweep_terminal_batch(&pool, &staging, 1)
             .await
             .unwrap();
-        assert_eq!(report.examined, 1);
-        assert_eq!(report.removed, 1);
-        assert_eq!(
-            usize::from(staging.join("first.txt").exists())
-                + usize::from(staging.join("second.txt").exists()),
-            1
-        );
+        assert_eq!(first_report.examined, 1);
+        assert_eq!(first_report.removed, 1);
+
+        let second_report = StagedPlaintextCleanup::sweep_terminal_batch(&pool, &staging, 1)
+            .await
+            .unwrap();
+        assert_eq!(second_report.examined, 1);
+        assert_eq!(second_report.removed, 1);
+        assert!(!staging.join("first.txt").exists());
+        assert!(!staging.join("second.txt").exists());
     }
 
     #[tokio::test]
