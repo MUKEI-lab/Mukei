@@ -221,7 +221,7 @@ mod secure_runtime {
             }
 
             let services = super::super::runtime_services(&config);
-            let runtime = match MukeiRuntime::create_with_services(config, services) {
+            let runtime = match MukeiRuntime::create_with_services(config.clone(), services) {
                 Ok(runtime) => Arc::new(runtime),
                 Err(_) => return 0,
             };
