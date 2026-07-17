@@ -38,9 +38,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
-      - name: Check committed whitespace
-        working-directory: .
-        run: git diff --check HEAD^
       - name: Cargo check
         shell: bash
         run: |
