@@ -1,0 +1,85 @@
+name: patch-kotlin-test-barrier
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - .github/workflows/patch-kotlin-test-barrier.yml
+
+permissions:
+  contents: write
+  statuses: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+      - name: Publish pending
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'pending', context: 'patch-kotlin-test-barrier', description: 'Scoping projection barrier to tests', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
+      - name: Replace obsolete-barrier block with test-only barrier
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('scripts/port_kotlin_selected.sh')
+          lines = path.read_text(encoding='utf-8').splitlines()
+          start = lines.index('# Removing the obsolete Barrier variant after installing Flush.')
+          end = next(index for index in range(start + 1, len(lines)) if lines[index] == 'PY') + 1
+          replacement = '''# Keep Barrier only for the FIFO regression test; production uses Flush.
+          python <<'PY'
+          from pathlib import Path
+
+          state_path = Path('rust/crates/mukei-core/src/application_runtime/foundation_state.rs')
+          state = state_path.read_text(encoding='utf-8')
+          state = state.replace(
+              '''    Barrier(tokio::sync::oneshot::Sender<()>),
+          ''',
+              '''    #[cfg(test)]
+              Barrier(tokio::sync::oneshot::Sender<()>),
+          ''',
+              1,
+          )
+          state = state.replace(
+              '''                    PersistenceCommand::Barrier(acknowledgement) => {
+                                  let _ = acknowledgement.send(());
+                              }
+          ''',
+              '''                    #[cfg(test)]
+                              PersistenceCommand::Barrier(acknowledgement) => {
+                                  let _ = acknowledgement.send(());
+                              }
+          ''',
+              1,
+          )
+          state_path.write_text(state, encoding='utf-8')
+          PY'''.splitlines()
+          lines[start:end] = replacement
+          path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+      - name: Commit patched script
+        run: |
+          git config user.name "mukei-storage-bot"
+          git config user.email "mukei-storage-bot@users.noreply.github.com"
+          git add scripts/port_kotlin_selected.sh
+          git rm .github/workflows/patch-kotlin-test-barrier.yml
+          git commit -m "fix(ci): keep projection barrier test-only during Kotlin port"
+          git push origin HEAD:temp/universal-storage-workspace-v0.1
+      - name: Publish success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'success', context: 'patch-kotlin-test-barrier', description: 'Projection barrier scoped to tests', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
+      - name: Publish failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'failure', context: 'patch-kotlin-test-barrier', description: 'Test-only barrier patch failed', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
