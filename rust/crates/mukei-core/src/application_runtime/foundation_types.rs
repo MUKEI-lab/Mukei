@@ -8,9 +8,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{
-    sync_channel, Receiver, SyncSender, TryRecvError, TrySendError,
-};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
@@ -40,13 +38,12 @@ use crate::platform::{
 };
 use crate::tools::ToolRegistry;
 use crate::types::{BranchId, ChatMessage, ConversationId, MessageId, Role};
-use crate::ui_protocol::{
-    validate_command, CommandAcknowledgementV2, CommandEnvelopeV2,
-    CommandType, EventEnvelopeV2, ProtocolCapabilitySnapshot, RejectionReason, ValidatedCommand,
-    ValidatedCommandPayload,
-};
 #[cfg(test)]
 use crate::ui_protocol::AcknowledgementStatus;
+use crate::ui_protocol::{
+    validate_command, CommandAcknowledgementV2, CommandEnvelopeV2, CommandType, EventEnvelopeV2,
+    ProtocolCapabilitySnapshot, RejectionReason, ValidatedCommand, ValidatedCommandPayload,
+};
 
 const DEFAULT_EVENT_CAPACITY: usize = 512;
 const MAX_EVENT_CAPACITY: usize = 4096;
@@ -263,11 +260,11 @@ impl EventBus {
     }
 
     fn decrement_queued(&self) {
-        let _ = self.queued.fetch_update(
-            Ordering::AcqRel,
-            Ordering::Acquire,
-            |value| Some(value.saturating_sub(1)),
-        );
+        let _ = self
+            .queued
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                Some(value.saturating_sub(1))
+            });
     }
 
     fn drain(&self, limit: usize, timeout: Duration) -> EventDrain {

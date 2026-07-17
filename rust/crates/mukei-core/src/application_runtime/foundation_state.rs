@@ -77,6 +77,12 @@ enum PersistenceCommand {
         key: &'static str,
         value: Value,
     },
+    Flush {
+        store: Arc<dyn RuntimeProjectionStore>,
+        projections: Vec<(&'static str, Value)>,
+        acknowledgement: tokio::sync::oneshot::Sender<Result<(), MukeiError>>,
+    },
+    #[cfg(test)]
     Barrier(tokio::sync::oneshot::Sender<()>),
 }
 
@@ -107,6 +113,21 @@ impl FeatureState {
                             );
                         }
                     }
+                    PersistenceCommand::Flush {
+                        store,
+                        projections,
+                        acknowledgement,
+                    } => {
+                        let mut result = Ok(());
+                        for (key, value) in projections {
+                            if let Err(error) = store.save(key, value).await {
+                                result = Err(error);
+                                break;
+                            }
+                        }
+                        let _ = acknowledgement.send(result);
+                    }
+                    #[cfg(test)]
                     PersistenceCommand::Barrier(acknowledgement) => {
                         let _ = acknowledgement.send(());
                     }
@@ -139,7 +160,9 @@ impl FeatureState {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
-        let Some(store) = store else { return Ok(()); };
+        let Some(store) = store else {
+            return Ok(());
+        };
 
         if let Some(value) = store.load("operations").await? {
             let mut records: Vec<OperationRecord> =
@@ -186,12 +209,7 @@ impl FeatureState {
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = records
                 .into_iter()
-                .map(|record| {
-                    (
-                        (record.conversation_id, record.branch_id),
-                        record.messages,
-                    )
-                })
+                .map(|record| ((record.conversation_id, record.branch_id), record.messages))
                 .collect();
         }
         self.persist_operations();
@@ -204,7 +222,9 @@ impl FeatureState {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
-        let Some(store) = store else { return; };
+        let Some(store) = store else {
+            return;
+        };
         if self
             .persistence_sender
             .send(PersistenceCommand::Save { store, key, value })
@@ -437,8 +457,7 @@ impl FeatureState {
             .conversations
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(messages) =
-            conversations.get_mut(&(conversation.to_owned(), branch.to_owned()))
+        let Some(messages) = conversations.get_mut(&(conversation.to_owned(), branch.to_owned()))
         else {
             return false;
         };
@@ -481,14 +500,6 @@ impl FeatureState {
             .remove(model_id);
         self.persist_models();
         removed
-    }
-
-    fn model(&self, model_id: &str) -> Option<ModelProjection> {
-        self.models
-            .read()
-            .unwrap_or_else(|p| p.into_inner())
-            .get(model_id)
-            .cloned()
     }
 
     fn insert_document(&self, document: DocumentProjection) {
