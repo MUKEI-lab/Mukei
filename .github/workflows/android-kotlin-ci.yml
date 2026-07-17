@@ -24,6 +24,16 @@ on:
       - ".github/workflows/android-kotlin-ci.yml"
       - ".github/workflows/android-release-candidate.yml"
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: "Git ref to validate; defaults to the triggering commit."
+        required: false
+        type: string
+      status_sha:
+        description: "Commit SHA that receives the legacy android-kotlin-ci status."
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -42,6 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
       - uses: dtolnay/rust-toolchain@1.86.0
       - name: Install native build dependencies
         run: >-
@@ -95,6 +107,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -127,6 +141,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -205,3 +221,39 @@ jobs:
             android/app/build/outputs/apk/release/*.apk
             android/app/build/outputs/mapping/release/mapping.txt
             android/app/build/reports/lint-results-release.html
+
+  report-status:
+    if: ${{ always() }}
+    needs: [ rust-security, android-debug, release-hardening ]
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Publish observable commit status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const explicitSha = '${{ inputs.status_sha }}';
+            const sha = explicitSha ||
+              (context.eventName === 'pull_request'
+                ? context.payload.pull_request.head.sha
+                : context.sha);
+            const results = {
+              rustSecurity: '${{ needs.rust-security.result }}',
+              androidDebug: '${{ needs.android-debug.result }}',
+              releaseHardening: '${{ needs.release-hardening.result }}',
+            };
+            const succeeded = Object.values(results).every(
+              (value) => value === 'success'
+            );
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha,
+              state: succeeded ? 'success' : 'failure',
+              context: 'android-kotlin-ci',
+              description: succeeded
+                ? 'Rust, Android and release-hardening checks passed'
+                : 'One or more Android CI jobs failed or were skipped',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
