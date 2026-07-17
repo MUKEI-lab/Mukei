@@ -37,26 +37,26 @@ object SecureRuntimeFactory {
 
         val databaseKeyFile = secureFile(filesRoot, DATABASE_KEY_FILE)
         val databaseKey = if (databaseKeyFile.exists()) {
-  unwrapDatabaseKey(databaseKeyFile)
+            unwrapDatabaseKey(databaseKeyFile)
         } else {
-  createAndPersistDatabaseKey(databaseKeyFile)
+            createAndPersistDatabaseKey(databaseKeyFile)
         }
         val objectKeyFile = secureFile(filesRoot, OBJECT_STORE_KEY_FILE)
         val objectStoreKey = try {
-  if (objectKeyFile.exists()) {
-      unwrapObjectStoreKey(objectKeyFile)
-  } else {
-      createAndPersistObjectStoreKey(objectKeyFile)
-  }
+            if (objectKeyFile.exists()) {
+                unwrapObjectStoreKey(objectKeyFile)
+            } else {
+                createAndPersistObjectStoreKey(objectKeyFile)
+            }
         } catch (failure: Throwable) {
-  databaseKey.fill(0)
-  throw failure
+            databaseKey.fill(0)
+            throw failure
         }
         val gateway = try {
-  RustNativeGateway.createSecure(configJson, databaseKey, objectStoreKey)
+            RustNativeGateway.createSecure(configJson, databaseKey, objectStoreKey)
         } finally {
-  databaseKey.fill(0)
-  objectStoreKey.fill(0)
+            databaseKey.fill(0)
+            objectStoreKey.fill(0)
         }
         return try {
             configureRemoteToolsIfPresent(gateway, filesRoot)
@@ -157,38 +157,37 @@ object SecureRuntimeFactory {
 
     private fun createAndPersistObjectStoreKey(keyFile: File): ByteArray {
         val rawKey = try {
-  NativeBindings.generateObjectStoreKey()
+            NativeBindings.generateObjectStoreKey()
         } catch (failure: Throwable) {
-  throw SecurityBootstrapException("object_store_key_generation_failed", failure)
+            throw SecurityBootstrapException("object_store_key_generation_failed", failure)
         }
         if (rawKey.size != OBJECT_STORE_KEY_BYTES) {
-  rawKey.fill(0)
-  throw SecurityBootstrapException("object_store_key_generation_failed")
+            rawKey.fill(0)
+            throw SecurityBootstrapException("object_store_key_generation_failed")
         }
         return try {
-  val wrapped = wrap(rawKey)
-  try {
-      writeAtomically(keyFile, wrapped)
-  } finally {
-      wrapped.fill(0)
-  }
-  rawKey
+            val wrapped = wrap(rawKey)
+            try {
+                writeAtomically(keyFile, wrapped)
+            } finally {
+                wrapped.fill(0)
+            }
+            rawKey
         } catch (failure: Exception) {
-  rawKey.fill(0)
-  if (failure is SecurityBootstrapException) throw failure
-  throw SecurityBootstrapException("object_store_key_creation_failed", failure)
+            rawKey.fill(0)
+            if (failure is SecurityBootstrapException) throw failure
+            throw SecurityBootstrapException("object_store_key_creation_failed", failure)
         }
     }
 
     private fun unwrapObjectStoreKey(keyFile: File): ByteArray {
         val raw = unwrapSecretFile(keyFile)
         if (raw.size != OBJECT_STORE_KEY_BYTES) {
-  raw.fill(0)
-  throw SecurityBootstrapException("object_store_key_length_invalid")
+            raw.fill(0)
+            throw SecurityBootstrapException("object_store_key_length_invalid")
         }
         return raw
     }
-
     private fun unwrapSecretFile(file: File): ByteArray {
         val wrapped = try {
             Files.readAllBytes(file.toPath())

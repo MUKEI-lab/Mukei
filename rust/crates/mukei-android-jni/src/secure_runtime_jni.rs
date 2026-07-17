@@ -359,17 +359,18 @@ mod secure_runtime {
                 }));
             };
             super::super::serialize(&json!({
-                      "sqlcipher": status_tag(resources.encryption_status),
-                      "panic_hook": mukei_core::diagnostics::panic_hook::is_installed(),
-                      "crash_sink": "app_private",
-                      "telemetry": "local_only",                "projections": "encrypted",
-            "object_store": if resources.object_store_ready { "encrypted" } else { "unavailable" },
-            "staged_plaintext_cleanup": {
-                "removed": resources.staged_cleanup_removed,
-                "unsafe_paths": resources.staged_cleanup_unsafe_paths,
-            },
-            "rag": if resources.rag_ready { "ready" } else { "artifacts_required" },
-                  }))
+                "sqlcipher": status_tag(resources.encryption_status),
+                "panic_hook": mukei_core::diagnostics::panic_hook::is_installed(),
+                "crash_sink": "app_private",
+                "telemetry": "local_only",
+                "projections": "encrypted",
+                "object_store": if resources.object_store_ready { "encrypted" } else { "unavailable" },
+                "staged_plaintext_cleanup": {
+                    "removed": resources.staged_cleanup_removed,
+                    "unsafe_paths": resources.staged_cleanup_unsafe_paths,
+                },
+                "rag": if resources.rag_ready { "ready" } else { "artifacts_required" },
+            }))
         });
         super::super::to_java_bytes(&mut env, &response)
     }
