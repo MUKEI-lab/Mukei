@@ -13,6 +13,15 @@ use crate::storage::universal::{
 use rusqlite::{OptionalExtension, TransactionBehavior};
 use uuid::Uuid;
 
+type TrashTargetRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+);
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrashReceipt {
     pub journal_id: Uuid,
@@ -45,7 +54,7 @@ impl TrashRepository {
             let transaction =
                 connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
-            let row: Option<(String, String, String, Option<String>, Option<String>, String)> =
+            let row: Option<TrashTargetRow> =
                 transaction
                     .query_row(
                         "SELECT n.scope_id, s.workspace_id, s.owner_chat_id, n.parent_node_id, n.system_role, n.state \

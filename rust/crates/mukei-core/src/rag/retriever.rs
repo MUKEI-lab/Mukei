@@ -732,7 +732,7 @@ impl Retriever {
         let mut normalized_matches: Vec<(u64, f32)> = matches
             .into_iter()
             .map(|(chunk_id, raw_score)| (chunk_id, normalize_cosine_score(raw_score)))
-            .filter(|(_, score)| request.min_score.map_or(true, |minimum| *score >= minimum))
+            .filter(|(_, score)| request.min_score.is_none_or(|minimum| *score >= minimum))
             .collect();
         normalized_matches.sort_by(|(left_id, left_score), (right_id, right_score)| {
             right_score

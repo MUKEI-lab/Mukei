@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{
-    sync_channel, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError,
+    sync_channel, Receiver, SyncSender, TryRecvError, TrySendError,
 };
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -289,15 +289,9 @@ impl EventBus {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let first = if timeout.is_zero() {
-                match receiver.try_recv() {
-                    Ok(event) => Some(event),
-                    Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,
-                }
+                receiver.try_recv().ok()
             } else {
-                match receiver.recv_timeout(timeout) {
-                    Ok(event) => Some(event),
-                    Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => None,
-                }
+                receiver.recv_timeout(timeout).ok()
             };
             if let Some(event) = first {
                 self.decrement_queued();

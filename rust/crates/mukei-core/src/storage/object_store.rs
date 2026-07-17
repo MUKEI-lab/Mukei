@@ -72,7 +72,8 @@ impl<C: ObjectCipher> ImmutableObjectStore<C> {
         let final_path = self.root.join(&relative_path);
 
         if final_path.exists() {
-            self.verify_existing(&final_path, &digest, plaintext_size)?;
+            self.verify_existing(&final_path, &digest, plaintext_size)
+                .map_err(|_| ObjectStoreError::CorruptDeduplicatedObject)?;
             return self.stored_object(digest, plaintext_size, relative_path, true);
         }
 

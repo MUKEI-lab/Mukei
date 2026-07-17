@@ -1,4 +1,5 @@
 impl MukeiRuntime {
+    #[allow(clippy::needless_return)]
     fn download_model(&self, command: &ValidatedCommand) -> CommandAcknowledgementV2 {
         if let Err(ack) = self.ensure_ready(command) {
             return ack;

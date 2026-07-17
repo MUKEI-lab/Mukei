@@ -191,9 +191,10 @@ impl WorkspaceLayout {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub enum DuplicatePolicy {
     /// Preserve the existing entry and create `name (2).ext`, `name (3).ext`, …
+    #[default]
     RenameNewEntry,
     /// Fail without mutating the existing entry.
     RejectNameConflict,
@@ -201,11 +202,6 @@ pub enum DuplicatePolicy {
     ReplaceWithNewVersion,
 }
 
-impl Default for DuplicatePolicy {
-    fn default() -> Self {
-        Self::RenameNewEntry
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ImportTarget {
