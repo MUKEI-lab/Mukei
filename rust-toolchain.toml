@@ -25,6 +25,7 @@ components = ["rustfmt", "clippy"]
 # does not need a manual install step.
 targets    = [
     "aarch64-linux-android",      # primary target (mobile)
+    "x86_64-linux-android",       # Android emulator / CI release ABI
     "x86_64-unknown-linux-gnu",   # CI / dev sandbox
     "aarch64-apple-darwin",       # macOS desktop (Apple Silicon)
 ]
