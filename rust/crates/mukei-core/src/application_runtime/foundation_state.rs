@@ -111,7 +111,7 @@ impl FeatureState {
 
         if let Some(value) = store.load("operations").await? {
             let mut records: Vec<OperationRecord> = serde_json::from_value(value)
-                .map_err(|error| MukeiError::DatabaseCorruption)?;
+                .map_err(|_| MukeiError::DatabaseCorruption)?;
             for record in &mut records {
                 if matches!(record.status, OperationStatus::Accepted | OperationStatus::Running) {
                     record.status = OperationStatus::Failed;
@@ -416,13 +416,6 @@ impl FeatureState {
         removed
     }
 
-    fn model(&self, model_id: &str) -> Option<ModelProjection> {
-        self.models
-            .read()
-            .unwrap_or_else(|p| p.into_inner())
-            .get(model_id)
-            .cloned()
-    }
 
     fn insert_document(&self, document: DocumentProjection) {
         self.documents

@@ -1,9 +1,9 @@
-//! Platform-neutral application runtime owned by the native process.
-//!
-//! Protocol V2 commands are validated once, routed to feature handlers, tracked
-//! as cancellable operations, projected through ordered events, and exposed via
-//! authoritative snapshots. Android-only services are accessed through the
-//! pull-based platform broker in [`crate::platform`].
+// Platform-neutral application runtime owned by the native process.
+//
+// Protocol V2 commands are validated once, routed to feature handlers, tracked
+// as cancellable operations, projected through ordered events, and exposed via
+// authoritative snapshots. Android-only services are accessed through the
+// pull-based platform broker in `crate::platform`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -41,10 +41,12 @@ use crate::platform::{
 use crate::tools::ToolRegistry;
 use crate::types::{BranchId, ChatMessage, ConversationId, MessageId, Role};
 use crate::ui_protocol::{
-    validate_command, AcknowledgementStatus, CommandAcknowledgementV2, CommandEnvelopeV2,
+    validate_command, CommandAcknowledgementV2, CommandEnvelopeV2,
     CommandType, EventEnvelopeV2, ProtocolCapabilitySnapshot, RejectionReason, ValidatedCommand,
     ValidatedCommandPayload,
 };
+#[cfg(test)]
+use crate::ui_protocol::AcknowledgementStatus;
 
 const DEFAULT_EVENT_CAPACITY: usize = 512;
 const MAX_EVENT_CAPACITY: usize = 4096;

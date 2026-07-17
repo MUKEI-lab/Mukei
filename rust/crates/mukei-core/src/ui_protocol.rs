@@ -43,6 +43,8 @@ pub const CAP_PER_STREAM_SEQUENCING: &str = "per_stream_sequencing";
 pub const CAP_IDEMPOTENT_COMMAND_REPLAY: &str = "idempotent_command_replay";
 /// Capability: command-correlated operation lifecycle events.
 pub const CAP_OPERATION_LIFECYCLE_EVENTS: &str = "operation_lifecycle_events";
+/// Capability: chat operations require explicit conversation, branch, and operation scope.
+pub const CAP_SCOPED_CHAT_OPERATIONS: &str = "scoped_chat_operations";
 /// Capability: event delivery through bounded drain batches.
 pub const CAP_BOUNDED_EVENT_DRAIN: &str = "bounded_event_drain";
 /// Capability: authoritative domain snapshots for recovery.
@@ -106,6 +108,7 @@ impl ProtocolCapabilitySnapshot {
                 CAP_PER_STREAM_SEQUENCING.into(),
                 CAP_IDEMPOTENT_COMMAND_REPLAY.into(),
                 CAP_OPERATION_LIFECYCLE_EVENTS.into(),
+                CAP_SCOPED_CHAT_OPERATIONS.into(),
                 CAP_BOUNDED_EVENT_DRAIN.into(),
                 CAP_RUNTIME_SNAPSHOTS.into(),
                 CAP_GRACEFUL_SHUTDOWN.into(),

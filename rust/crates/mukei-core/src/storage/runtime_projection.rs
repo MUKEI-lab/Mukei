@@ -168,7 +168,7 @@ mod tests {
     #[tokio::test]
     async fn projection_round_trip_is_durable() {
         let directory = tempfile::tempdir().unwrap();
-        let pool = DatabasePool::open(directory.path().join("projection.db")).unwrap();
+        let pool = DatabasePool::open(&directory.path().join("projection.db")).unwrap();
         Migrator::embedded().apply_pending(&pool).await.unwrap();
         RuntimeProjectionRepository::ensure_schema(&pool).await.unwrap();
         RuntimeProjectionRepository::upsert(&pool, "setting", "theme_mode", "\"taupe\"")
