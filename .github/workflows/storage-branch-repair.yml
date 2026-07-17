@@ -1,0 +1,81 @@
+name: storage-branch-repair
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: storage-branch-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: ${{ !contains(github.event.head_commit.message, '[storage-repair]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+      - name: Assert isolated branch
+        run: |
+          test "$(git branch --show-current)" = "temp/universal-storage-workspace-v0.1"
+          test "${GITHUB_REF_NAME}" = "temp/universal-storage-workspace-v0.1"
+      - name: Install Rust 1.82 with rustfmt
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.82.0
+          components: rustfmt
+      - name: Embed V014 and V015 and format Rust
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path("rust/crates/mukei-core/src/storage/migrations.rs")
+          text = path.read_text()
+          if '"V014__universal_storage_and_workspaces"' not in text:
+              anchor = '''    (
+                  13,
+                  "V013__saas_tenancy_entitlements_usage_ledger",
+                  include_str!("../../../../migrations/V013__saas_tenancy_entitlements_usage_ledger.sql"),
+              ),
+          ];'''
+              replacement = '''    (
+                  13,
+                  "V013__saas_tenancy_entitlements_usage_ledger",
+                  include_str!("../../../../migrations/V013__saas_tenancy_entitlements_usage_ledger.sql"),
+              ),
+              (
+                  14,
+                  "V014__universal_storage_and_workspaces",
+                  include_str!("../../../../migrations/V014__universal_storage_and_workspaces.sql"),
+              ),
+              (
+                  15,
+                  "V015__workspace_scope_isolation_guards",
+                  include_str!("../../../../migrations/V015__workspace_scope_isolation_guards.sql"),
+              ),
+          ];'''
+              if anchor not in text:
+                  raise SystemExit("refusing repair: V013 embedded-migration anchor not found")
+              path.write_text(text.replace(anchor, replacement, 1))
+      - name: Format workspace
+        working-directory: rust
+        run: cargo fmt --all
+      - name: Verify migration contract
+        working-directory: rust
+        run: cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite --test universal_storage_embedded_migrations -- --nocapture
+      - name: Commit repair to temporary branch
+        run: |
+          if git diff --quiet; then
+            echo "No repair changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust
+          git commit -m "fix(storage): embed migrations and apply rustfmt [storage-repair]"
+          git push origin HEAD:temp/universal-storage-workspace-v0.1
