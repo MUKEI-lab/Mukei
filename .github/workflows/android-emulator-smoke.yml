@@ -234,7 +234,7 @@ jobs:
 
           PID=""
           for _ in $(seq 1 30); do
-            PID="$(adb shell pidof "${PACKAGE}" 2>/dev/null | tr -d '\r')"
+            PID="$(adb shell pidof "${PACKAGE}" 2>/dev/null | tr -d '\r' || true)"
             [[ -n "${PID}" ]] && break
             sleep 1
           done
@@ -249,10 +249,29 @@ jobs:
             exit 1
           fi
 
-          SETTINGS_X=990
-          SETTINGS_Y=180
-          printf '%s %s\n' "${SETTINGS_X}" "${SETTINGS_Y}" \
-            | tee "${EVIDENCE}/settings-tap.txt"
+          SETTINGS_POINT="$(python3 - "${EVIDENCE}/launch-window.xml" <<'PY'
+          import re
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          for node in root.iter("node"):
+              description = node.get("content-desc", "").strip().lower()
+              if description != "open settings":
+                  continue
+              match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+              if match:
+                  x1, y1, x2, y2 = map(int, match.groups())
+                  print((x1 + x2) // 2, (y1 + y2) // 2)
+                  break
+          PY
+          )"
+          printf '%s\n' "${SETTINGS_POINT}" | tee "${EVIDENCE}/settings-tap.txt"
+          if [[ -z "${SETTINGS_POINT}" ]]; then
+            echo "Open settings accessibility target was not found." >&2
+            exit 1
+          fi
+          read -r SETTINGS_X SETTINGS_Y <<< "${SETTINGS_POINT}"
           adb shell input tap "${SETTINGS_X}" "${SETTINGS_Y}"
           sleep 2
           adb exec-out screencap -p > "${EVIDENCE}/02-settings.png"
@@ -261,12 +280,48 @@ jobs:
           adb pull /sdcard/mukei-settings.xml "${EVIDENCE}/settings-window.xml" \
             > "${EVIDENCE}/uiautomator-settings-pull.txt" 2>&1 || true
 
+          SETTINGS_VISIBLE="$(python3 - "${EVIDENCE}/settings-window.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          visible = any(
+              node.get("content-desc", "").strip().lower() == "settings"
+              for node in root.iter("node")
+          )
+          print("true" if visible else "false")
+          PY
+          )"
+          printf '%s\n' "${SETTINGS_VISIBLE}" | tee "${EVIDENCE}/settings-visible.txt"
+          if [[ "${SETTINGS_VISIBLE}" != "true" ]]; then
+            echo "Settings pane did not become visible after tapping its accessibility target." >&2
+            exit 1
+          fi
+
           adb shell input keyevent 4
           sleep 1
           adb exec-out screencap -p > "${EVIDENCE}/03-back.png"
-          FINAL_PID="$(adb shell pidof "${PACKAGE}" 2>/dev/null | tr -d '\r')"
+          adb shell uiautomator dump /sdcard/mukei-back.xml \
+            > "${EVIDENCE}/uiautomator-back.txt" 2>&1 || true
+          adb pull /sdcard/mukei-back.xml "${EVIDENCE}/back-window.xml" \
+            > "${EVIDENCE}/uiautomator-back-pull.txt" 2>&1 || true
+
+          CHAT_VISIBLE="$(python3 - "${EVIDENCE}/back-window.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          visible = any(
+              node.get("content-desc", "").strip().lower() == "chat"
+              for node in root.iter("node")
+          )
+          print("true" if visible else "false")
+          PY
+          )"
+          printf '%s\n' "${CHAT_VISIBLE}" | tee "${EVIDENCE}/chat-visible-after-back.txt"
+          FINAL_PID="$(adb shell pidof "${PACKAGE}" 2>/dev/null | tr -d '\r' || true)"
           printf '%s\n' "${FINAL_PID}" | tee "${EVIDENCE}/final-pid.txt"
-          [[ -n "${FINAL_PID}" ]]
+          [[ "${CHAT_VISIBLE}" == "true" && -n "${FINAL_PID}" ]]
 
       - name: Upload emulator evidence
         if: always()
