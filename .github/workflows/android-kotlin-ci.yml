@@ -64,8 +64,10 @@ jobs:
           cargo test -p mukei-core --lib 2>&1 | tee "$RUNNER_TEMP/rust-security.log"
       - name: Test canonical prompt sandbox
         working-directory: rust
-        run: >-
-          cargo test -p mukei-core tools::
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p mukei-core --lib tools:: 2>&1 | tee -a "$RUNNER_TEMP/rust-security.log"
       - name: Check SQLCipher core
         working-directory: rust
         run: >-
