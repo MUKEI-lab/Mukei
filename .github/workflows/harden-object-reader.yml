@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  patch-and-validate:
+  patch-commit-and-validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,24 +53,24 @@ jobs:
 
           test_anchor = "    #[test]\n    fn corrupted_ciphertext_fails_closed() {\n"
           test = '''    #[test]
-          fn oversized_sparse_object_is_rejected_before_ciphertext_allocation() {
-              let directory = tempfile::tempdir().unwrap();
-              let path = directory.path().join("oversized.mobj");
-              let digest = [0x41; SHA256_LEN];
-              let encrypted_size = MAX_ENCODED_OBJECT_BYTES + 1;
-              let mut header = associated_data(&digest, 1, AES_GCM_CIPHER_VERSION);
-              header.extend_from_slice(&encrypted_size.to_be_bytes());
+              fn oversized_sparse_object_is_rejected_before_ciphertext_allocation() {
+                  let directory = tempfile::tempdir().unwrap();
+                  let path = directory.path().join("oversized.mobj");
+                  let digest = [0x41; SHA256_LEN];
+                  let encrypted_size = MAX_ENCODED_OBJECT_BYTES + 1;
+                  let mut header = associated_data(&digest, 1, AES_GCM_CIPHER_VERSION);
+                  header.extend_from_slice(&encrypted_size.to_be_bytes());
 
-              let mut file = File::create(&path).unwrap();
-              file.write_all(&header).unwrap();
-              file.set_len(header.len() as u64 + encrypted_size).unwrap();
-              file.sync_all().unwrap();
+                  let mut file = File::create(&path).unwrap();
+                  file.write_all(&header).unwrap();
+                  file.set_len(header.len() as u64 + encrypted_size).unwrap();
+                  file.sync_all().unwrap();
 
-              assert!(matches!(
-                  read_encoded_object(&path),
-                  Err(ObjectStoreError::MalformedObject)
-              ));
-          }
+                  assert!(matches!(
+                      read_encoded_object(&path),
+                      Err(ObjectStoreError::MalformedObject)
+                  ));
+              }
 
           '''
           if "oversized_sparse_object_is_rejected_before_ciphertext_allocation" not in text:
@@ -86,20 +86,16 @@ jobs:
           toolchain: 1.82.0
           components: rustfmt, clippy
 
-      - name: Format and validate focused storage tests
+      - name: Format production patch
         working-directory: rust
-        run: |
-          cargo fmt --all
-          cargo fmt --all -- --check
-          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite storage::object_store::tests
-          cargo clippy -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings
+        run: cargo fmt --all
 
       - name: Verify only the allowed production file changed
         run: |
           changed="$(git diff --name-only)"
           test "$changed" = "rust/crates/mukei-core/src/storage/object_store.rs"
 
-      - name: Commit verified hardening
+      - name: Commit bounded reader to temporary branch
         run: |
           if git diff --quiet; then
             echo "Object reader was already hardened."
@@ -111,3 +107,10 @@ jobs:
           git add rust/crates/mukei-core/src/storage/object_store.rs
           git commit -m "fix(storage): bound encrypted object reader allocation"
           git push origin HEAD:temp/universal-storage-workspace-v0.1
+
+      - name: Validate focused storage hardening
+        working-directory: rust
+        run: |
+          cargo fmt --all -- --check
+          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite storage::object_store::tests
+          cargo clippy -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings
