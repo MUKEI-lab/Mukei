@@ -62,6 +62,11 @@ impl<C: ObjectCipher> ImmutableObjectStore<C> {
         Ok(Self { root, cipher })
     }
 
+    /// Encryption generation encoded into newly published object headers.
+    pub fn encryption_version(&self) -> u32 {
+        self.cipher.version()
+    }
+
     /// Encrypt and atomically publish an immutable object. The deduplication key
     /// is the complete SHA-256 digest plus plaintext size; truncated hashes are
     /// never used for identity or paths.

@@ -116,7 +116,6 @@ pub struct WorkspaceStagedImportService<C> {
     object_store: Arc<ImmutableObjectStore<C>>,
     staging_root: PathBuf,
     max_import_bytes: u64,
-    encryption_version: u32,
 }
 
 impl<C: ObjectCipher> WorkspaceStagedImportService<C> {
@@ -125,9 +124,8 @@ impl<C: ObjectCipher> WorkspaceStagedImportService<C> {
         object_store: Arc<ImmutableObjectStore<C>>,
         staging_root: impl Into<PathBuf>,
         max_import_bytes: u64,
-        encryption_version: u32,
     ) -> Result<Self, StagedImportError> {
-        if max_import_bytes == 0 || encryption_version == 0 {
+        if max_import_bytes == 0 || object_store.encryption_version() == 0 {
             return Err(StagedImportError::InvalidConfiguration);
         }
         let staging_root = staging_root.into();
@@ -138,7 +136,6 @@ impl<C: ObjectCipher> WorkspaceStagedImportService<C> {
             object_store,
             staging_root,
             max_import_bytes,
-            encryption_version,
         })
     }
 
@@ -207,7 +204,7 @@ impl<C: ObjectCipher> WorkspaceStagedImportService<C> {
                     .filter(|value| !value.trim().is_empty()),
                 detected_encoding: Some("utf-8".to_string()),
                 language_id: None,
-                encryption_version: self.encryption_version,
+                encryption_version: self.object_store.encryption_version(),
                 duplicate_policy: request.duplicate_policy,
             },
         )
@@ -466,7 +463,6 @@ mod tests {
             store,
             &staging,
             DEFAULT_MAX_STAGED_IMPORT_BYTES,
-            1,
         )
         .unwrap();
         (pool, service, staging)
