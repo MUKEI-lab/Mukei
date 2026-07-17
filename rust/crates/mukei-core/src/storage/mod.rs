@@ -32,6 +32,8 @@ pub mod saf;
 #[cfg(feature = "rusqlite")]
 pub mod settings;
 #[cfg(all(feature = "rusqlite", feature = "tokio"))]
+pub mod staged_cleanup;
+#[cfg(all(feature = "rusqlite", feature = "tokio"))]
 pub mod staged_import;
 #[cfg(feature = "rusqlite")]
 pub mod trash_repository;
@@ -93,6 +95,8 @@ pub use saas::{
 pub use saf::{DocumentProjection, SafCleanupPlan, SafRegistry, SafTokenRow};
 #[cfg(feature = "rusqlite")]
 pub use settings::{PreferenceRecord, PreferenceValue, SecretRefRecord, SettingsRepository};
+#[cfg(all(feature = "rusqlite", feature = "tokio"))]
+pub use staged_cleanup::{StagedCleanupReport, StagedPlaintextCleanup};
 #[cfg(all(feature = "rusqlite", feature = "tokio"))]
 pub use staged_import::{
     StagedFileImporter, StagedImportError, WorkspaceStagedImportReceipt,
