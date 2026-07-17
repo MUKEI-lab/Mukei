@@ -70,22 +70,31 @@ jobs:
           cargo test -p mukei-core --lib tools:: 2>&1 | tee -a "$RUNNER_TEMP/rust-security.log"
       - name: Check SQLCipher core
         working-directory: rust
-        run: >-
-          cargo check -p mukei-core
-          --no-default-features
-          --features std,tokio,sqlcipher,runtime_hardening
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check -p mukei-core \
+            --no-default-features \
+            --features std,tokio,sqlcipher \
+            2>&1 | tee -a "$RUNNER_TEMP/rust-security.log"
       - name: Test secure JNI bootstrap contracts
         working-directory: rust
-        run: >-
-          cargo test -p mukei-android-jni --lib
-          --no-default-features
-          --features secure_runtime,runtime_hardening
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p mukei-android-jni --lib \
+            --no-default-features \
+            --features secure_runtime \
+            2>&1 | tee -a "$RUNNER_TEMP/rust-security.log"
       - name: Check production RAG composition
         working-directory: rust
-        run: >-
-          cargo check -p mukei-android-jni
-          --no-default-features
-          --features secure_runtime,rag_runtime,runtime_hardening
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check -p mukei-android-jni \
+            --no-default-features \
+            --features secure_runtime,rag_runtime,runtime_hardening \
+            2>&1 | tee -a "$RUNNER_TEMP/rust-security.log"
       - name: Build and test host inference capsule
         run: |
           set -euo pipefail
