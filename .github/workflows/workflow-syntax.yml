@@ -1,0 +1,36 @@
+name: workflow-syntax
+
+on:
+  push:
+    branches: [ Kotlin ]
+    paths:
+      - ".github/workflows/**"
+  pull_request:
+    branches: [ Kotlin ]
+    paths:
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-syntax-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse every GitHub Actions workflow
+        run: |
+          ruby -e '
+            require "yaml"
+            files = Dir[".github/workflows/*.{yml,yaml}"].sort
+            abort "no workflow files found" if files.empty?
+            files.each do |path|
+              YAML.parse_file(path)
+              puts "validated #{path}"
+            end
+          '
