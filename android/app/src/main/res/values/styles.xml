@@ -7,6 +7,5 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:statusBarColor">@color/mukei_splash_background</item>
         <item name="android:navigationBarColor">@color/mukei_splash_background</item>
-        <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>
