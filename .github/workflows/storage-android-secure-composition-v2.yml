@@ -65,9 +65,33 @@ jobs:
           end = source.index(end_marker, start)
           lines = source[start:end].splitlines()
           patch = "\n".join(line[10:] if line.startswith("          ") else line for line in lines) + "\n"
+          exact_helper = '''def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if new in text:
+                  return text
+              if old not in text:
+                  raise SystemExit(f"missing patch marker: {label}")
+              return text.replace(old, new, 1)
+          '''
+          tolerant_helper = '''import re
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if new in text:
+                  return text
+              if old in text:
+                  return text.replace(old, new, 1)
+              tokens = re.split(r"(\\s+)", old)
+              pattern = "".join(r"\\s+" if token.isspace() else re.escape(token) for token in tokens)
+              match = re.search(pattern, text)
+              if match is None:
+                  raise SystemExit(f"missing patch marker: {label}")
+              return text[:match.start()] + new + text[match.end():]
+          '''
+          if exact_helper not in patch:
+              raise SystemExit('extracted replace_once helper changed unexpectedly')
+          patch = patch.replace(exact_helper, tolerant_helper, 1)
           Path('/tmp/apply_secure_storage.py').write_text(patch, encoding='utf-8')
-          compile(patch, '/tmp/apply_secure_storage.py', 'exec')
-          exec(compile(patch, '/tmp/apply_secure_storage.py', 'exec'), {'__name__': '__main__'})
+          code = compile(patch, '/tmp/apply_secure_storage.py', 'exec')
+          exec(code, {'__name__': '__main__'})
       - name: Format modified Rust files
         working-directory: rust
         run: |
