@@ -15,7 +15,7 @@ permissions:
   statuses: write
 
 env:
-  CARGO_TERM_COLOR: always
+  CARGO_TERM_COLOR: never
   RUST_BACKTRACE: 1
   RUSTFLAGS: -D warnings
 
@@ -23,7 +23,12 @@ jobs:
   storage-core:
     name: storage core checks
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
+    outputs:
+      fmt_exit: ${{ steps.cargo.outputs.fmt_exit }}
+      check_exit: ${{ steps.cargo.outputs.check_exit }}
+      test_exit: ${{ steps.cargo.outputs.test_exit }}
+      clippy_exit: ${{ steps.cargo.outputs.clippy_exit }}
     defaults:
       run:
         working-directory: rust
@@ -38,19 +43,55 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
-      - name: Formatting
-        run: cargo fmt --all -- --check
-      - name: Check storage feature set
-        run: cargo check -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets
-      - name: Test storage feature set
-        run: cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets
-      - name: Clippy storage feature set
-        run: cargo clippy -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings
+      - name: Run Cargo diagnostics
+        id: cargo
+        shell: bash
+        run: |
+          set +e
+          mkdir -p ../ci-logs
+
+          cargo fmt --all -- --check > ../ci-logs/fmt.log 2>&1
+          fmt_exit=$?
+          echo "fmt_exit=$fmt_exit" >> "$GITHUB_OUTPUT"
+
+          cargo check -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets > ../ci-logs/check.log 2>&1
+          check_exit=$?
+          echo "check_exit=$check_exit" >> "$GITHUB_OUTPUT"
+
+          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets > ../ci-logs/test.log 2>&1
+          test_exit=$?
+          echo "test_exit=$test_exit" >> "$GITHUB_OUTPUT"
+
+          cargo clippy -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings > ../ci-logs/clippy.log 2>&1
+          clippy_exit=$?
+          echo "clippy_exit=$clippy_exit" >> "$GITHUB_OUTPUT"
+
+          printf 'fmt=%s\ncheck=%s\ntest=%s\nclippy=%s\n' \
+            "$fmt_exit" "$check_exit" "$test_exit" "$clippy_exit" \
+            > ../ci-logs/summary.txt
+          exit 0
+      - name: Upload Cargo diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-cargo-logs-${{ github.sha }}
+          path: ci-logs
+          if-no-files-found: error
+          retention-days: 7
+      - name: Enforce Cargo results
+        shell: bash
+        run: |
+          test '${{ steps.cargo.outputs.fmt_exit }}' = '0'
+          test '${{ steps.cargo.outputs.check_exit }}' = '0'
+          test '${{ steps.cargo.outputs.test_exit }}' = '0'
+          test '${{ steps.cargo.outputs.clippy_exit }}' = '0'
 
   embedded-migrations:
     name: embedded storage migrations
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    outputs:
+      migration_exit: ${{ steps.migrations.outputs.migration_exit }}
     defaults:
       run:
         working-directory: rust
@@ -64,8 +105,29 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
-      - name: Embedded migration contract
-        run: cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite --test universal_storage_embedded_migrations -- --nocapture
+      - name: Run embedded migration contract
+        id: migrations
+        shell: bash
+        run: |
+          set +e
+          mkdir -p ../ci-migration-logs
+          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite \
+            --test universal_storage_embedded_migrations -- --nocapture \
+            > ../ci-migration-logs/embedded-migrations.log 2>&1
+          migration_exit=$?
+          echo "migration_exit=$migration_exit" >> "$GITHUB_OUTPUT"
+          echo "migration=$migration_exit" > ../ci-migration-logs/summary.txt
+          exit 0
+      - name: Upload migration diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-migration-logs-${{ github.sha }}
+          path: ci-migration-logs
+          if-no-files-found: error
+          retention-days: 7
+      - name: Enforce migration result
+        run: test '${{ steps.migrations.outputs.migration_exit }}' = '0'
 
   publish-status:
     name: publish storage validation status
@@ -79,20 +141,22 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const results = {
-              storageCore: '${{ needs.storage-core.result }}',
-              embeddedMigrations: '${{ needs.embedded-migrations.result }}'
+            const codes = {
+              fmt: '${{ needs.storage-core.outputs.fmt_exit }}',
+              check: '${{ needs.storage-core.outputs.check_exit }}',
+              test: '${{ needs.storage-core.outputs.test_exit }}',
+              clippy: '${{ needs.storage-core.outputs.clippy_exit }}',
+              migrations: '${{ needs.embedded-migrations.outputs.migration_exit }}'
             };
-            const success = Object.values(results).every(result => result === 'success');
+            const success = Object.values(codes).every(code => code === '0');
+            const details = Object.entries(codes).map(([key, value]) => `${key}=${value || '?'}`).join(',');
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: context.sha,
               state: success ? 'success' : 'failure',
               context: 'storage-branch-validation',
-              description: success
-                ? 'Storage Cargo checks passed'
-                : `storage=${results.storageCore}, migrations=${results.embeddedMigrations}`.slice(0, 140),
+              description: success ? 'Storage Cargo checks passed' : details.slice(0, 140),
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
-            if (!success) core.setFailed('Storage branch validation failed');
+            if (!success) core.setFailed(`Storage validation failed: ${details}`);
