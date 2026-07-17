@@ -204,12 +204,7 @@ fn associated_data(digest: &[u8; SHA256_LEN], size: u64, version: u32) -> Vec<u8
     output
 }
 
-fn encode_object(
-    version: u32,
-    digest: &[u8; SHA256_LEN],
-    size: u64,
-    ciphertext: &[u8],
-) -> Vec<u8> {
+fn encode_object(version: u32, digest: &[u8; SHA256_LEN], size: u64, ciphertext: &[u8]) -> Vec<u8> {
     let mut output = associated_data(digest, size, version);
     output.extend_from_slice(&(ciphertext.len() as u64).to_be_bytes());
     output.extend_from_slice(ciphertext);

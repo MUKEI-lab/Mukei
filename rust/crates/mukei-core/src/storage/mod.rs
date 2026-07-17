@@ -43,17 +43,15 @@ pub mod universal_repository;
 pub mod version_repository;
 
 pub use file_policy::{
-    admit_file_name, AllowedFileName, FileAdmissionError, FileAdmissionRule,
-    ALLOWED_EXACT_NAMES, ALLOWED_EXTENSIONS, FILE_POLICY_VERSION, MAX_FILENAME_BYTES,
+    admit_file_name, AllowedFileName, FileAdmissionError, FileAdmissionRule, ALLOWED_EXACT_NAMES,
+    ALLOWED_EXTENSIONS, FILE_POLICY_VERSION, MAX_FILENAME_BYTES,
 };
-pub use object_store::{
-    ImmutableObjectStore, ObjectCipher, ObjectStoreError, StoredObject,
-};
+pub use object_store::{ImmutableObjectStore, ObjectCipher, ObjectStoreError, StoredObject};
 pub use universal::{
-    ChatId, DuplicatePolicy, FileVersionId, ImportTarget, ImportTransactionId,
-    PlannedDirectory, StorageDomainError, StorageNodeId, StorageNodeKind, StorageNodeState,
-    StorageObjectId, StorageScopeId, StorageScopeType, SystemDirectoryRole,
-    WorkspaceAccessContext, WorkspaceId, WorkspaceLayout, UNIVERSAL_STORAGE_NAME,
+    ChatId, DuplicatePolicy, FileVersionId, ImportTarget, ImportTransactionId, PlannedDirectory,
+    StorageDomainError, StorageNodeId, StorageNodeKind, StorageNodeState, StorageObjectId,
+    StorageScopeId, StorageScopeType, SystemDirectoryRole, WorkspaceAccessContext, WorkspaceId,
+    WorkspaceLayout, UNIVERSAL_STORAGE_NAME,
 };
 
 #[cfg(feature = "rusqlite")]
@@ -72,9 +70,7 @@ pub use import_commit_repository::{
     ImportAuthorization, ImportCommitReceipt, ImportCommitRepository, ImportCommitRequest,
 };
 #[cfg(feature = "rusqlite")]
-pub use import_journal::{
-    ImportJournalRepository, ImportState, ImportTransactionRecord,
-};
+pub use import_journal::{ImportJournalRepository, ImportState, ImportTransactionRecord};
 #[cfg(feature = "rusqlite")]
 pub use migrations::{
     MigrationBackup, MigrationRecord, Migrator, MIGRATIONS_DIR, MIGRATION_FILE_PREFIX,
@@ -100,8 +96,7 @@ pub use settings::{PreferenceRecord, PreferenceValue, SecretRefRecord, SettingsR
 #[cfg(all(feature = "rusqlite", feature = "tokio"))]
 pub use staged_import::{
     StagedFileImporter, StagedImportError, WorkspaceStagedImportReceipt,
-    WorkspaceStagedImportRequest, WorkspaceStagedImportService,
-    DEFAULT_MAX_STAGED_IMPORT_BYTES,
+    WorkspaceStagedImportRequest, WorkspaceStagedImportService, DEFAULT_MAX_STAGED_IMPORT_BYTES,
 };
 #[cfg(feature = "rusqlite")]
 pub use trash_repository::{RestoreReceipt, TrashReceipt, TrashRepository};

@@ -12,11 +12,10 @@ pub const MAX_FILENAME_BYTES: usize = 255;
 
 /// Allowed extensions, stored in canonical lowercase form without the leading dot.
 pub const ALLOWED_EXTENSIONS: &[&str] = &[
-    "ass", "bash", "bat", "cfg", "cjs", "cmd", "conf", "cs", "css", "csv", "go",
-    "htm", "html", "ini", "java", "js", "json", "jsonl", "jsx", "kt", "kts",
-    "local", "log", "lua", "markdown", "md", "mjs", "php", "phtml", "pl", "pm",
-    "po", "pot", "ps1", "py", "pyi", "pyw", "r", "rake", "rb", "rs", "rtf",
-    "scss", "sh", "sql", "srt", "svg", "swift", "text", "toml", "ts", "tsv",
+    "ass", "bash", "bat", "cfg", "cjs", "cmd", "conf", "cs", "css", "csv", "go", "htm", "html",
+    "ini", "java", "js", "json", "jsonl", "jsx", "kt", "kts", "local", "log", "lua", "markdown",
+    "md", "mjs", "php", "phtml", "pl", "pm", "po", "pot", "ps1", "py", "pyi", "pyw", "r", "rake",
+    "rb", "rs", "rtf", "scss", "sh", "sql", "srt", "svg", "swift", "text", "toml", "ts", "tsv",
     "tsx", "txt", "vtt", "yaml", "yml", "zsh",
 ];
 
@@ -227,10 +226,7 @@ mod tests {
     #[test]
     fn long_names_are_rejected_by_utf8_byte_length() {
         let name = format!("{}.txt", "a".repeat(MAX_FILENAME_BYTES));
-        assert_eq!(
-            admit_file_name(&name),
-            Err(FileAdmissionError::NameTooLong)
-        );
+        assert_eq!(admit_file_name(&name), Err(FileAdmissionError::NameTooLong));
     }
 
     #[test]

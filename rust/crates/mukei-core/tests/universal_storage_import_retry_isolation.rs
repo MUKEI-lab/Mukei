@@ -24,12 +24,10 @@ async fn committed_retry_requires_the_original_workspace_authorization() {
     .await
     .unwrap();
 
-    let owner = UniversalStorageRepository::ensure_workspace(
-        &pool,
-        ChatId::parse("chat-owner").unwrap(),
-    )
-    .await
-    .unwrap();
+    let owner =
+        UniversalStorageRepository::ensure_workspace(&pool, ChatId::parse("chat-owner").unwrap())
+            .await
+            .unwrap();
     let outsider = UniversalStorageRepository::ensure_workspace(
         &pool,
         ChatId::parse("chat-outsider").unwrap(),
@@ -71,12 +69,7 @@ async fn committed_retry_requires_the_original_workspace_authorization() {
         plaintext_sha256: digest,
         plaintext_size: 4,
         encrypted_size: 48,
-        relative_path: PathBuf::from(format!(
-            "{}/{}/{}-4.mobj",
-            &hex[0..2],
-            &hex[2..4],
-            hex
-        )),
+        relative_path: PathBuf::from(format!("{}/{}/{}-4.mobj", &hex[0..2], &hex[2..4], hex)),
         deduplicated: false,
     };
     let owner_access = WorkspaceAccessContext {

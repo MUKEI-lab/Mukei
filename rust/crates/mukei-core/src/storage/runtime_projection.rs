@@ -170,7 +170,9 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let pool = DatabasePool::open(&directory.path().join("projection.db")).unwrap();
         Migrator::embedded().apply_pending(&pool).await.unwrap();
-        RuntimeProjectionRepository::ensure_schema(&pool).await.unwrap();
+        RuntimeProjectionRepository::ensure_schema(&pool)
+            .await
+            .unwrap();
         RuntimeProjectionRepository::upsert(&pool, "setting", "theme_mode", "\"taupe\"")
             .await
             .unwrap();

@@ -308,8 +308,15 @@ fn validate_role_once(
     directories: &[PersistedSystemDirectory],
     role: SystemDirectoryRole,
 ) -> std::result::Result<(), DbError> {
-    if directories.iter().filter(|entry| entry.role == role).count() != 1 {
-        return invariant(format!("system directory role {role:?} is missing or duplicated"));
+    if directories
+        .iter()
+        .filter(|entry| entry.role == role)
+        .count()
+        != 1
+    {
+        return invariant(format!(
+            "system directory role {role:?} is missing or duplicated"
+        ));
     }
     Ok(())
 }
@@ -405,27 +412,28 @@ mod tests {
 
         assert_eq!(first, second);
         assert_eq!(first.directories.len(), 8);
-        assert!(first.directory(SystemDirectoryRole::UploadedFiles).is_some());
+        assert!(first
+            .directory(SystemDirectoryRole::UploadedFiles)
+            .is_some());
     }
 
     #[tokio::test]
     async fn different_chats_receive_isolated_workspaces() {
         let (_directory, pool) = migrated_pool().await;
-        let first = UniversalStorageRepository::ensure_workspace(
-            &pool,
-            ChatId::parse("chat-1").unwrap(),
-        )
-        .await
-        .unwrap();
-        let second = UniversalStorageRepository::ensure_workspace(
-            &pool,
-            ChatId::parse("chat-2").unwrap(),
-        )
-        .await
-        .unwrap();
+        let first =
+            UniversalStorageRepository::ensure_workspace(&pool, ChatId::parse("chat-1").unwrap())
+                .await
+                .unwrap();
+        let second =
+            UniversalStorageRepository::ensure_workspace(&pool, ChatId::parse("chat-2").unwrap())
+                .await
+                .unwrap();
 
         assert_ne!(first.workspace_id, second.workspace_id);
         assert_ne!(first.scope_id, second.scope_id);
-        assert_ne!(first.uploaded_files_node_id(), second.uploaded_files_node_id());
+        assert_ne!(
+            first.uploaded_files_node_id(),
+            second.uploaded_files_node_id()
+        );
     }
 }

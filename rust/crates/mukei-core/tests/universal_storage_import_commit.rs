@@ -77,12 +77,7 @@ fn stored_object(seed: u8, object_id: StorageObjectId) -> StoredObject {
         plaintext_sha256: digest,
         plaintext_size: 12,
         encrypted_size: 64,
-        relative_path: PathBuf::from(format!(
-            "{}/{}/{}-12.mobj",
-            &hex[0..2],
-            &hex[2..4],
-            hex
-        )),
+        relative_path: PathBuf::from(format!("{}/{}/{}-12.mobj", &hex[0..2], &hex[2..4], hex)),
         deduplicated: false,
     }
 }
@@ -111,12 +106,10 @@ fn commit_request(
 #[tokio::test]
 async fn first_publish_is_atomic_and_retry_is_idempotent() {
     let (_directory, pool) = migrated_pool().await;
-    let workspace = UniversalStorageRepository::ensure_workspace(
-        &pool,
-        ChatId::parse("chat-a").unwrap(),
-    )
-    .await
-    .expect("workspace");
+    let workspace =
+        UniversalStorageRepository::ensure_workspace(&pool, ChatId::parse("chat-a").unwrap())
+            .await
+            .expect("workspace");
     let transaction_id =
         import_ready_for_node_commit(&pool, &workspace, "notes.md", "txn-a.partial").await;
     let request = commit_request(
@@ -172,12 +165,10 @@ async fn first_publish_is_atomic_and_retry_is_idempotent() {
 #[tokio::test]
 async fn identical_content_reuses_object_and_version_but_allocates_a_safe_name() {
     let (_directory, pool) = migrated_pool().await;
-    let workspace = UniversalStorageRepository::ensure_workspace(
-        &pool,
-        ChatId::parse("chat-a").unwrap(),
-    )
-    .await
-    .expect("workspace");
+    let workspace =
+        UniversalStorageRepository::ensure_workspace(&pool, ChatId::parse("chat-a").unwrap())
+            .await
+            .expect("workspace");
 
     let first_tx =
         import_ready_for_node_commit(&pool, &workspace, "notes.md", "txn-first.partial").await;
@@ -237,18 +228,14 @@ async fn identical_content_reuses_object_and_version_but_allocates_a_safe_name()
 #[tokio::test]
 async fn cross_chat_authorization_is_rejected_before_a_recovery_journal_is_created() {
     let (_directory, pool) = migrated_pool().await;
-    let first = UniversalStorageRepository::ensure_workspace(
-        &pool,
-        ChatId::parse("chat-a").unwrap(),
-    )
-    .await
-    .unwrap();
-    let second = UniversalStorageRepository::ensure_workspace(
-        &pool,
-        ChatId::parse("chat-b").unwrap(),
-    )
-    .await
-    .unwrap();
+    let first =
+        UniversalStorageRepository::ensure_workspace(&pool, ChatId::parse("chat-a").unwrap())
+            .await
+            .unwrap();
+    let second =
+        UniversalStorageRepository::ensure_workspace(&pool, ChatId::parse("chat-b").unwrap())
+            .await
+            .unwrap();
     let transaction_id =
         import_ready_for_node_commit(&pool, &second, "private.md", "txn-private.partial").await;
     let mut request = commit_request(
@@ -260,7 +247,9 @@ async fn cross_chat_authorization_is_rejected_before_a_recovery_journal_is_creat
     );
     request.authorization = ImportAuthorization::Workspace(access(&first));
 
-    assert!(ImportCommitRepository::commit(&pool, request).await.is_err());
+    assert!(ImportCommitRepository::commit(&pool, request)
+        .await
+        .is_err());
     pool.with_conn(move |connection| {
         let journal_count: i64 = connection.query_row(
             "SELECT COUNT(*) FROM operation_journal WHERE transaction_id = ?1",
@@ -286,12 +275,10 @@ async fn cross_chat_authorization_is_rejected_before_a_recovery_journal_is_creat
 #[tokio::test]
 async fn rejected_name_conflict_retains_filesystem_recovery_evidence() {
     let (_directory, pool) = migrated_pool().await;
-    let workspace = UniversalStorageRepository::ensure_workspace(
-        &pool,
-        ChatId::parse("chat-a").unwrap(),
-    )
-    .await
-    .unwrap();
+    let workspace =
+        UniversalStorageRepository::ensure_workspace(&pool, ChatId::parse("chat-a").unwrap())
+            .await
+            .unwrap();
 
     let first_tx =
         import_ready_for_node_commit(&pool, &workspace, "notes.md", "txn-a.partial").await;
@@ -336,7 +323,10 @@ async fn rejected_name_conflict_retains_filesystem_recovery_evidence() {
             [second_tx.to_string()],
             |row| row.get(0),
         )?;
-        assert_eq!(object_count, 1, "failed DB publication must roll back the new object row");
+        assert_eq!(
+            object_count, 1,
+            "failed DB publication must roll back the new object row"
+        );
         assert_eq!(journal_state, "applied_filesystem");
         assert_eq!(import_state, "committing_node");
         Ok::<_, DbError>(())

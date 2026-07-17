@@ -164,12 +164,14 @@ impl WorkspaceLayout {
             role: SystemDirectoryRole::ScopeRoot,
             display_name: SystemDirectoryRole::ScopeRoot.display_name(),
         });
-        directories.extend(SystemDirectoryRole::WORKSPACE_CHILDREN.map(|role| PlannedDirectory {
-            node_id: StorageNodeId::new(),
-            parent_node_id: Some(root_node_id),
-            role,
-            display_name: role.display_name(),
-        }));
+        directories.extend(
+            SystemDirectoryRole::WORKSPACE_CHILDREN.map(|role| PlannedDirectory {
+                node_id: StorageNodeId::new(),
+                parent_node_id: Some(root_node_id),
+                role,
+                display_name: role.display_name(),
+            }),
+        );
 
         Self {
             workspace_id: WorkspaceId::new(),
@@ -202,10 +204,11 @@ pub enum DuplicatePolicy {
     ReplaceWithNewVersion,
 }
 
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ImportTarget {
-    Universal { parent_node_id: StorageNodeId },
+    Universal {
+        parent_node_id: StorageNodeId,
+    },
     WorkspaceUploadedFiles {
         workspace_id: WorkspaceId,
         uploaded_files_node_id: StorageNodeId,
@@ -274,9 +277,7 @@ mod tests {
     #[test]
     fn uploaded_files_is_a_direct_child_of_the_workspace_root() {
         let plan = WorkspaceLayout::plan(chat("chat-1"));
-        let uploaded = plan
-            .directory(SystemDirectoryRole::UploadedFiles)
-            .unwrap();
+        let uploaded = plan.directory(SystemDirectoryRole::UploadedFiles).unwrap();
 
         assert_eq!(uploaded.display_name, "Uploaded files");
         assert_eq!(uploaded.parent_node_id, Some(plan.root_node_id));
@@ -291,7 +292,10 @@ mod tests {
         assert_ne!(first.workspace_id, second.workspace_id);
         assert_ne!(first.scope_id, second.scope_id);
         assert_ne!(first.root_node_id, second.root_node_id);
-        assert_ne!(first.uploaded_files_node_id(), second.uploaded_files_node_id());
+        assert_ne!(
+            first.uploaded_files_node_id(),
+            second.uploaded_files_node_id()
+        );
     }
 
     #[test]
@@ -303,9 +307,7 @@ mod tests {
             workspace_id: first.workspace_id,
         };
 
-        assert!(access
-            .authorize(&first.chat_id, first.workspace_id)
-            .is_ok());
+        assert!(access.authorize(&first.chat_id, first.workspace_id).is_ok());
         assert_eq!(
             access.authorize(&second.chat_id, first.workspace_id),
             Err(StorageDomainError::CrossWorkspaceAccessDenied)

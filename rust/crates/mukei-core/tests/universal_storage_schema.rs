@@ -65,7 +65,10 @@ fn workspace_requires_an_immutable_workspace_and_chat_identity() {
                    'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
         params!["scope-b", "workspace-b", "chat-a", "root-b"],
     );
-    assert!(duplicate_chat.is_err(), "one chat must own at most one live workspace");
+    assert!(
+        duplicate_chat.is_err(),
+        "one chat must own at most one live workspace"
+    );
 }
 
 #[test]
@@ -80,7 +83,10 @@ fn object_rows_reject_invalid_hashes_and_node_names_do_not_silently_collide() {
                    'verified', CURRENT_TIMESTAMP)",
         [],
     );
-    assert!(invalid_hash.is_err(), "object identity requires a full SHA-256 digest");
+    assert!(
+        invalid_hash.is_err(),
+        "object identity requires a full SHA-256 digest"
+    );
 
     connection
         .execute(
@@ -129,7 +135,10 @@ fn object_rows_reject_invalid_hashes_and_node_names_do_not_silently_collide() {
                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)",
         [],
     );
-    assert!(duplicate_name.is_err(), "normalized sibling names must not overwrite or collide");
+    assert!(
+        duplicate_name.is_err(),
+        "normalized sibling names must not overwrite or collide"
+    );
 }
 
 #[test]

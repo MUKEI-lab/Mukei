@@ -12,8 +12,7 @@ fn boundary_lease_allows_work_while_current() {
     let owner = Inner::new();
     let lease = BoundaryLease::capture(&owner);
 
-    let result: Result<i32, GuardError> =
-        callback_with_guard!(lease, { Ok::<_, GuardError>(42) });
+    let result: Result<i32, GuardError> = callback_with_guard!(lease, { Ok::<_, GuardError>(42) });
 
     assert_eq!(result.unwrap(), 42);
 }
@@ -36,8 +35,7 @@ fn tombstoned_owner_is_rejected() {
     let lease = BoundaryLease::capture(&owner);
     owner.tombstone();
 
-    let result: Result<i32, GuardError> =
-        callback_with_guard!(lease, { Ok::<_, GuardError>(99) });
+    let result: Result<i32, GuardError> = callback_with_guard!(lease, { Ok::<_, GuardError>(99) });
 
     assert_eq!(result.unwrap_err(), GuardError::Released);
 }

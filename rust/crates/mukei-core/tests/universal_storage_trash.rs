@@ -24,7 +24,13 @@ fn workspace_connection() -> Connection {
 
     for (node_id, parent_node_id, name, normalized_name, role) in [
         ("root-a", None, "Workspace", "workspace", Some("scope_root")),
-        ("uploaded-a", Some("root-a"), "Uploaded files", "uploaded files", Some("uploaded_files")),
+        (
+            "uploaded-a",
+            Some("root-a"),
+            "Uploaded files",
+            "uploaded files",
+            Some("uploaded_files"),
+        ),
         ("trash-a", Some("root-a"), "Trash", "trash", Some("trash")),
         ("file-a", Some("uploaded-a"), "notes.txt", "notes.txt", None),
     ] {
@@ -54,7 +60,9 @@ fn workspace_connection() -> Connection {
 #[test]
 fn trash_move_preserves_identity_and_records_original_parent() {
     let connection = workspace_connection();
-    let transaction = connection.unchecked_transaction().expect("begin transaction");
+    let transaction = connection
+        .unchecked_transaction()
+        .expect("begin transaction");
     transaction
         .execute(
             "INSERT INTO operation_journal (
@@ -120,7 +128,10 @@ fn system_directories_are_not_valid_trash_candidates() {
             |row| row.get(0),
         )
         .expect("count candidates");
-    assert_eq!(candidate_count, 0, "mandatory directories must never match trash updates");
+    assert_eq!(
+        candidate_count, 0,
+        "mandatory directories must never match trash updates"
+    );
 }
 
 #[test]
@@ -154,7 +165,10 @@ fn restore_conflict_fails_without_overwriting_existing_node() {
          WHERE node_id = 'file-a' AND state = 'trashed'",
         [],
     );
-    assert!(restore.is_err(), "unique sibling-name protection must reject restore conflict");
+    assert!(
+        restore.is_err(),
+        "unique sibling-name protection must reject restore conflict"
+    );
 
     let state: String = connection
         .query_row(
@@ -163,7 +177,10 @@ fn restore_conflict_fails_without_overwriting_existing_node() {
             |row| row.get(0),
         )
         .expect("original node state");
-    assert_eq!(state, "trashed", "failed restore must leave the node recoverable");
+    assert_eq!(
+        state, "trashed",
+        "failed restore must leave the node recoverable"
+    );
 }
 
 #[test]

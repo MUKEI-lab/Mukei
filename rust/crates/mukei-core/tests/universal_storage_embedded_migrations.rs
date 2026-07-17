@@ -22,9 +22,16 @@ fn embedded_migrations_include_universal_storage_and_isolation_guards() {
         .iter()
         .find(|(version, _, _)| *version == 14)
         .expect("V014 Universal Storage migration must be embedded");
-    assert_eq!(universal_storage.1, "V014__universal_storage_and_workspaces");
-    assert!(universal_storage.2.contains("CREATE TABLE IF NOT EXISTS storage_scopes"));
-    assert!(universal_storage.2.contains("CREATE TABLE IF NOT EXISTS import_transactions"));
+    assert_eq!(
+        universal_storage.1,
+        "V014__universal_storage_and_workspaces"
+    );
+    assert!(universal_storage
+        .2
+        .contains("CREATE TABLE IF NOT EXISTS storage_scopes"));
+    assert!(universal_storage
+        .2
+        .contains("CREATE TABLE IF NOT EXISTS import_transactions"));
 
     let isolation_guards = migrations
         .iter()

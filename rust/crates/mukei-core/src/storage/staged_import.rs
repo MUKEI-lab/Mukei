@@ -189,7 +189,8 @@ impl<C: ObjectCipher> WorkspaceStagedImportService<C> {
             FileAdmissionRule::ExactName(name) => format!("exact:{name}"),
         };
         let workspace =
-            UniversalStorageRepository::ensure_workspace(&self.pool, request.chat_id.clone()).await?;
+            UniversalStorageRepository::ensure_workspace(&self.pool, request.chat_id.clone())
+                .await?;
         let receipt = ImportCommitRepository::commit(
             &self.pool,
             ImportCommitRequest {
@@ -201,7 +202,9 @@ impl<C: ObjectCipher> WorkspaceStagedImportService<C> {
                 admitted_name,
                 stored_object,
                 detected_format,
-                detected_mime: request.detected_mime.filter(|value| !value.trim().is_empty()),
+                detected_mime: request
+                    .detected_mime
+                    .filter(|value| !value.trim().is_empty()),
                 detected_encoding: Some("utf-8".to_string()),
                 language_id: None,
                 encryption_version: self.encryption_version,
@@ -212,11 +215,10 @@ impl<C: ObjectCipher> WorkspaceStagedImportService<C> {
         transition(&self.pool, transaction_id, ImportState::Completed).await?;
 
         let cleanup_path = canonical_path;
-        let staged_file_removed = tokio::task::spawn_blocking(move || {
-            fs::remove_file(cleanup_path).is_ok()
-        })
-        .await
-        .unwrap_or(false);
+        let staged_file_removed =
+            tokio::task::spawn_blocking(move || fs::remove_file(cleanup_path).is_ok())
+                .await
+                .unwrap_or(false);
         Ok(WorkspaceStagedImportReceipt {
             transaction_id,
             node_id: receipt.node_id,
@@ -251,7 +253,8 @@ where
             request.expected_size,
         )?;
         let workspace =
-            UniversalStorageRepository::ensure_workspace(&self.pool, request.chat_id.clone()).await?;
+            UniversalStorageRepository::ensure_workspace(&self.pool, request.chat_id.clone())
+                .await?;
         let transaction_id = ImportJournalRepository::create(
             &self.pool,
             workspace.scope_id,
@@ -355,8 +358,8 @@ fn read_bounded_staged_file(
     if expected_size.is_some_and(|expected| expected != initial_size) {
         return Err(StagedImportError::SizeMismatch);
     }
-    let capacity = usize::try_from(initial_size.min(maximum))
-        .map_err(|_| StagedImportError::FileTooLarge)?;
+    let capacity =
+        usize::try_from(initial_size.min(maximum)).map_err(|_| StagedImportError::FileTooLarge)?;
     let mut bytes = Vec::with_capacity(capacity);
     file.take(maximum.saturating_add(1))
         .read_to_end(&mut bytes)
@@ -432,11 +435,7 @@ mod tests {
             1
         }
 
-        fn seal(
-            &self,
-            plaintext: &[u8],
-            associated_data: &[u8],
-        ) -> Result<Vec<u8>, String> {
+        fn seal(&self, plaintext: &[u8], associated_data: &[u8]) -> Result<Vec<u8>, String> {
             let mask = Sha256::digest(associated_data);
             Ok(plaintext
                 .iter()
@@ -445,11 +444,7 @@ mod tests {
                 .collect())
         }
 
-        fn open(
-            &self,
-            ciphertext: &[u8],
-            associated_data: &[u8],
-        ) -> Result<Vec<u8>, String> {
+        fn open(&self, ciphertext: &[u8], associated_data: &[u8]) -> Result<Vec<u8>, String> {
             self.seal(ciphertext, associated_data)
         }
     }

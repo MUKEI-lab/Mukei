@@ -198,8 +198,8 @@ impl FileVersionRepository {
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .optional()?;
-            let (workspace_id, chat_id) = ownership
-                .ok_or_else(|| invariant("file node was not found in a workspace"))?;
+            let (workspace_id, chat_id) =
+                ownership.ok_or_else(|| invariant("file node was not found in a workspace"))?;
             let workspace_id = parse_workspace_id(&workspace_id)?;
             let chat_id = ChatId::parse(chat_id)
                 .map_err(|error| invariant(format!("invalid persisted chat id: {error}")))?;
@@ -252,8 +252,8 @@ impl FileVersionRepository {
 }
 
 fn next_version_number(previous: i64) -> std::result::Result<u32, DbError> {
-    let previous = u32::try_from(previous)
-        .map_err(|_| invariant("persisted version number is invalid"))?;
+    let previous =
+        u32::try_from(previous).map_err(|_| invariant("persisted version number is invalid"))?;
     previous
         .checked_add(1)
         .ok_or_else(|| invariant("file version number overflow"))
