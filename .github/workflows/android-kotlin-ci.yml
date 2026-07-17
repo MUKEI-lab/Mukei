@@ -78,7 +78,7 @@ jobs:
       - name: Test canonical prompt sandbox
         working-directory: rust
         run: >-
-          cargo test -p mukei-core tools::
+          cargo test -p mukei-core --lib tools::
       - name: Check SQLCipher core
         working-directory: rust
         run: >-
@@ -130,7 +130,6 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.4.1"
-          cache-disabled: ${{ github.event_name == 'pull_request_target' }}
       - name: Test, lint and assemble Android modules
         shell: bash
         run: |
@@ -141,8 +140,7 @@ jobs:
             :app:lintDebug \
             :app:assembleDebug \
             :app:assembleOffline \
-            --stacktrace 2>&1 |
-            tee "$RUNNER_TEMP/mukei-android-debug.log"
+            --stacktrace 2>&1 | tee "$RUNNER_TEMP/mukei-android-debug.log"
       - name: Upload Android debug failure log
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
@@ -180,7 +178,6 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.4.1"
-          cache-disabled: ${{ github.event_name == 'pull_request_target' }}
       - name: Install pinned Android native build tools
         shell: bash
         run: |
