@@ -14,7 +14,8 @@
 #[cfg(feature = "tokio")]
 pub use tokio;
 
-// Public, platform-neutral contracts.
+// Public, platform-neutral contracts. The split runtime implementation keeps a
+// module-scoped docs allowance while its stable transport-facing types remain documented.
 #[cfg(feature = "tokio")]
 #[allow(missing_docs)]
 pub mod application_runtime;
