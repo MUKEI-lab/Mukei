@@ -65,14 +65,9 @@ picks=(
   77c6f7fb3558329c096fc7d90f806a927004b3f4
   9c3c57a8b8faf4e26dd862fba7d20109da96a321
   94d32d4db8a2aa250b5e4afa618825aba5cb938f
-  29f2b764768707b509ba04aad123baf721d93983
-  2196c690d9ecfdee2a91f33741f280208d1f3762
-  5674765ce56aea807f9a1048607935e41d31070a
   91f4c18bd4f0c870300a072d77c36680e5003e71
   ed532aefb80825aeb3b607f536f5ed963e2bcb78
   26ca8b2255e261167c87152dfdf9c50791d01cfb
-  e9233b4b52a8f801769b72f4acfa60c465a32345
-  65c68d6951ab4fd06195d783eca444aa41233d1a
 )
 
 for sha in "${picks[@]}"; do
@@ -88,8 +83,6 @@ for sha in "${picks[@]}"; do
       git checkout --theirs -- android/app/src/main/kotlin/ai/mukei/android/BackendRuntimeHost.kt ;;
     9c3c57a8b8faf4e26dd862fba7d20109da96a321|94d32d4db8a2aa250b5e4afa618825aba5cb938f|26ca8b2255e261167c87152dfdf9c50791d01cfb)
       git checkout --theirs -- rust/crates/mukei-core/src/application_runtime/tests.rs ;;
-    29f2b764768707b509ba04aad123baf721d93983|2196c690d9ecfdee2a91f33741f280208d1f3762|5674765ce56aea807f9a1048607935e41d31070a|e9233b4b52a8f801769b72f4acfa60c465a32345|65c68d6951ab4fd06195d783eca444aa41233d1a)
-      git checkout --theirs -- .github/workflows/android-kotlin-ci.yml ;;
     91f4c18bd4f0c870300a072d77c36680e5003e71)
       git checkout --ours -- rust/crates/mukei-core/src/application_runtime.rs ;;
     ed532aefb80825aeb3b607f536f5ed963e2bcb78)
@@ -136,14 +129,6 @@ if 'security.optString("object_store", "unknown")' not in text:
     )
 host.write_text(text, encoding='utf-8')
 
-workflow = Path('.github/workflows/android-kotlin-ci.yml')
-text = workflow.read_text(encoding='utf-8')
-text = text.replace(
-    'branches: [ Kotlin ]',
-    'branches: [ Kotlin, temp/universal-storage-workspace-v0.1 ]',
-    1,
-)
-workflow.write_text(text, encoding='utf-8')
 PY
 
 python <<'PY'
@@ -259,22 +244,6 @@ Path('rust/crates/mukei-core/src/application_runtime/persistence_flush.rs').writ
 ''', encoding='utf-8')
 PY
 
-rm -f .github/workflows/kotlin-selective-port-audit.yml \
-      .github/workflows/kotlin-selective-port.yml \
-      .github/workflows/kotlin-port-conflict-diagnostic.yml \
-      .github/workflows/kotlin-port-resolution-diagnostic.yml \
-      .github/workflows/kotlin-port-resolution-diagnostic-v2.yml \
-      .github/workflows/kotlin-selective-port-v2.yml \
-      .github/workflows/kotlin-selective-port-v3.yml \
-      .github/workflows/kotlin-selective-port-v4.yml \
-      .github/workflows/kotlin-selective-port-v5.yml \
-      .github/workflows/kotlin-selective-port-v6.yml \
-      .github/workflows/kotlin-selective-port-v7.yml \
-      .github/workflows/patch-kotlin-flush-v2.yml \
-      .github/workflows/patch-kotlin-flush-barrier.yml \
-      .github/workflows/fix-kotlin-port-barrier-syntax.yml \
-      .github/workflows/patch-kotlin-test-barrier.yml \
-      .github/workflows/patch-kotlin-test-barrier-v2.yml
 
 git add -A
 rustfmt --edition 2021 \
