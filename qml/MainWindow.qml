@@ -37,17 +37,27 @@ ApplicationWindow {
     }
 
     AppShell {
+        id: appShell
         anchors.fill: parent
         anchors.topMargin: root.safeTop
         anchors.bottomMargin: root.safeBottom
         anchors.leftMargin: root.safeLeft
         anchors.rightMargin: root.safeRight
+        focus: true
+
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: function(event) {
+            if ((event.key === Qt.Key_Back || event.key === Qt.Key_Escape)
+                    && NavigationStore.history.length > 0) {
+                event.accepted = IntentDispatcher.dispatch({ type: "navigation.back" })
+            }
+        }
     }
 
     onWidthChanged: ResponsiveStore.updateViewport(width - safeLeft - safeRight,
-                                                    height - safeTop - safeBottom)
-    onHeightChanged: ResponsiveStore.updateViewport(width - safeLeft - safeRight,
                                                      height - safeTop - safeBottom)
+    onHeightChanged: ResponsiveStore.updateViewport(width - safeLeft - safeRight,
+                                                      height - safeTop - safeBottom)
 
     Component.onCompleted: {
         ResponsiveStore.updateViewport(width - safeLeft - safeRight,
@@ -81,6 +91,7 @@ ApplicationWindow {
 
     Shortcut {
         sequences: [ StandardKey.Back ]
+        enabled: NavigationStore.history.length > 0
         onActivated: IntentDispatcher.dispatch({ type: "navigation.back" })
     }
 }
