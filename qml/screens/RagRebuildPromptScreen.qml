@@ -2,11 +2,13 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import "../architecture"
+import "../architecture"
 import "../theme"
 import "../components"
 
 Page {
     id: root
+    objectName: "ragRebuildPromptScreen"
     objectName: "ragRebuildPromptScreen"
 
     background: Rectangle {

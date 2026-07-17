@@ -1015,7 +1015,9 @@ async fn hydrate_provider_secrets_bounded() -> Result<(), String> {
     match tokio::time::timeout(
         std::time::Duration::from_secs(15),
         tokio::task::spawn_blocking(hydrate_provider_secrets_from_platform),
-    ).await {
+    )
+    .await
+    {
         Ok(joined) => joined.map_err(|error| format!("provider secret worker failed: {error}"))?,
         Err(_) => Err("provider secret hydration timed out".to_string()),
     }
