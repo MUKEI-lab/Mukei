@@ -5,10 +5,24 @@ ROOT = Path(__file__).resolve().parents[2]
 PATH = ROOT / "qml/screens/RagRebuildPromptScreen.qml"
 
 text = PATH.read_text(encoding="utf-8")
-text = text.replace('import "../theme"\n', 'import "../architecture"\nimport "../theme"\n', 1)
-text = text.replace('Page {\n    id: root\n', 'Page {\n    id: root\n    objectName: "ragRebuildPromptScreen"\n', 1)
-text = text.replace(
-'''        RowLayout {
+
+if 'import "../architecture"\n' not in text:
+    text = text.replace(
+        'import "../theme"\n',
+        'import "../architecture"\nimport "../theme"\n',
+        1,
+    )
+
+if 'objectName: "ragRebuildPromptScreen"' not in text:
+    text = text.replace(
+        "Page {\n    id: root\n",
+        'Page {\n    id: root\n    objectName: "ragRebuildPromptScreen"\n',
+        1,
+    )
+
+if 'objectName: "ragRebuildUnavailableButton"' not in text:
+    text = text.replace(
+        '''        RowLayout {
             PrimaryButton {
                 text: qsTr("Rebuild now")
             }
@@ -17,7 +31,7 @@ text = text.replace(
             }
         }
 ''',
-'''        Text {
+        '''        Text {
             Layout.fillWidth: true
             text: qsTr("Rebuild is not available in this runtime yet. No indexing action will be simulated or started silently.")
             color: Theme.p.inkSecondary
@@ -38,7 +52,8 @@ text = text.replace(
             }
         }
 ''',
-1,
-)
+        1,
+    )
+
 PATH.write_text(text, encoding="utf-8")
 print("RAG prompt actions finalized")
