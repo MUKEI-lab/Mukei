@@ -13,6 +13,12 @@ test -d "$ndk"
 export ANDROID_NDK_HOME="$ndk"
 export ANDROID_NDK_ROOT="$ndk"
 
+# Resolve the exact production graph before cross-compilation, then normalize
+# NumKong's known Android NDK 27 syscall declaration conflict. The patch script
+# validates the exact crate version and declaration and fails closed on drift.
+cargo fetch --manifest-path "$GITHUB_WORKSPACE/rust/Cargo.toml"
+bash "$GITHUB_WORKSPACE/scripts/android/patch_numkong_android.sh"
+
 output="$GITHUB_WORKSPACE/android/core/native/src/main/jniLibs"
 rm -rf "$output"
 mkdir -p "$output"
