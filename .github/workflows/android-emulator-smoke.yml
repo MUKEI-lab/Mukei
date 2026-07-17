@@ -190,7 +190,7 @@ jobs:
               echo "Emulator process exited before Android boot completed." >&2
               break
             fi
-            BOOT_STATE="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+            BOOT_STATE="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
             if [[ "${BOOT_STATE}" == "1" ]]; then
               BOOTED=true
               break
