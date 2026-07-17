@@ -8,7 +8,7 @@ on:
 
 concurrency:
   group: storage-branch-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -29,15 +29,18 @@ jobs:
         working-directory: rust
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust 1.82 with Clippy
+      - name: Install Rust 1.82 with Clippy and rustfmt
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.82.0
-          components: clippy
+          components: clippy,rustfmt
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
+      - name: Rustfmt check
+        shell: bash
+        run: cargo fmt -p mukei-core -- --check
       - name: Cargo check
         shell: bash
         run: |
@@ -45,6 +48,12 @@ jobs:
           mkdir -p ../ci-storage-validation
           cargo check -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets \
             2>&1 | tee ../ci-storage-validation/check.log
+      - name: Targeted staged-import tests
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite staged_import -- --nocapture \
+            2>&1 | tee ../ci-storage-validation/staged-import.log
       - name: Cargo tests
         shell: bash
         run: |
@@ -122,7 +131,7 @@ jobs:
               sha: context.sha,
               state: success ? 'success' : 'failure',
               context: 'storage-branch-validation',
-              description: success ? 'Storage check, tests, Clippy, and migrations passed' : details.slice(0, 140),
+              description: success ? 'Storage format, check, tests, Clippy, and migrations passed' : details.slice(0, 140),
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
             if (!success) core.setFailed(`Storage validation failed: ${details}`);
