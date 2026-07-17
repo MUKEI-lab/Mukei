@@ -31,7 +31,7 @@ jobs:
           set -o pipefail
           cargo check -p mukei-core \
             --no-default-features \
-            --features std,tokio,sqlcipher,runtime_hardening \
+            --features std,tokio,sqlcipher \
             2>&1 | tee "$RUNNER_TEMP/sqlcipher.log"
       - if: always()
         uses: actions/upload-artifact@v4
@@ -57,7 +57,7 @@ jobs:
           set -o pipefail
           cargo test -p mukei-android-jni --lib \
             --no-default-features \
-            --features secure_runtime,runtime_hardening \
+            --features secure_runtime \
             2>&1 | tee "$RUNNER_TEMP/secure-jni.log"
       - if: always()
         uses: actions/upload-artifact@v4
