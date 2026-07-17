@@ -73,6 +73,8 @@ jobs:
           echo "ANDROID_HOME=${SDK_ROOT}" >> "${GITHUB_ENV}"
           echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "${GITHUB_ENV}"
           echo "ANDROID_NDK_ROOT=${SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "${GITHUB_ENV}"
+          echo "${SDK_ROOT}/platform-tools" >> "${GITHUB_PATH}"
+          echo "${SDK_ROOT}/emulator" >> "${GITHUB_PATH}"
           echo "${SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}" >> "${GITHUB_PATH}"
 
       - name: Install Qt Android x86_64 and host kits
@@ -136,115 +138,135 @@ jobs:
           python3 scripts/android/prepare-branding.py cleanup --repo-root "${GITHUB_WORKSPACE}" --state "${STATE}"
           trap - EXIT
 
-      - name: Launch and exercise core navigation
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 35
-          target: google_apis
-          arch: x86_64
-          profile: pixel_6
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: |
-            set -uo pipefail
-            EVIDENCE="dist/emulator/evidence"
-            PACKAGE="app.mukei"
-            mkdir -p "${EVIDENCE}"
-            exec > >(tee -a "${EVIDENCE}/runtime-smoke.log") 2>&1
+      - name: Launch emulator and exercise core navigation
+        shell: bash
+        run: |
+          set -uo pipefail
+          EVIDENCE="dist/emulator/evidence"
+          PACKAGE="app.mukei"
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          AVD_NAME="mukei-ci-api35"
+          AVD_HOME="${RUNNER_TEMP}/android-avd"
+          EMULATOR_PID=""
+          mkdir -p "${EVIDENCE}" "${AVD_HOME}"
+          export ANDROID_AVD_HOME="${AVD_HOME}"
+          exec > >(tee -a "${EVIDENCE}/runtime-smoke.log") 2>&1
 
-            collect_evidence() {
-              adb logcat -d -v threadtime > "${EVIDENCE}/logcat.txt" 2>&1 || true
-              adb shell dumpsys package "${PACKAGE}" > "${EVIDENCE}/package-dumpsys.txt" 2>&1 || true
-              adb shell dumpsys activity activities > "${EVIDENCE}/activity-dumpsys.txt" 2>&1 || true
-              adb shell ps -A > "${EVIDENCE}/processes.txt" 2>&1 || true
-              adb exec-out screencap -p > "${EVIDENCE}/failure-screen.png" 2>/dev/null || true
-            }
-            trap collect_evidence EXIT
-
-            adb get-state | tee "${EVIDENCE}/adb-state.txt"
-            if ! adb install -r dist/emulator/mukei-ui-shell-emulator.apk \
-                2>&1 | tee "${EVIDENCE}/install.txt"; then
-              echo "APK installation failed." >&2
-              exit 1
+          collect_evidence() {
+            adb devices -l > "${EVIDENCE}/adb-devices.txt" 2>&1 || true
+            adb logcat -d -v threadtime > "${EVIDENCE}/logcat.txt" 2>&1 || true
+            adb shell dumpsys package "${PACKAGE}" > "${EVIDENCE}/package-dumpsys.txt" 2>&1 || true
+            adb shell dumpsys activity activities > "${EVIDENCE}/activity-dumpsys.txt" 2>&1 || true
+            adb shell ps -A > "${EVIDENCE}/processes.txt" 2>&1 || true
+            adb exec-out screencap -p > "${EVIDENCE}/failure-screen.png" 2>/dev/null || true
+            if [[ -n "${EMULATOR_PID}" ]]; then
+              kill "${EMULATOR_PID}" 2>/dev/null || true
             fi
+          }
+          trap collect_evidence EXIT
 
-            adb logcat -c || true
-            adb shell am force-stop "${PACKAGE}" || true
-            LAUNCHER="$(adb shell cmd package resolve-activity --brief \
-              -a android.intent.action.MAIN \
-              -c android.intent.category.LAUNCHER \
-              "${PACKAGE}" 2>&1 | tr -d '\r' | tail -n 1)"
-            printf '%s\n' "${LAUNCHER}" | tee "${EVIDENCE}/launcher-activity.txt"
-            if [[ -z "${LAUNCHER}" || "${LAUNCHER}" == *"No activity found"* ]]; then
-              echo "Launcher activity could not be resolved." >&2
-              exit 1
+          printf 'no\n' | "${SDK_ROOT}/cmdline-tools/latest/bin/avdmanager" create avd \
+            --force \
+            --name "${AVD_NAME}" \
+            --package "system-images;android-35;google_apis;x86_64" \
+            2>&1 | tee "${EVIDENCE}/avd-create.log"
+
+          "${SDK_ROOT}/emulator/emulator" \
+            -avd "${AVD_NAME}" \
+            -no-window \
+            -gpu swiftshader_indirect \
+            -no-snapshot \
+            -noaudio \
+            -no-boot-anim \
+            -camera-back none \
+            > "${EVIDENCE}/emulator.log" 2>&1 &
+          EMULATOR_PID=$!
+          printf '%s\n' "${EMULATOR_PID}" > "${EVIDENCE}/emulator-host-pid.txt"
+
+          adb start-server
+          BOOTED=false
+          for _ in $(seq 1 180); do
+            if ! kill -0 "${EMULATOR_PID}" 2>/dev/null; then
+              echo "Emulator process exited before Android boot completed." >&2
+              break
             fi
-
-            if ! adb shell am start -W -n "${LAUNCHER}" \
-                2>&1 | tee "${EVIDENCE}/launch.txt"; then
-              echo "Launcher activity failed to start." >&2
-              exit 1
+            BOOT_STATE="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+            if [[ "${BOOT_STATE}" == "1" ]]; then
+              BOOTED=true
+              break
             fi
-
-            PID=""
-            for _ in $(seq 1 30); do
-              PID="$(adb shell pidof "${PACKAGE}" 2>/dev/null | tr -d '\r')"
-              [[ -n "${PID}" ]] && break
-              sleep 1
-            done
-            printf '%s\n' "${PID}" | tee "${EVIDENCE}/pid.txt"
-            adb exec-out screencap -p > "${EVIDENCE}/01-launch.png" 2>/dev/null || true
-            adb shell uiautomator dump /sdcard/mukei-launch.xml \
-              > "${EVIDENCE}/uiautomator-launch.txt" 2>&1 || true
-            adb pull /sdcard/mukei-launch.xml "${EVIDENCE}/launch-window.xml" \
-              > "${EVIDENCE}/uiautomator-pull.txt" 2>&1 || true
-            if [[ -z "${PID}" ]]; then
-              echo "Mukei process was not alive after launch." >&2
-              exit 1
-            fi
-
-            SETTINGS_POINT="$(python3 - <<'PY'
-            import re
-            import xml.etree.ElementTree as ET
-            from pathlib import Path
-
-            path = Path("dist/emulator/evidence/launch-window.xml")
-            if not path.exists():
-                raise SystemExit(0)
-            root = ET.parse(path).getroot()
-            for node in root.iter("node"):
-                label = " ".join((node.get("text", ""), node.get("content-desc", ""))).lower()
-                if "open settings" not in label and label.strip() != "settings":
-                    continue
-                match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
-                if match:
-                    x1, y1, x2, y2 = map(int, match.groups())
-                    print((x1 + x2) // 2, (y1 + y2) // 2)
-                    break
-            PY
-            )"
-            if [[ -n "${SETTINGS_POINT}" ]]; then
-              read -r SETTINGS_X SETTINGS_Y <<< "${SETTINGS_POINT}"
-            else
-              SETTINGS_X=990
-              SETTINGS_Y=180
-            fi
-            printf '%s %s\n' "${SETTINGS_X}" "${SETTINGS_Y}" \
-              | tee "${EVIDENCE}/settings-tap.txt"
-            adb shell input tap "${SETTINGS_X}" "${SETTINGS_Y}"
             sleep 2
-            adb exec-out screencap -p > "${EVIDENCE}/02-settings.png"
-            adb shell uiautomator dump /sdcard/mukei-settings.xml \
-              > "${EVIDENCE}/uiautomator-settings.txt" 2>&1 || true
-            adb pull /sdcard/mukei-settings.xml "${EVIDENCE}/settings-window.xml" \
-              > "${EVIDENCE}/uiautomator-settings-pull.txt" 2>&1 || true
+          done
+          printf '%s\n' "${BOOTED}" | tee "${EVIDENCE}/booted.txt"
+          if [[ "${BOOTED}" != "true" ]]; then
+            echo "Android emulator did not complete boot within the bounded timeout." >&2
+            exit 1
+          fi
 
-            adb shell input keyevent 4
+          adb shell settings put global window_animation_scale 0 || true
+          adb shell settings put global transition_animation_scale 0 || true
+          adb shell settings put global animator_duration_scale 0 || true
+          adb get-state | tee "${EVIDENCE}/adb-state.txt"
+
+          if ! adb install -r dist/emulator/mukei-ui-shell-emulator.apk \
+              2>&1 | tee "${EVIDENCE}/install.txt"; then
+            echo "APK installation failed." >&2
+            exit 1
+          fi
+
+          adb logcat -c || true
+          adb shell am force-stop "${PACKAGE}" || true
+          LAUNCHER="$(adb shell cmd package resolve-activity --brief \
+            -a android.intent.action.MAIN \
+            -c android.intent.category.LAUNCHER \
+            "${PACKAGE}" 2>&1 | tr -d '\r' | tail -n 1)"
+          printf '%s\n' "${LAUNCHER}" | tee "${EVIDENCE}/launcher-activity.txt"
+          if [[ -z "${LAUNCHER}" || "${LAUNCHER}" == *"No activity found"* ]]; then
+            echo "Launcher activity could not be resolved." >&2
+            exit 1
+          fi
+
+          if ! adb shell am start -W -n "${LAUNCHER}" \
+              2>&1 | tee "${EVIDENCE}/launch.txt"; then
+            echo "Launcher activity failed to start." >&2
+            exit 1
+          fi
+
+          PID=""
+          for _ in $(seq 1 30); do
+            PID="$(adb shell pidof "${PACKAGE}" 2>/dev/null | tr -d '\r')"
+            [[ -n "${PID}" ]] && break
             sleep 1
-            adb exec-out screencap -p > "${EVIDENCE}/03-back.png"
-            FINAL_PID="$(adb shell pidof "${PACKAGE}" 2>/dev/null | tr -d '\r')"
-            printf '%s\n' "${FINAL_PID}" | tee "${EVIDENCE}/final-pid.txt"
-            [[ -n "${FINAL_PID}" ]]
+          done
+          printf '%s\n' "${PID}" | tee "${EVIDENCE}/pid.txt"
+          adb exec-out screencap -p > "${EVIDENCE}/01-launch.png" 2>/dev/null || true
+          adb shell uiautomator dump /sdcard/mukei-launch.xml \
+            > "${EVIDENCE}/uiautomator-launch.txt" 2>&1 || true
+          adb pull /sdcard/mukei-launch.xml "${EVIDENCE}/launch-window.xml" \
+            > "${EVIDENCE}/uiautomator-pull.txt" 2>&1 || true
+          if [[ -z "${PID}" ]]; then
+            echo "Mukei process was not alive after launch." >&2
+            exit 1
+          fi
+
+          SETTINGS_X=990
+          SETTINGS_Y=180
+          printf '%s %s\n' "${SETTINGS_X}" "${SETTINGS_Y}" \
+            | tee "${EVIDENCE}/settings-tap.txt"
+          adb shell input tap "${SETTINGS_X}" "${SETTINGS_Y}"
+          sleep 2
+          adb exec-out screencap -p > "${EVIDENCE}/02-settings.png"
+          adb shell uiautomator dump /sdcard/mukei-settings.xml \
+            > "${EVIDENCE}/uiautomator-settings.txt" 2>&1 || true
+          adb pull /sdcard/mukei-settings.xml "${EVIDENCE}/settings-window.xml" \
+            > "${EVIDENCE}/uiautomator-settings-pull.txt" 2>&1 || true
+
+          adb shell input keyevent 4
+          sleep 1
+          adb exec-out screencap -p > "${EVIDENCE}/03-back.png"
+          FINAL_PID="$(adb shell pidof "${PACKAGE}" 2>/dev/null | tr -d '\r')"
+          printf '%s\n' "${FINAL_PID}" | tee "${EVIDENCE}/final-pid.txt"
+          [[ -n "${FINAL_PID}" ]]
 
       - name: Upload emulator evidence
         if: always()
