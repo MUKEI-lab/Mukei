@@ -321,7 +321,7 @@ flush_path.write_text('''impl FeatureState {
 ''', encoding='utf-8')
 PY
 
-# Removing the obsolete Barrier variant after installing Flush.
+# Keep Barrier only for the FIFO regression test; production uses Flush.
 python <<'PY'
 from pathlib import Path
 
@@ -330,7 +330,9 @@ state = state_path.read_text(encoding='utf-8')
 state = state.replace(
     '''    Barrier(tokio::sync::oneshot::Sender<()>),
 ''',
-    '',
+    '''    #[cfg(test)]
+    Barrier(tokio::sync::oneshot::Sender<()>),
+''',
     1,
 )
 state = state.replace(
@@ -338,7 +340,11 @@ state = state.replace(
                         let _ = acknowledgement.send(());
                     }
 ''',
-    '',
+    '''                    #[cfg(test)]
+                    PersistenceCommand::Barrier(acknowledgement) => {
+                        let _ = acknowledgement.send(());
+                    }
+''',
     1,
 )
 state_path.write_text(state, encoding='utf-8')
