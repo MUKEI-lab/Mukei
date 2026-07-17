@@ -8,6 +8,11 @@ set -euo pipefail
 ndk="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}"
 test -d "$ndk"
 
+# cargo-ndk otherwise auto-discovers the newest runner NDK, which can diverge
+# from the version used by the CMake capsule build.
+export ANDROID_NDK_HOME="$ndk"
+export ANDROID_NDK_ROOT="$ndk"
+
 output="$GITHUB_WORKSPACE/android/core/native/src/main/jniLibs"
 rm -rf "$output"
 mkdir -p "$output"
@@ -32,10 +37,28 @@ for abi in arm64-v8a x86_64; do
   echo "::group::Build JNI runtime for ${abi}"
   (
     cd rust
-    cargo ndk -t "$abi" -o ../android/core/native/src/main/jniLibs \
-      build -p mukei-android-jni --release \
-      --no-default-features \
-      --features runtime_production,runtime_hardening
+    if [[ "$abi" == "x86_64" ]]; then
+      # Android emulators do not need server-only AVX-512 BF16/AMX kernels.
+      # NDK clang 18 can crash while selecting those NumKong instructions,
+      # so retain the portable/Haswell/Skylake/Icelake dispatch set and omit
+      # the problematic server generations for the emulator ABI.
+      env \
+        NK_TARGET_GENOA=0 \
+        NK_TARGET_SAPPHIRE=0 \
+        NK_TARGET_SAPPHIREAMX=0 \
+        NK_TARGET_GRANITEAMX=0 \
+        NK_TARGET_DIAMOND=0 \
+        NK_TARGET_TURIN=0 \
+        cargo ndk -t "$abi" -o ../android/core/native/src/main/jniLibs \
+          build -p mukei-android-jni --release \
+          --no-default-features \
+          --features runtime_production,runtime_hardening
+    else
+      cargo ndk -t "$abi" -o ../android/core/native/src/main/jniLibs \
+        build -p mukei-android-jni --release \
+        --no-default-features \
+        --features runtime_production,runtime_hardening
+    fi
   )
   echo "::endgroup::"
 
