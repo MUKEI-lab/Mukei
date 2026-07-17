@@ -26,7 +26,8 @@ new_imports = (
     '// module. Keeping each transport in a real Rust module prevents textual\n'
     '// `include!` import collisions while preserving the exported JNI symbol names.\n'
     'use super::{\n'
-    '    guarded_bytes, invalid_handle_payload, runtime_entry, runtime_services, serialize,\n'
+    '    error_payload, guarded_bytes, invalid_handle_payload, runtime_entry, runtime_services,\n'
+    '    serialize,\n'
     '    to_java_bytes, RUNTIMES,\n'
     '};\n'
 )
@@ -42,7 +43,7 @@ registry_path.write_text(registry, encoding='utf-8')
 secure_path = Path('rust/crates/mukei-android-jni/src/secure_runtime_jni.rs')
 secure = secure_path.read_text(encoding='utf-8')
 secure_imports = (
-    'use jni::objects::{JByteArray, JObject};\n'
+    'use jni::objects::JObject;\n'
     'use jni::sys::jbyteArray;\n'
     'use jni::JNIEnv;\n'
     'use zeroize::Zeroize;\n\n'
