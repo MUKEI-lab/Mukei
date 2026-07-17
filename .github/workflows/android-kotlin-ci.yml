@@ -10,6 +10,7 @@ on:
       - "rust/crates/mukei-android-jni/**"
       - "rust/migrations/**"
       - "rust/llama-cpp-prebuilt/**"
+      - "scripts/android/**"
       - ".github/workflows/android-kotlin-ci.yml"
       - ".github/workflows/android-release-candidate.yml"
   pull_request:
@@ -21,6 +22,7 @@ on:
       - "rust/crates/mukei-android-jni/**"
       - "rust/migrations/**"
       - "rust/llama-cpp-prebuilt/**"
+      - "scripts/android/**"
       - ".github/workflows/android-kotlin-ci.yml"
       - ".github/workflows/android-release-candidate.yml"
   workflow_dispatch:
@@ -64,33 +66,8 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          {
-            cd rust
-            cargo test -p mukei-core --lib
-            cargo test -p mukei-core --lib tools::
-            cargo check -p mukei-core \
-              --no-default-features \
-              --features std,tokio,sqlcipher,runtime_hardening
-            cargo test -p mukei-android-jni --lib \
-              --no-default-features \
-              --features secure_runtime,runtime_hardening
-            cargo check -p mukei-android-jni \
-              --no-default-features \
-              --features secure_runtime,rag_runtime,runtime_hardening
-            cd ..
-            cmake -S rust/llama-cpp-prebuilt \
-              -B build/llama-host \
-              -G Ninja \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DMUKEI_LLAMA_FORCE_REBUILD=ON
-            cmake --build build/llama-host --target mukei_llama_native_smoke
-            ctest --test-dir build/llama-host --output-on-failure
-            cd rust
-            MUKEI_LLAMA_NATIVE_LIB_DIR="$GITHUB_WORKSPACE/rust/llama-cpp-prebuilt/prebuilt/host" \
-              cargo check -p mukei-android-jni \
-                --no-default-features \
-                --features native_inference
-          } 2>&1 | tee "$RUNNER_TEMP/mukei-rust-security.log"
+          bash scripts/android/ci_rust_security.sh 2>&1 |
+            tee "$RUNNER_TEMP/mukei-rust-security.log"
       - name: Upload Rust security failure log
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
