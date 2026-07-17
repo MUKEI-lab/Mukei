@@ -58,7 +58,10 @@ jobs:
           sudo apt-get install -y clang cmake ninja-build pkg-config libssl-dev perl make
       - name: Test platform-neutral runtime
         working-directory: rust
-        run: cargo test -p mukei-core --lib
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p mukei-core --lib 2>&1 | tee "$RUNNER_TEMP/rust-security.log"
       - name: Test canonical prompt sandbox
         working-directory: rust
         run: >-
@@ -99,6 +102,14 @@ jobs:
           cargo check -p mukei-android-jni
           --no-default-features
           --features native_inference
+      - name: Upload Rust diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-security-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rust-security.log
+          if-no-files-found: warn
+          retention-days: 7
 
   android-debug:
     runs-on: ubuntu-latest
@@ -112,14 +123,16 @@ jobs:
         with:
           gradle-version: "9.4.1"
       - name: Test, lint and assemble Android modules
-        run: >-
-          gradle -p android
-          :core:protocol:testDebugUnitTest
-          :core:native:testDebugUnitTest
-          :app:lintDebug
-          :app:assembleDebug
-          :app:assembleOffline
-          --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle -p android \
+            :core:protocol:testDebugUnitTest \
+            :core:native:testDebugUnitTest \
+            :app:lintDebug \
+            :app:assembleDebug \
+            :app:assembleOffline \
+            --stacktrace 2>&1 | tee "$RUNNER_TEMP/android-debug.log"
       - name: Verify offline APK removes INTERNET
         shell: bash
         run: |
@@ -130,6 +143,14 @@ jobs:
             echo "offline APK unexpectedly declares INTERNET" >&2
             exit 1
           fi
+      - name: Upload Android diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/android-debug.log
+          if-no-files-found: warn
+          retention-days: 7
 
   release-hardening:
     needs: [ rust-security, android-debug ]
