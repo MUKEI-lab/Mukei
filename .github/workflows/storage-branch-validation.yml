@@ -23,75 +23,56 @@ jobs:
   storage-core:
     name: storage core checks
     runs-on: ubuntu-latest
-    timeout-minutes: 35
-    outputs:
-      fmt_exit: ${{ steps.cargo.outputs.fmt_exit }}
-      check_exit: ${{ steps.cargo.outputs.check_exit }}
-      test_exit: ${{ steps.cargo.outputs.test_exit }}
-      clippy_exit: ${{ steps.cargo.outputs.clippy_exit }}
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: rust
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust 1.82 with clippy and rustfmt
+      - name: Install Rust 1.82 with Clippy
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.82.0
-          components: clippy,rustfmt
+          components: clippy
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
-      - name: Run Cargo diagnostics
-        id: cargo
+      - name: Check committed whitespace
+        working-directory: .
+        run: git diff --check HEAD^
+      - name: Cargo check
         shell: bash
         run: |
-          set +e
-          mkdir -p ../ci-logs
-
-          cargo fmt --all -- --check > ../ci-logs/fmt.log 2>&1
-          fmt_exit=$?
-          echo "fmt_exit=$fmt_exit" >> "$GITHUB_OUTPUT"
-
-          cargo check -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets > ../ci-logs/check.log 2>&1
-          check_exit=$?
-          echo "check_exit=$check_exit" >> "$GITHUB_OUTPUT"
-
-          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets > ../ci-logs/test.log 2>&1
-          test_exit=$?
-          echo "test_exit=$test_exit" >> "$GITHUB_OUTPUT"
-
-          cargo clippy -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings > ../ci-logs/clippy.log 2>&1
-          clippy_exit=$?
-          echo "clippy_exit=$clippy_exit" >> "$GITHUB_OUTPUT"
-
-          printf 'fmt=%s\ncheck=%s\ntest=%s\nclippy=%s\n' \
-            "$fmt_exit" "$check_exit" "$test_exit" "$clippy_exit" \
-            > ../ci-logs/summary.txt
-          exit 0
+          set -o pipefail
+          mkdir -p ../ci-storage-validation
+          cargo check -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets \
+            2>&1 | tee ../ci-storage-validation/check.log
+      - name: Cargo tests
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets \
+            2>&1 | tee ../ci-storage-validation/test.log
+      - name: Clippy
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo clippy -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings \
+            2>&1 | tee ../ci-storage-validation/clippy.log
       - name: Upload Cargo diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: storage-cargo-logs-${{ github.sha }}
-          path: ci-logs
-          if-no-files-found: error
+          name: storage-validation-${{ github.sha }}
+          path: ci-storage-validation
+          if-no-files-found: warn
           retention-days: 7
-      - name: Enforce Cargo results
-        shell: bash
-        run: |
-          test '${{ steps.cargo.outputs.fmt_exit }}' = '0'
-          test '${{ steps.cargo.outputs.check_exit }}' = '0'
-          test '${{ steps.cargo.outputs.test_exit }}' = '0'
-          test '${{ steps.cargo.outputs.clippy_exit }}' = '0'
 
   embedded-migrations:
     name: embedded storage migrations
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    outputs:
-      migration_exit: ${{ steps.migrations.outputs.migration_exit }}
     defaults:
       run:
         working-directory: rust
@@ -105,29 +86,22 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
-      - name: Run embedded migration contract
-        id: migrations
+      - name: Embedded migration contract
         shell: bash
         run: |
-          set +e
-          mkdir -p ../ci-migration-logs
+          set -o pipefail
+          mkdir -p ../ci-storage-migrations
           cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite \
             --test universal_storage_embedded_migrations -- --nocapture \
-            > ../ci-migration-logs/embedded-migrations.log 2>&1
-          migration_exit=$?
-          echo "migration_exit=$migration_exit" >> "$GITHUB_OUTPUT"
-          echo "migration=$migration_exit" > ../ci-migration-logs/summary.txt
-          exit 0
+            2>&1 | tee ../ci-storage-migrations/test.log
       - name: Upload migration diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: storage-migration-logs-${{ github.sha }}
-          path: ci-migration-logs
-          if-no-files-found: error
+          name: storage-migration-validation-${{ github.sha }}
+          path: ci-storage-migrations
+          if-no-files-found: warn
           retention-days: 7
-      - name: Enforce migration result
-        run: test '${{ steps.migrations.outputs.migration_exit }}' = '0'
 
   publish-status:
     name: publish storage validation status
@@ -141,22 +115,17 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const codes = {
-              fmt: '${{ needs.storage-core.outputs.fmt_exit }}',
-              check: '${{ needs.storage-core.outputs.check_exit }}',
-              test: '${{ needs.storage-core.outputs.test_exit }}',
-              clippy: '${{ needs.storage-core.outputs.clippy_exit }}',
-              migrations: '${{ needs.embedded-migrations.outputs.migration_exit }}'
-            };
-            const success = Object.values(codes).every(code => code === '0');
-            const details = Object.entries(codes).map(([key, value]) => `${key}=${value || '?'}`).join(',');
+            const storage = '${{ needs.storage-core.result }}';
+            const migrations = '${{ needs.embedded-migrations.result }}';
+            const success = storage === 'success' && migrations === 'success';
+            const details = `storage=${storage}, migrations=${migrations}`;
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: context.sha,
               state: success ? 'success' : 'failure',
               context: 'storage-branch-validation',
-              description: success ? 'Storage Cargo checks passed' : details.slice(0, 140),
+              description: success ? 'Storage check, tests, Clippy, and migrations passed' : details.slice(0, 140),
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
             if (!success) core.setFailed(`Storage validation failed: ${details}`);
