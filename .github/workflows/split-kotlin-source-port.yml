@@ -1,0 +1,84 @@
+name: split-kotlin-source-port
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - .github/workflows/split-kotlin-source-port.yml
+
+permissions:
+  contents: write
+  statuses: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+      - name: Publish pending
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'pending', context: 'split-kotlin-source-port', description: 'Separating source and workflow ports', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
+      - name: Patch source-only port script
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path('scripts/port_kotlin_selected.sh')
+          text = path.read_text(encoding='utf-8')
+          ci_shas = [
+              '29f2b764768707b509ba04aad123baf721d93983',
+              '2196c690d9ecfdee2a91f33741f280208d1f3762',
+              '5674765ce56aea807f9a1048607935e41d31070a',
+              'e9233b4b52a8f801769b72f4acfa60c465a32345',
+              '65c68d6951ab4fd06195d783eca444aa41233d1a',
+          ]
+          for sha in ci_shas:
+              text = text.replace(f'  {sha}\n', '')
+          text = re.sub(
+              r'    29f2b764768707b509ba04aad123baf721d93983\|.*?\)\n'
+              r'      git checkout --theirs -- \.github/workflows/android-kotlin-ci\.yml ;;\n',
+              '',
+              text,
+              count=1,
+          )
+          text = re.sub(
+              r"\nworkflow = Path\('\.github/workflows/android-kotlin-ci\.yml'\).*?workflow\.write_text\(text, encoding='utf-8'\)\n",
+              '\n',
+              text,
+              count=1,
+              flags=re.DOTALL,
+          )
+          text = re.sub(
+              r'\nrm -f \.github/workflows/kotlin-selective-port-audit\.yml \\\n.*?\.github/workflows/patch-kotlin-test-barrier-v2\.yml\n',
+              '\n',
+              text,
+              count=1,
+              flags=re.DOTALL,
+          )
+          path.write_text(text, encoding='utf-8')
+      - name: Commit source-only script
+        run: |
+          git config user.name mukei-storage-bot
+          git config user.email mukei-storage-bot@users.noreply.github.com
+          git add scripts/port_kotlin_selected.sh
+          git commit -m "fix(ci): split Kotlin source port from workflow updates"
+          git push origin HEAD:temp/universal-storage-workspace-v0.1
+      - name: Publish success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'success', context: 'split-kotlin-source-port', description: 'Source-only port script ready', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
+      - name: Publish failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'failure', context: 'split-kotlin-source-port', description: 'Source/workflow split failed', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
