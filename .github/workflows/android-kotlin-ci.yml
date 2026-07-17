@@ -5,6 +5,7 @@ on:
     branches: [ Kotlin ]
     paths:
       - "android/**"
+      - "rust-toolchain.toml"
       - "rust/Cargo.toml"
       - "rust/crates/mukei-core/**"
       - "rust/crates/mukei-android-jni/**"
@@ -17,6 +18,7 @@ on:
     branches: [ Kotlin ]
     paths:
       - "android/**"
+      - "rust-toolchain.toml"
       - "rust/Cargo.toml"
       - "rust/crates/mukei-core/**"
       - "rust/crates/mukei-android-jni/**"
