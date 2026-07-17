@@ -123,6 +123,7 @@ object BackendRuntimeHost {
                 val summary = listOf(
                     security.optString("sqlcipher", "unknown"),
                     security.optString("projections", "unknown"),
+                    security.optString("object_store", "unknown"),
                     security.optString("rag", "unknown"),
                     if (security.optBoolean("panic_hook", false)) {
                         "panic-contained"

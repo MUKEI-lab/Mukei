@@ -173,8 +173,6 @@ mod tests {
         runtime.shutdown();
         runtime.shutdown();
         assert_eq!(runtime.state(), RuntimeState::Stopped);
-        assert!(runtime
-            .snapshot(RuntimeSnapshotDomain::Application)
-            .is_ok());
+        assert!(runtime.snapshot(RuntimeSnapshotDomain::Application).is_ok());
     }
 }
