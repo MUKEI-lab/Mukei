@@ -1,0 +1,94 @@
+name: rust-feature-diagnostics
+
+on:
+  pull_request:
+    branches: [ Kotlin ]
+    paths:
+      - "rust/**"
+      - ".github/workflows/rust-feature-diagnostics.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN: "1.86.0"
+
+jobs:
+  sqlcipher:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.86.0
+      - name: Install SQLCipher build dependencies
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y clang pkg-config libssl-dev perl make
+      - name: Check SQLCipher core
+        working-directory: rust
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check -p mukei-core \
+            --no-default-features \
+            --features std,tokio,sqlcipher,runtime_hardening \
+            2>&1 | tee "$RUNNER_TEMP/sqlcipher.log"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqlcipher-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sqlcipher.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  secure-jni:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.86.0
+      - name: Install secure JNI build dependencies
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y clang pkg-config libssl-dev perl make
+      - name: Test secure JNI contracts
+        working-directory: rust
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p mukei-android-jni --lib \
+            --no-default-features \
+            --features secure_runtime,runtime_hardening \
+            2>&1 | tee "$RUNNER_TEMP/secure-jni.log"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: secure-jni-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/secure-jni.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  rag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.86.0
+      - name: Install RAG build dependencies
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y clang cmake pkg-config libssl-dev perl make
+      - name: Check production RAG composition
+        working-directory: rust
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check -p mukei-android-jni \
+            --no-default-features \
+            --features secure_runtime,rag_runtime,runtime_hardening \
+            2>&1 | tee "$RUNNER_TEMP/rag.log"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rag.log
+          if-no-files-found: warn
+          retention-days: 7
