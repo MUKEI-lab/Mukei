@@ -135,7 +135,7 @@ mod tests {
 
     async fn failed_import(
         pool: &DatabasePool,
-        workspace: &crate::storage::universal::WorkspaceLayout,
+        workspace: &crate::storage::universal_repository::PersistedWorkspace,
         relative_path: &str,
         size: u64,
     ) {
