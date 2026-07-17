@@ -29,9 +29,26 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - name: cargo fmt --check
+      - name: Generate rustfmt evidence
         working-directory: rust
-        run: cargo fmt --all -- --check
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/rustfmt-evidence"
+          cargo fmt --all
+          git diff -- . > "${RUNNER_TEMP}/rustfmt-evidence/rustfmt.patch"
+          if [[ -s "${RUNNER_TEMP}/rustfmt-evidence/rustfmt.patch" ]]; then
+            cat "${RUNNER_TEMP}/rustfmt-evidence/rustfmt.patch"
+            exit 1
+          fi
+      - name: Upload rustfmt evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustfmt-evidence
+          path: ${{ runner.temp }}/rustfmt-evidence/rustfmt.patch
+          if-no-files-found: error
+          retention-days: 14
 
   clippy:
     name: clippy (mukei-core)
