@@ -10,11 +10,25 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 jobs:
   diagnose:
     runs-on: ubuntu-latest
     steps:
+      - name: Publish pending status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'pending',
+              context: 'storage-secure-patch-diagnostic',
+              description: 'Secure patch diagnostic running',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
       - uses: actions/checkout@v4
         with:
           ref: temp/universal-storage-workspace-v0.1
@@ -51,3 +65,31 @@ jobs:
           path: secure-patch-diagnostic
           if-no-files-found: error
           retention-days: 7
+      - name: Publish success status
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              context: 'storage-secure-patch-diagnostic',
+              description: 'Secure patch applied in diagnostic runner',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+      - name: Publish failure status
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'failure',
+              context: 'storage-secure-patch-diagnostic',
+              description: 'Secure patch diagnostic failed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
