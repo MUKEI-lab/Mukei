@@ -10,8 +10,7 @@ on:
       - "rust/crates/mukei-android-jni/**"
       - "rust/migrations/**"
       - "rust/llama-cpp-prebuilt/**"
-      - ".github/workflows/android-kotlin-ci.yml"
-      - ".github/workflows/android-release-candidate.yml"
+      - ".github/workflows/**"
   pull_request:
     branches: [ Kotlin ]
     paths:
@@ -21,8 +20,7 @@ on:
       - "rust/crates/mukei-android-jni/**"
       - "rust/migrations/**"
       - "rust/llama-cpp-prebuilt/**"
-      - ".github/workflows/android-kotlin-ci.yml"
-      - ".github/workflows/android-release-candidate.yml"
+      - ".github/workflows/**"
   workflow_dispatch:
 
 permissions:
@@ -42,6 +40,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate workflow YAML syntax
+        run: |
+          ruby -e '
+            require "yaml"
+            files = Dir[".github/workflows/*.{yml,yaml}"].sort
+            abort "no workflow files found" if files.empty?
+            files.each do |path|
+              YAML.parse_file(path)
+              puts "validated #{path}"
+            end
+          '
       - uses: dtolnay/rust-toolchain@1.86.0
       - name: Install native build dependencies
         run: >-
