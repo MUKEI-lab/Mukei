@@ -89,15 +89,51 @@ jobs:
           if exact_helper not in patch:
               raise SystemExit('extracted replace_once helper changed unexpectedly')
           patch = patch.replace(exact_helper, tolerant_helper, 1)
-          Path('/tmp/apply_secure_storage.py').write_text(patch, encoding='utf-8')
-          code = compile(patch, '/tmp/apply_secure_storage.py', 'exec')
-          exec(code, {'__name__': '__main__'})
+          exec(compile(patch, '/tmp/apply_secure_storage.py', 'exec'), {'__name__': '__main__'})
+
+          registry_path = Path('rust/crates/mukei-android-jni/src/runtime_registry.rs')
+          registry = registry_path.read_text(encoding='utf-8')
+          registry = registry.replace(
+              'use jni::sys::jlong;\n',
+              'use jni::objects::{JByteArray, JObject};\nuse jni::sys::{jbyteArray, jlong};\nuse jni::JNIEnv;\n',
+              1,
+          )
+          registry = registry.replace(
+              'use mukei_core::application_runtime::MukeiRuntime;\n',
+              'use mukei_core::application_runtime::MukeiRuntime;\nuse zeroize::{Zeroize, Zeroizing};\n',
+              1,
+          )
+          registry_path.write_text(registry, encoding='utf-8')
+
+          secure_path = Path('rust/crates/mukei-android-jni/src/secure_runtime_jni.rs')
+          secure = secure_path.read_text(encoding='utf-8')
+          for declaration in [
+              'use jni::objects::JObject;\n',
+              'use jni::sys::jbyteArray;\n',
+              'use jni::JNIEnv;\n',
+              'use zeroize::Zeroize;\n',
+          ]:
+              secure = secure.replace(declaration, '', 1)
+          secure_path.write_text(secure, encoding='utf-8')
+
+          remote_path = Path('rust/crates/mukei-android-jni/src/remote_tools_jni.rs')
+          remote = remote_path.read_text(encoding='utf-8')
+          for declaration in [
+              'use jni::objects::{JByteArray, JObject};\n',
+              'use jni::sys::{jbyteArray, jlong};\n',
+              'use jni::JNIEnv;\n',
+              'use zeroize::{Zeroize, Zeroizing};\n',
+          ]:
+              remote = remote.replace(declaration, '', 1)
+          remote_path.write_text(remote, encoding='utf-8')
       - name: Format modified Rust files
         working-directory: rust
         run: |
           rustfmt --edition 2021 crates/mukei-core/src/storage/object_store.rs
           rustfmt --edition 2021 crates/mukei-core/src/storage/mod.rs
           rustfmt --edition 2021 crates/mukei-android-jni/src/secure_runtime_jni.rs
+          rustfmt --edition 2021 crates/mukei-android-jni/src/remote_tools_jni.rs
+          rustfmt --edition 2021 crates/mukei-android-jni/src/runtime_registry.rs
       - name: Verify patch whitespace
         run: git diff --check
       - name: Core Cargo check
@@ -130,6 +166,8 @@ jobs:
             rust/crates/mukei-core/src/storage/object_store.rs \
             rust/crates/mukei-core/src/storage/mod.rs \
             rust/crates/mukei-android-jni/src/secure_runtime_jni.rs \
+            rust/crates/mukei-android-jni/src/remote_tools_jni.rs \
+            rust/crates/mukei-android-jni/src/runtime_registry.rs \
             android/core/native/src/main/kotlin/ai/mukei/android/core/nativebridge/MukeiNativeGateway.kt \
             android/core/native/src/main/kotlin/ai/mukei/android/core/nativebridge/SecureRuntimeFactory.kt \
             android/core/native/src/main/kotlin/ai/mukei/android/core/nativebridge/AndroidPlatformRequestProcessor.kt \
