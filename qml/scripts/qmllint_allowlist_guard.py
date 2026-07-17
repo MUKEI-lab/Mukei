@@ -30,26 +30,6 @@ ALLOWED: set[tuple[str, str]] = {
         'property var bridgeSource: typeof mukeiBridge !== "undefined" ? mukeiBridge : null',
     ),
     (
-        "architecture/IntentDispatcher.qml",
-        'property var contractStoreRef: typeof ContractStore !== "undefined" ? ContractStore : null',
-    ),
-    (
-        "architecture/IntentDispatcher.qml",
-        'property var capabilityStoreRef: typeof CapabilityStore !== "undefined" ? CapabilityStore : null',
-    ),
-    (
-        "architecture/IntentDispatcher.qml",
-        'property var chatStoreRef: typeof ChatStore !== "undefined" ? ChatStore : null',
-    ),
-    (
-        "architecture/IntentDispatcher.qml",
-        'property var operationStoreRef: typeof OperationStore !== "undefined" ? OperationStore : null',
-    ),
-    (
-        "architecture/IntentDispatcher.qml",
-        "&& ErrorStore !== null",
-    ),
-    (
         "stores/ChatStore.qml",
         "? mukeiTimelineModel : fallbackTimelineModel",
     ),
