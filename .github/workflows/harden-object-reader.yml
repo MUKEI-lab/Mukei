@@ -1,4 +1,5 @@
 name: Harden encrypted object reader
+run-name: Harden encrypted object reader on isolated storage branch
 
 on:
   push:
@@ -17,7 +18,7 @@ concurrency:
 
 jobs:
   patch-commit-and-validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,9 +87,13 @@ jobs:
           toolchain: 1.82.0
           components: rustfmt, clippy
 
-      - name: Format production patch
+      - name: Format and validate focused storage hardening
         working-directory: rust
-        run: cargo fmt --all
+        run: |
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite storage::object_store::tests
+          cargo clippy -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings
 
       - name: Verify only the allowed production file changed
         run: |
@@ -107,10 +112,3 @@ jobs:
           git add rust/crates/mukei-core/src/storage/object_store.rs
           git commit -m "fix(storage): bound encrypted object reader allocation"
           git push origin HEAD:temp/universal-storage-workspace-v0.1
-
-      - name: Validate focused storage hardening
-        working-directory: rust
-        run: |
-          cargo fmt --all -- --check
-          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite storage::object_store::tests
-          cargo clippy -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings
