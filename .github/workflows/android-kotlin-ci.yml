@@ -54,6 +54,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.86.0
       - name: Install native build dependencies
         run: >-
@@ -61,7 +62,19 @@ jobs:
           sudo apt-get install -y clang cmake ninja-build pkg-config libssl-dev perl make
       - name: Test platform-neutral runtime
         working-directory: rust
-        run: cargo test -p mukei-core --lib
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p mukei-core --lib 2>&1 |
+            tee "$RUNNER_TEMP/mukei-rust-core.log"
+      - name: Upload Rust core failure log
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-core-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ runner.temp }}/mukei-rust-core.log
       - name: Test canonical prompt sandbox
         working-directory: rust
         run: >-
@@ -109,6 +122,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -116,15 +130,27 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.4.1"
+          cache-disabled: ${{ github.event_name == 'pull_request_target' }}
       - name: Test, lint and assemble Android modules
-        run: >-
-          gradle -p android
-          :core:protocol:testDebugUnitTest
-          :core:native:testDebugUnitTest
-          :app:lintDebug
-          :app:assembleDebug
-          :app:assembleOffline
-          --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle -p android \
+            :core:protocol:testDebugUnitTest \
+            :core:native:testDebugUnitTest \
+            :app:lintDebug \
+            :app:assembleDebug \
+            :app:assembleOffline \
+            --stacktrace 2>&1 |
+            tee "$RUNNER_TEMP/mukei-android-debug.log"
+      - name: Upload Android debug failure log
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ runner.temp }}/mukei-android-debug.log
       - name: Verify offline APK removes INTERNET
         shell: bash
         run: |
@@ -143,6 +169,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -153,6 +180,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.4.1"
+          cache-disabled: ${{ github.event_name == 'pull_request_target' }}
       - name: Install pinned Android native build tools
         shell: bash
         run: |
