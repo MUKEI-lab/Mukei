@@ -1,0 +1,53 @@
+name: storage-secure-patch-diagnostic
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - .github/workflows/storage-secure-patch-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+      - name: Extract and apply patch with focused log
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p secure-patch-diagnostic
+          python - <<'PY' 2>&1 | tee secure-patch-diagnostic/patch.log
+          from pathlib import Path
+          import traceback
+
+          try:
+              source = Path('.github/workflows/storage-android-secure-composition.yml').read_text(encoding='utf-8')
+              start_marker = "        run: |\n          from pathlib import Path\n"
+              end_marker = "\n      - name: Format modified Rust files"
+              start = source.index(start_marker) + len("        run: |\n")
+              end = source.index(end_marker, start)
+              lines = source[start:end].splitlines()
+              patch = "\n".join(line[10:] if line.startswith("          ") else line for line in lines) + "\n"
+              Path('secure-patch-diagnostic/extracted.py').write_text(patch, encoding='utf-8')
+              print(f'extracted_bytes={len(patch.encode())}')
+              code = compile(patch, 'extracted.py', 'exec')
+              exec(code, {'__name__': '__main__'})
+              print('PATCH_APPLIED')
+          except BaseException:
+              traceback.print_exc()
+              raise
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: storage-secure-patch-diagnostic-${{ github.sha }}
+          path: secure-patch-diagnostic
+          if-no-files-found: error
+          retention-days: 7
