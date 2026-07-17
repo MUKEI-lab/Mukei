@@ -46,6 +46,7 @@ concurrency:
 
 env:
   RUST_TOOLCHAIN: "1.86.0"
+  RUSTUP_TOOLCHAIN: "1.86.0"
   ANDROID_NDK_VERSION: "27.2.12479018"
   CARGO_NDK_VERSION: "4.1.2"
 
@@ -145,11 +146,14 @@ jobs:
           sudo apt-get install -y cmake ninja-build perl make
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;${ANDROID_NDK_VERSION}"
-          rustup target add --toolchain "${RUST_TOOLCHAIN}" \
+          rustup target add --toolchain "${RUSTUP_TOOLCHAIN}" \
             aarch64-linux-android \
             x86_64-linux-android
-          rustup target list --toolchain "${RUST_TOOLCHAIN}" --installed | grep -Fx 'aarch64-linux-android'
-          rustup target list --toolchain "${RUST_TOOLCHAIN}" --installed | grep -Fx 'x86_64-linux-android'
+          rustup target list --toolchain "${RUSTUP_TOOLCHAIN}" --installed | grep -Fx 'aarch64-linux-android'
+          rustup target list --toolchain "${RUSTUP_TOOLCHAIN}" --installed | grep -Fx 'x86_64-linux-android'
+          rustup show active-toolchain
+          rustc --version --verbose
+          cargo --version --verbose
           cargo install cargo-ndk --version "${CARGO_NDK_VERSION}" --locked
       - name: Build ABI-matched native runtime and inference capsules
         id: native-release
