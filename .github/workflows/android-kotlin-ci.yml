@@ -134,8 +134,6 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: dtolnay/rust-toolchain@1.86.0
-        with:
-          targets: aarch64-linux-android,x86_64-linux-android
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.4.1"
@@ -147,15 +145,21 @@ jobs:
           sudo apt-get install -y cmake ninja-build perl make
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;${ANDROID_NDK_VERSION}"
+          rustup target add --toolchain "${RUST_TOOLCHAIN}" \
+            aarch64-linux-android \
+            x86_64-linux-android
+          rustup target list --toolchain "${RUST_TOOLCHAIN}" --installed | grep -Fx 'aarch64-linux-android'
+          rustup target list --toolchain "${RUST_TOOLCHAIN}" --installed | grep -Fx 'x86_64-linux-android'
           cargo install cargo-ndk --version "${CARGO_NDK_VERSION}" --locked
       - name: Build ABI-matched native runtime and inference capsules
+        id: native-release
         shell: bash
         run: |
           set -o pipefail
           bash scripts/android/ci_release_native.sh 2>&1 |
             tee "$RUNNER_TEMP/mukei-release-native.log"
       - name: Upload native release failure log
-        if: ${{ failure() }}
+        if: ${{ steps.native-release.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
           name: native-release-failure-${{ github.run_id }}-${{ github.run_attempt }}
@@ -163,6 +167,7 @@ jobs:
           retention-days: 7
           path: ${{ runner.temp }}/mukei-release-native.log
       - name: Build R8-shrunk ABI release APKs
+        id: release-gradle
         shell: bash
         run: |
           set -o pipefail
@@ -171,7 +176,7 @@ jobs:
             :app:assembleRelease \
             --stacktrace 2>&1 | tee "$RUNNER_TEMP/mukei-release-gradle.log"
       - name: Upload release Gradle failure log
-        if: ${{ failure() }}
+        if: ${{ steps.release-gradle.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
           name: release-gradle-failure-${{ github.run_id }}-${{ github.run_attempt }}
