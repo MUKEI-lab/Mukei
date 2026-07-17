@@ -1,0 +1,73 @@
+name: kotlin-selective-port-audit
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - .github/workflows/kotlin-selective-port-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+      - name: Publish pending status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'pending',
+              context: 'kotlin-selective-port-audit',
+              description: 'Inspecting Kotlin-only commits',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+      - name: Inspect Kotlin-only history
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin Kotlin:refs/remotes/origin/Kotlin
+          mkdir -p kotlin-port-audit/commits
+          base="$(git merge-base HEAD origin/Kotlin)"
+          printf 'temporary_head=%s\nkotlin_head=%s\nmerge_base=%s\n' \
+            "$(git rev-parse HEAD)" "$(git rev-parse origin/Kotlin)" "$base" \
+            > kotlin-port-audit/summary.txt
+          git log --reverse --format='%H%x09%ad%x09%s' --date=iso-strict "$base..origin/Kotlin" \
+            > kotlin-port-audit/commits.tsv
+          while IFS=$'\t' read -r sha date subject; do
+            {
+              printf 'sha=%s\ndate=%s\nsubject=%s\n\n' "$sha" "$date" "$subject"
+              git show --format=fuller --stat --summary "$sha"
+              printf '\nFILES\n'
+              git diff-tree --no-commit-id --name-status -r "$sha"
+            } > "kotlin-port-audit/commits/${sha}.txt"
+          done < kotlin-port-audit/commits.tsv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-selective-port-audit-${{ github.sha }}
+          path: kotlin-port-audit
+          retention-days: 7
+      - name: Publish success status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              context: 'kotlin-selective-port-audit',
+              description: 'Kotlin-only commit inventory captured',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
