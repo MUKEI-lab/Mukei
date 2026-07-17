@@ -60,61 +60,45 @@ jobs:
         run: >-
           sudo apt-get update &&
           sudo apt-get install -y clang cmake ninja-build pkg-config libssl-dev perl make
-      - name: Test platform-neutral runtime
-        working-directory: rust
+      - name: Run Rust core and security feature matrix
         shell: bash
         run: |
           set -o pipefail
-          cargo test -p mukei-core --lib 2>&1 |
-            tee "$RUNNER_TEMP/mukei-rust-core.log"
-      - name: Upload Rust core failure log
+          {
+            cd rust
+            cargo test -p mukei-core --lib
+            cargo test -p mukei-core --lib tools::
+            cargo check -p mukei-core \
+              --no-default-features \
+              --features std,tokio,sqlcipher,runtime_hardening
+            cargo test -p mukei-android-jni --lib \
+              --no-default-features \
+              --features secure_runtime,runtime_hardening
+            cargo check -p mukei-android-jni \
+              --no-default-features \
+              --features secure_runtime,rag_runtime,runtime_hardening
+            cd ..
+            cmake -S rust/llama-cpp-prebuilt \
+              -B build/llama-host \
+              -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DMUKEI_LLAMA_FORCE_REBUILD=ON
+            cmake --build build/llama-host --target mukei_llama_native_smoke
+            ctest --test-dir build/llama-host --output-on-failure
+            cd rust
+            MUKEI_LLAMA_NATIVE_LIB_DIR="$GITHUB_WORKSPACE/rust/llama-cpp-prebuilt/prebuilt/host" \
+              cargo check -p mukei-android-jni \
+                --no-default-features \
+                --features native_inference
+          } 2>&1 | tee "$RUNNER_TEMP/mukei-rust-security.log"
+      - name: Upload Rust security failure log
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: rust-core-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          name: rust-security-failure-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           retention-days: 7
-          path: ${{ runner.temp }}/mukei-rust-core.log
-      - name: Test canonical prompt sandbox
-        working-directory: rust
-        run: >-
-          cargo test -p mukei-core --lib tools::
-      - name: Check SQLCipher core
-        working-directory: rust
-        run: >-
-          cargo check -p mukei-core
-          --no-default-features
-          --features std,tokio,sqlcipher,runtime_hardening
-      - name: Test secure JNI bootstrap contracts
-        working-directory: rust
-        run: >-
-          cargo test -p mukei-android-jni --lib
-          --no-default-features
-          --features secure_runtime,runtime_hardening
-      - name: Check production RAG composition
-        working-directory: rust
-        run: >-
-          cargo check -p mukei-android-jni
-          --no-default-features
-          --features secure_runtime,rag_runtime,runtime_hardening
-      - name: Build and test host inference capsule
-        run: |
-          set -euo pipefail
-          cmake -S rust/llama-cpp-prebuilt \
-            -B build/llama-host \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DMUKEI_LLAMA_FORCE_REBUILD=ON
-          cmake --build build/llama-host --target mukei_llama_native_smoke
-          ctest --test-dir build/llama-host --output-on-failure
-      - name: Check production inference adapter against pinned capsule
-        working-directory: rust
-        env:
-          MUKEI_LLAMA_NATIVE_LIB_DIR: ${{ github.workspace }}/rust/llama-cpp-prebuilt/prebuilt/host
-        run: >-
-          cargo check -p mukei-android-jni
-          --no-default-features
-          --features native_inference
+          path: ${{ runner.temp }}/mukei-rust-security.log
 
   android-debug:
     runs-on: ubuntu-latest
