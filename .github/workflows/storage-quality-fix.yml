@@ -1,0 +1,302 @@
+name: storage-quality-fix
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - .github/workflows/storage-quality-fix.yml
+  workflow_dispatch:
+
+concurrency:
+  group: storage-quality-fix
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  statuses: write
+
+env:
+  CARGO_TERM_COLOR: never
+  RUST_BACKTRACE: 1
+  RUSTFLAGS: -D warnings
+
+jobs:
+  patch-verify-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+      - name: Fetch Kotlin comparison ref
+        run: git fetch origin Kotlin:refs/remotes/origin/Kotlin
+      - name: Install Rust 1.82
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.82.0
+          components: clippy,rustfmt
+      - name: Apply exact critical and clippy fixes
+        id: patch
+        shell: python
+        run: |
+          from pathlib import Path
+          import os
+          import re
+          import traceback
+
+          log_dir = Path('ci-storage-quality-logs')
+          log_dir.mkdir(exist_ok=True)
+          changed_files = []
+
+          def save(path: Path, before: str, after: str) -> None:
+              if before != after:
+                  path.write_text(after, encoding='utf-8')
+                  changed_files.append(str(path))
+
+          try:
+              object_path = Path('rust/crates/mukei-core/src/storage/object_store.rs')
+              before = object_path.read_text(encoding='utf-8')
+              object_store = before
+              old = '''        if final_path.exists() {
+                  self.verify_existing(&final_path, &digest, plaintext_size)?;
+                  return self.stored_object(digest, plaintext_size, relative_path, true);
+              }'''
+              new = '''        if final_path.exists() {
+                  self.verify_existing(&final_path, &digest, plaintext_size)
+                      .map_err(|_| ObjectStoreError::CorruptDeduplicatedObject)?;
+                  return self.stored_object(digest, plaintext_size, relative_path, true);
+              }'''
+              if old in object_store:
+                  object_store = object_store.replace(old, new, 1)
+              elif new not in object_store:
+                  raise RuntimeError('object-store dedup verification marker not found')
+              save(object_path, before, object_store)
+
+              types_path = Path('rust/crates/mukei-core/src/application_runtime/foundation_types.rs')
+              before = types_path.read_text(encoding='utf-8')
+              types = before.replace(
+                  'sync_channel, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError,',
+                  'sync_channel, Receiver, SyncSender, TrySendError,',
+                  1,
+              )
+              old = '''            let first = if timeout.is_zero() {
+                  match receiver.try_recv() {
+                      Ok(event) => Some(event),
+                      Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,
+                  }
+              } else {
+                  match receiver.recv_timeout(timeout) {
+                      Ok(event) => Some(event),
+                      Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => None,
+                  }
+              };'''
+              new = '''            let first = if timeout.is_zero() {
+                  receiver.try_recv().ok()
+              } else {
+                  receiver.recv_timeout(timeout).ok()
+              };'''
+              if old in types:
+                  types = types.replace(old, new, 1)
+              elif new not in types:
+                  raise RuntimeError('event-drain Result::ok marker not found')
+              save(types_path, before, types)
+
+              download_path = Path('rust/crates/mukei-core/src/application_runtime/models_download.rs')
+              before = download_path.read_text(encoding='utf-8')
+              download = before
+              old = '''        #[cfg(not(feature = "network"))]
+              {
+                  return CommandAcknowledgementV2::rejected(
+                      Some(&command.envelope),
+                      RejectionReason::CapabilityUnavailable,
+                  );
+              }'''
+              new = '''        #[cfg(not(feature = "network"))]
+              {
+                  CommandAcknowledgementV2::rejected(
+                      Some(&command.envelope),
+                      RejectionReason::CapabilityUnavailable,
+                  )
+              }'''
+              if old in download:
+                  download = download.replace(old, new, 1)
+              elif new not in download:
+                  raise RuntimeError('models_download return marker not found')
+              save(download_path, before, download)
+
+              retriever_path = Path('rust/crates/mukei-core/src/rag/retriever.rs')
+              before = retriever_path.read_text(encoding='utf-8')
+              retriever = before.replace(
+                  'request.min_score.map_or(true, |minimum| *score >= minimum)',
+                  'request.min_score.is_none_or(|minimum| *score >= minimum)',
+                  1,
+              )
+              if 'request.min_score.map_or(true, |minimum| *score >= minimum)' in retriever:
+                  raise RuntimeError('RAG map_or marker was not resolved')
+              save(retriever_path, before, retriever)
+
+              universal_path = Path('rust/crates/mukei-core/src/storage/universal.rs')
+              before = universal_path.read_text(encoding='utf-8')
+              universal = before
+              universal = universal.replace(
+                  '#[derive(Copy, Clone, Debug, PartialEq, Eq)]\npub enum DuplicatePolicy {',
+                  '#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]\npub enum DuplicatePolicy {',
+                  1,
+              )
+              if '#[default]\n    RenameNewEntry,' not in universal:
+                  universal = universal.replace(
+                      '    RenameNewEntry,',
+                      '    #[default]\n    RenameNewEntry,',
+                      1,
+                  )
+              universal, removed = re.subn(
+                  r'\nimpl Default for DuplicatePolicy \{\n    fn default\(\) -> Self \{\n        Self::RenameNewEntry\n    \}\n\}\n',
+                  '\n',
+                  universal,
+                  count=1,
+              )
+              if removed == 0 and 'impl Default for DuplicatePolicy' in universal:
+                  raise RuntimeError('DuplicatePolicy default impl shape is unexpected')
+              save(universal_path, before, universal)
+
+              trash_path = Path('rust/crates/mukei-core/src/storage/trash_repository.rs')
+              before = trash_path.read_text(encoding='utf-8')
+              trash = before
+              alias = '''type TrashTargetRow = (
+                  String,
+                  String,
+                  String,
+                  Option<String>,
+                  Option<String>,
+                  String,
+              );
+
+              '''
+              if 'type TrashTargetRow =' not in trash:
+                  anchor = 'use uuid::Uuid;\n\n'
+                  if anchor not in trash:
+                      raise RuntimeError('trash repository import anchor not found')
+                  trash = trash.replace(anchor, anchor + alias, 1)
+              trash = trash.replace(
+                  'let row: Option<(String, String, String, Option<String>, Option<String>, String)> =',
+                  'let row: Option<TrashTargetRow> =',
+                  1,
+              )
+              save(trash_path, before, trash)
+
+              wrapper_path = Path('rust/crates/mukei-core/src/storage/import_commit_repository.rs')
+              before = wrapper_path.read_text(encoding='utf-8')
+              wrapper = before.replace(
+                  'include!("import_commit_repository/naming.rs");\ninclude!("import_commit_repository/recovery.rs");',
+                  'include!("import_commit_repository/recovery.rs");\ninclude!("import_commit_repository/naming.rs");',
+                  1,
+              )
+              if wrapper.find('recovery.rs') > wrapper.find('naming.rs'):
+                  raise RuntimeError('import commit include order was not corrected')
+              save(wrapper_path, before, wrapper)
+
+              (log_dir / 'patch-summary.txt').write_text(
+                  'changed=' + (','.join(changed_files) if changed_files else 'none') + '\n',
+                  encoding='utf-8',
+              )
+              patch_ok = True
+          except Exception:
+              patch_ok = False
+              (log_dir / 'patch-error.log').write_text(traceback.format_exc(), encoding='utf-8')
+
+          with open(Path(os.environ['GITHUB_OUTPUT']), 'a', encoding='utf-8') as output:
+              output.write(f'patch_ok={str(patch_ok).lower()}\n')
+      - name: Build branch Rust stage list
+        if: steps.patch.outputs.patch_ok == 'true'
+        shell: bash
+        run: |
+          {
+            git diff --name-only origin/Kotlin...HEAD -- '*.rs'
+            printf '%s\n' \
+              rust/crates/mukei-core/src/application_runtime/foundation_types.rs \
+              rust/crates/mukei-core/src/application_runtime/models_download.rs \
+              rust/crates/mukei-core/src/rag/retriever.rs \
+              rust/crates/mukei-core/src/storage/object_store.rs \
+              rust/crates/mukei-core/src/storage/universal.rs \
+              rust/crates/mukei-core/src/storage/trash_repository.rs \
+              rust/crates/mukei-core/src/storage/import_commit_repository.rs
+          } | sort -u > ci-storage-quality-logs/stage-files.txt
+      - name: Format working tree
+        if: steps.patch.outputs.patch_ok == 'true'
+        working-directory: rust
+        run: cargo fmt --all
+      - name: Stage only branch-owned Rust changes
+        if: steps.patch.outputs.patch_ok == 'true'
+        run: |
+          git add --pathspec-from-file=ci-storage-quality-logs/stage-files.txt
+          git diff --cached --check
+      - name: Run Cargo check
+        if: steps.patch.outputs.patch_ok == 'true'
+        shell: bash
+        working-directory: rust
+        run: |
+          set -o pipefail
+          cargo check -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets \
+            2>&1 | tee ../ci-storage-quality-logs/check.log
+      - name: Run Cargo tests
+        if: steps.patch.outputs.patch_ok == 'true'
+        shell: bash
+        working-directory: rust
+        run: |
+          set -o pipefail
+          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets \
+            2>&1 | tee ../ci-storage-quality-logs/test.log
+      - name: Run Clippy
+        if: steps.patch.outputs.patch_ok == 'true'
+        shell: bash
+        working-directory: rust
+        run: |
+          set -o pipefail
+          cargo clippy -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings \
+            2>&1 | tee ../ci-storage-quality-logs/clippy.log
+      - name: Upload quality diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-quality-fix-${{ github.sha }}
+          path: ci-storage-quality-logs
+          if-no-files-found: error
+          retention-days: 7
+      - name: Enforce patch result
+        run: test '${{ steps.patch.outputs.patch_ok }}' = 'true'
+      - name: Commit verified quality fixes
+        run: |
+          git config user.name "mukei-storage-bot"
+          git config user.email "mukei-storage-bot@users.noreply.github.com"
+          git commit -m "fix(storage): pass tests and quality gates"
+          git push origin HEAD:temp/universal-storage-workspace-v0.1
+      - name: Publish success status
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              context: 'storage-quality-fix',
+              description: 'Storage tests and Clippy passed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+      - name: Publish failure status
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'failure',
+              context: 'storage-quality-fix',
+              description: 'Storage quality verification failed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
