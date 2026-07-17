@@ -106,10 +106,9 @@ mod tests {
             .is_ok());
         runtime
             .async_runtime
-            .block_on(tokio::time::timeout(
-                Duration::from_secs(2),
-                barrier_receiver,
-            ))
+            .block_on(async {
+                tokio::time::timeout(Duration::from_secs(2), barrier_receiver).await
+            })
             .expect("projection barrier timeout")
             .expect("projection barrier");
 
