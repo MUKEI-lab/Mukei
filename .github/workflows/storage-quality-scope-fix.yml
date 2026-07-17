@@ -1,0 +1,48 @@
+name: storage-quality-scope-fix
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - .github/workflows/storage-quality-scope-fix.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: storage-quality-scope-fix
+  cancel-in-progress: false
+
+jobs:
+  patch-quality-workflow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+      - name: Narrow formatter scope
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('.github/workflows/storage-quality-fix.yml')
+          source = path.read_text(encoding='utf-8')
+          old = 'cargo fmt --all > ../ci-storage-quality-logs/format.log 2>&1'
+          new = 'cargo fmt -p mukei-core > ../ci-storage-quality-logs/format.log 2>&1'
+          if old not in source:
+              if new in source:
+                  raise SystemExit(0)
+              raise SystemExit('Refusing to patch: formatter marker not found')
+          path.write_text(source.replace(old, new, 1), encoding='utf-8')
+      - name: Commit workflow correction
+        run: |
+          git config user.name "mukei-storage-bot"
+          git config user.email "mukei-storage-bot@users.noreply.github.com"
+          git add .github/workflows/storage-quality-fix.yml
+          git diff --cached --check
+          git commit -m "ci(storage): scope formatting to mukei-core"
+          git push origin HEAD:temp/universal-storage-workspace-v0.1
