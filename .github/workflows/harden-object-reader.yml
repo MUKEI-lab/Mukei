@@ -26,6 +26,7 @@ jobs:
       - name: Verify isolated branch
         run: |
           test "$(git branch --show-current)" = "temp/universal-storage-workspace-v0.1"
+          test "$(git rev-parse --abbrev-ref HEAD)" != "Kotlin"
 
       - name: Bound malformed object allocation
         run: |
@@ -51,26 +52,26 @@ jobs:
 
           test_anchor = "    #[test]\n    fn corrupted_ciphertext_fails_closed() {\n"
           test = '''    #[test]
-    fn oversized_sparse_object_is_rejected_before_ciphertext_allocation() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("oversized.mobj");
-        let digest = [0x41; SHA256_LEN];
-        let encrypted_size = MAX_ENCODED_OBJECT_BYTES + 1;
-        let mut header = associated_data(&digest, 1, AES_GCM_CIPHER_VERSION);
-        header.extend_from_slice(&encrypted_size.to_be_bytes());
+          fn oversized_sparse_object_is_rejected_before_ciphertext_allocation() {
+              let directory = tempfile::tempdir().unwrap();
+              let path = directory.path().join("oversized.mobj");
+              let digest = [0x41; SHA256_LEN];
+              let encrypted_size = MAX_ENCODED_OBJECT_BYTES + 1;
+              let mut header = associated_data(&digest, 1, AES_GCM_CIPHER_VERSION);
+              header.extend_from_slice(&encrypted_size.to_be_bytes());
 
-        let mut file = File::create(&path).unwrap();
-        file.write_all(&header).unwrap();
-        file.set_len(header.len() as u64 + encrypted_size).unwrap();
-        file.sync_all().unwrap();
+              let mut file = File::create(&path).unwrap();
+              file.write_all(&header).unwrap();
+              file.set_len(header.len() as u64 + encrypted_size).unwrap();
+              file.sync_all().unwrap();
 
-        assert!(matches!(
-            read_encoded_object(&path),
-            Err(ObjectStoreError::MalformedObject)
-        ));
-    }
+              assert!(matches!(
+                  read_encoded_object(&path),
+                  Err(ObjectStoreError::MalformedObject)
+              ));
+          }
 
-'''
+          '''
           if "oversized_sparse_object_is_rejected_before_ciphertext_allocation" not in text:
               if test_anchor not in text:
                   raise SystemExit("object-store test anchor not found")
@@ -86,9 +87,15 @@ jobs:
       - name: Format and validate focused storage tests
         working-directory: rust
         run: |
+          cargo fmt --all
           cargo fmt --all -- --check
           cargo test -p mukei-core storage::object_store::tests
           cargo clippy -p mukei-core --all-targets -- -D warnings
+
+      - name: Verify only the allowed production file changed
+        run: |
+          changed="$(git diff --name-only)"
+          test "$changed" = "rust/crates/mukei-core/src/storage/object_store.rs"
 
       - name: Commit verified hardening
         run: |
@@ -96,6 +103,7 @@ jobs:
             echo "Object reader was already hardened."
             exit 0
           fi
+          test "$(git branch --show-current)" = "temp/universal-storage-workspace-v0.1"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add rust/crates/mukei-core/src/storage/object_store.rs
