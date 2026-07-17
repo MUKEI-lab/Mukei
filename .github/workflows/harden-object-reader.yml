@@ -6,6 +6,7 @@ on:
       - temp/universal-storage-workspace-v0.1
     paths:
       - .github/workflows/harden-object-reader.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -80,8 +81,9 @@ jobs:
           path.write_text(text)
           PY
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.82.0
           components: rustfmt, clippy
 
       - name: Format and validate focused storage tests
@@ -89,8 +91,8 @@ jobs:
         run: |
           cargo fmt --all
           cargo fmt --all -- --check
-          cargo test -p mukei-core storage::object_store::tests
-          cargo clippy -p mukei-core --all-targets -- -D warnings
+          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite storage::object_store::tests
+          cargo clippy -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings
 
       - name: Verify only the allowed production file changed
         run: |
