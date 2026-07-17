@@ -1,9 +1,9 @@
-//! Platform-neutral application runtime owned by the native process.
-//!
-//! Protocol V2 commands are validated once, routed to feature handlers, tracked
-//! as cancellable operations, projected through ordered events, and exposed via
-//! authoritative snapshots. Android-only services are accessed through the
-//! pull-based platform broker in [`crate::platform`].
+// Platform-neutral application runtime owned by the native process.
+//
+// Protocol V2 commands are validated once, routed to feature handlers, tracked
+// as cancellable operations, projected through ordered events, and exposed via
+// authoritative snapshots. Android-only services are accessed through the
+// pull-based platform broker in `crate::platform`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
