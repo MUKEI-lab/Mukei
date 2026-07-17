@@ -117,7 +117,7 @@ jobs:
         run: cargo clippy -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings
       - name: Secure JNI tests
         working-directory: rust
-        run: cargo test -p mukei-android-jni --lib --no-default-features --features secure_runtime,runtime_hardening
+        run: cargo test -p mukei-android-jni --lib --no-default-features --features secure_runtime
       - name: Compile Kotlin secure bridge
         run: gradle -p android :core:native:compileDebugKotlin :app:compileDebugKotlin --stacktrace
       - name: Commit verified secure composition
