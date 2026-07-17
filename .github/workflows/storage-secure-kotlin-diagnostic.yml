@@ -35,7 +35,7 @@ jobs:
       - name: Apply verifier patch block
         shell: python
         run: |
-          from pathlib import import Path
+          from pathlib import Path
           source = Path('.github/workflows/storage-android-secure-composition-v2.yml').read_text(encoding='utf-8')
           start_marker = "      - name: Extract and apply reviewed patch\n        shell: python\n        run: |\n"
           end_marker = "\n      - name: Format modified Rust files"
