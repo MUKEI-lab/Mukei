@@ -31,6 +31,8 @@ pub mod saas;
 pub mod saf;
 #[cfg(feature = "rusqlite")]
 pub mod settings;
+#[cfg(all(feature = "rusqlite", feature = "tokio"))]
+pub mod staged_import;
 #[cfg(feature = "rusqlite")]
 pub mod trash_repository;
 #[cfg(feature = "rusqlite")]
@@ -95,6 +97,12 @@ pub use saas::{
 pub use saf::{DocumentProjection, SafCleanupPlan, SafRegistry, SafTokenRow};
 #[cfg(feature = "rusqlite")]
 pub use settings::{PreferenceRecord, PreferenceValue, SecretRefRecord, SettingsRepository};
+#[cfg(all(feature = "rusqlite", feature = "tokio"))]
+pub use staged_import::{
+    StagedFileImporter, StagedImportError, WorkspaceStagedImportReceipt,
+    WorkspaceStagedImportRequest, WorkspaceStagedImportService,
+    DEFAULT_MAX_STAGED_IMPORT_BYTES,
+};
 #[cfg(feature = "rusqlite")]
 pub use trash_repository::{RestoreReceipt, TrashReceipt, TrashRepository};
 #[cfg(feature = "rusqlite")]
