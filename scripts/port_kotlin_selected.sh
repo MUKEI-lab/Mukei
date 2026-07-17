@@ -181,6 +181,146 @@ text = text.replace(unused_model, '', 1)
 state.write_text(text, encoding='utf-8')
 PY
 
+python <<'PY'
+from pathlib import Path
+
+state_path = Path('rust/crates/mukei-core/src/application_runtime/foundation_state.rs')
+state = state_path.read_text(encoding='utf-8')
+old_command = '''enum PersistenceCommand {
+    Save {
+        store: Arc<dyn RuntimeProjectionStore>,
+        key: &'static str,
+        value: Value,
+    },
+    Barrier(tokio::sync::oneshot::Sender<()>),
+}
+'''
+new_command = '''enum PersistenceCommand {
+    Save {
+        store: Arc<dyn RuntimeProjectionStore>,
+        key: &'static str,
+        value: Value,
+    },
+    Flush {
+        store: Arc<dyn RuntimeProjectionStore>,
+        projections: Vec<(&'static str, Value)>,
+        acknowledgement: tokio::sync::oneshot::Sender<Result<(), MukeiError>>,
+    },
+    Barrier(tokio::sync::oneshot::Sender<()>),
+}
+'''
+if new_command not in state:
+    if old_command not in state:
+        raise SystemExit('missing PersistenceCommand marker')
+    state = state.replace(old_command, new_command, 1)
+
+old_barrier = '''                    PersistenceCommand::Barrier(acknowledgement) => {
+                        let _ = acknowledgement.send(());
+                    }
+'''
+new_barrier = '''                    PersistenceCommand::Flush {
+                        store,
+                        projections,
+                        acknowledgement,
+                    } => {
+                        let mut result = Ok(());
+                        for (key, value) in projections {
+                            if let Err(error) = store.save(key, value).await {
+                                result = Err(error);
+                                break;
+                            }
+                        }
+                        let _ = acknowledgement.send(result);
+                    }
+                    PersistenceCommand::Barrier(acknowledgement) => {
+                        let _ = acknowledgement.send(());
+                    }
+'''
+if new_barrier not in state:
+    if old_barrier not in state:
+        raise SystemExit('missing persistence writer marker')
+    state = state.replace(old_barrier, new_barrier, 1)
+state_path.write_text(state, encoding='utf-8')
+
+flush_path = Path('rust/crates/mukei-core/src/application_runtime/persistence_flush.rs')
+flush_path.write_text('''impl FeatureState {
+    async fn flush_projections(&self) -> Result<(), MukeiError> {
+        // Enqueue one authoritative snapshot after all prior saves and before
+        // any later save. The synchronous ordering lock is released before I/O.
+        let acknowledgement = {
+            let _enqueue = self
+                .persistence_enqueue
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let store = self
+                .projection_store
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            let Some(store) = store else { return Ok(()); };
+
+            let operations = self
+                .operations
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
+            let models = self
+                .models
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
+            let documents = self
+                .documents
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
+            let conversations = self
+                .conversations
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .iter()
+                .map(|((conversation_id, branch_id), messages)| ConversationProjection {
+                    conversation_id: conversation_id.clone(),
+                    branch_id: branch_id.clone(),
+                    messages: messages.clone(),
+                })
+                .collect::<Vec<_>>();
+            let projections = vec![
+                ("operations", serde_json::to_value(operations)
+                    .map_err(|error| MukeiError::Internal(error.to_string()))?),
+                ("models", serde_json::to_value(models)
+                    .map_err(|error| MukeiError::Internal(error.to_string()))?),
+                ("documents", serde_json::to_value(documents)
+                    .map_err(|error| MukeiError::Internal(error.to_string()))?),
+                ("conversations", serde_json::to_value(conversations)
+                    .map_err(|error| MukeiError::Internal(error.to_string()))?),
+            ];
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            self.persistence_sender
+                .send(PersistenceCommand::Flush {
+                    store,
+                    projections,
+                    acknowledgement: sender,
+                })
+                .map_err(|_| MukeiError::Internal("projection writer unavailable".into()))?;
+            receiver
+        };
+
+        acknowledgement
+            .await
+            .map_err(|_| MukeiError::Internal("projection writer stopped before flush".into()))??;
+        Ok(())
+    }
+}
+''', encoding='utf-8')
+PY
+
 rm -f .github/workflows/kotlin-selective-port-audit.yml \
       .github/workflows/kotlin-selective-port.yml \
       .github/workflows/kotlin-port-conflict-diagnostic.yml \
