@@ -6,7 +6,7 @@
         <item name="android:windowSplashScreenBackground">@color/mukei_splash_background</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/mukei_splash_icon</item>
         <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
-        <item name="android:postSplashScreenTheme">@style/Theme.Mukei.PostSplash</item>
+        <item name="postSplashScreenTheme">@style/Theme.Mukei.PostSplash</item>
     </style>
 
     <style name="Theme.Mukei.PostSplash" parent="android:style/Theme.Material.Light.NoActionBar">
