@@ -1,0 +1,265 @@
+name: kotlin-selective-port
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - .github/workflows/kotlin-selective-port.yml
+
+permissions:
+  contents: write
+  statuses: write
+
+concurrency:
+  group: kotlin-selective-port
+  cancel-in-progress: true
+
+jobs:
+  port:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: never
+      RUST_BACKTRACE: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.82.0
+          components: clippy,rustfmt
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+      - name: Publish pending status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'pending',
+              context: 'kotlin-selective-port',
+              description: 'Cherry-picking selected Kotlin fixes',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+      - name: Fetch protected source branch
+        run: git fetch --no-tags origin Kotlin:refs/remotes/origin/Kotlin
+      - name: Port JNI module isolation safely
+        shell: python
+        run: |
+          from pathlib import Path
+
+          registry_path = Path('rust/crates/mukei-android-jni/src/runtime_registry.rs')
+          registry = registry_path.read_text(encoding='utf-8')
+          registry = registry.replace(
+              'use jni::objects::{JByteArray, JObject};\nuse jni::sys::{jbyteArray, jlong};\nuse jni::JNIEnv;\nuse mukei_core::application_runtime::MukeiRuntime;\nuse zeroize::{Zeroize, Zeroizing};\n',
+              'use jni::sys::jlong;\nuse mukei_core::application_runtime::MukeiRuntime;\n\n'
+              '// Child JNI modules intentionally access these crate-root helpers through this\n'
+              '// module. Keeping each transport in a real Rust module prevents textual\n'
+              '// `include!` import collisions while preserving the exported JNI symbol names.\n'
+              'use super::{\n'
+              '    guarded_bytes, invalid_handle_payload, runtime_entry, runtime_services, serialize,\n'
+              '    to_java_bytes, RUNTIMES,\n'
+              '};\n',
+              1,
+          )
+          registry = registry.replace(
+              'include!("secure_runtime_jni.rs");\ninclude!("remote_tools_jni.rs");',
+              '#[path = "secure_runtime_jni.rs"]\nmod secure_runtime_jni;\n#[path = "remote_tools_jni.rs"]\nmod remote_tools_jni;',
+              1,
+          )
+          registry_path.write_text(registry, encoding='utf-8')
+
+          secure_path = Path('rust/crates/mukei-android-jni/src/secure_runtime_jni.rs')
+          secure = secure_path.read_text(encoding='utf-8')
+          secure_imports = (
+              'use jni::objects::{JByteArray, JObject};\n'
+              'use jni::sys::jbyteArray;\n'
+              'use jni::JNIEnv;\n'
+              'use zeroize::Zeroize;\n\n'
+          )
+          if not secure.startswith('use jni::'):
+              secure = secure_imports + secure
+          secure_path.write_text(secure, encoding='utf-8')
+
+          remote_path = Path('rust/crates/mukei-android-jni/src/remote_tools_jni.rs')
+          remote = remote_path.read_text(encoding='utf-8')
+          remote_imports = (
+              'use jni::objects::{JByteArray, JObject};\n'
+              'use jni::sys::{jbyteArray, jlong};\n'
+              'use jni::JNIEnv;\n'
+              'use zeroize::{Zeroize, Zeroizing};\n\n'
+          )
+          if not remote.startswith('use jni::'):
+              remote = remote_imports + remote
+          remote_path.write_text(remote, encoding='utf-8')
+      - name: Commit JNI isolation port
+        run: |
+          git config user.name "mukei-storage-bot"
+          git config user.email "mukei-storage-bot@users.noreply.github.com"
+          git add rust/crates/mukei-android-jni/src/runtime_registry.rs \
+                  rust/crates/mukei-android-jni/src/secure_runtime_jni.rs \
+                  rust/crates/mukei-android-jni/src/remote_tools_jni.rs
+          git commit -m "fix(jni): isolate secure transport modules" \
+            -m "Selective port of Kotlin commit 127524b089a7b4dee4ad28110be98488391550a1, reconciled with encrypted storage composition."
+      - name: Cherry-pick selected Kotlin commits
+        shell: bash
+        run: |
+          set -euo pipefail
+          picks=(
+            587dc2e2b277ee43328b998c91f984fdb9e0f62f
+            c0ef6cd10cc84e1f77abc6c2e3b2da5a192495ba
+            f969f2aeca821994d7c50c19e917f431662d701c
+            77c6f7fb3558329c096fc7d90f806a927004b3f4
+            9c3c57a8b8faf4e26dd862fba7d20109da96a321
+            94d32d4db8a2aa250b5e4afa618825aba5cb938f
+            29f2b764768707b509ba04aad123baf721d93983
+            2196c690d9ecfdee2a91f33741f280208d1f3762
+            5674765ce56aea807f9a1048607935e41d31070a
+            91f4c18bd4f0c870300a072d77c36680e5003e71
+            ed532aefb80825aeb3b607f536f5ed963e2bcb78
+            26ca8b2255e261167c87152dfdf9c50791d01cfb
+            e9233b4b52a8f801769b72f4acfa60c465a32345
+            65c68d6951ab4fd06195d783eca444aa41233d1a
+          )
+          for sha in "${picks[@]}"; do
+            if git cherry-pick -x "$sha"; then
+              continue
+            fi
+            case "$sha" in
+              587dc2e2b277ee43328b998c91f984fdb9e0f62f)
+                git checkout --theirs -- rust/crates/mukei-core/src/application_runtime/foundation_state.rs ;;
+              c0ef6cd10cc84e1f77abc6c2e3b2da5a192495ba)
+                git checkout --theirs -- rust/crates/mukei-core/src/application_runtime/persistence_flush.rs ;;
+              f969f2aeca821994d7c50c19e917f431662d701c|77c6f7fb3558329c096fc7d90f806a927004b3f4)
+                git checkout --theirs -- android/app/src/main/kotlin/ai/mukei/android/BackendRuntimeHost.kt ;;
+              9c3c57a8b8faf4e26dd862fba7d20109da96a321|94d32d4db8a2aa250b5e4afa618825aba5cb938f|26ca8b2255e261167c87152dfdf9c50791d01cfb)
+                git checkout --theirs -- rust/crates/mukei-core/src/application_runtime/tests.rs ;;
+              29f2b764768707b509ba04aad123baf721d93983|2196c690d9ecfdee2a91f33741f280208d1f3762|5674765ce56aea807f9a1048607935e41d31070a|e9233b4b52a8f801769b72f4acfa60c465a32345|65c68d6951ab4fd06195d783eca444aa41233d1a)
+                git checkout --theirs -- .github/workflows/android-kotlin-ci.yml ;;
+              91f4c18bd4f0c870300a072d77c36680e5003e71)
+                git checkout --ours -- rust/crates/mukei-core/src/application_runtime.rs ;;
+              ed532aefb80825aeb3b607f536f5ed963e2bcb78)
+                git checkout --theirs -- rust/crates/mukei-core/src/application_runtime/foundation_types.rs ;;
+              *)
+                git status --short
+                exit 1 ;;
+            esac
+            git add -A
+            git cherry-pick --continue
+          done
+      - name: Reconcile storage-specific additions
+        shell: python
+        run: |
+          from pathlib import Path
+
+          runtime = Path('rust/crates/mukei-core/src/application_runtime.rs')
+          text = runtime.read_text(encoding='utf-8')
+          text = text.replace(
+              'include!("application_runtime/durable.rs");\ninclude!("application_runtime/foundation_types.rs");',
+              'include!("application_runtime/foundation_types.rs");\ninclude!("application_runtime/durable.rs");',
+              1,
+          )
+          if 'include!("application_runtime/storage_import.rs");' not in text:
+              text = text.replace(
+                  'include!("application_runtime/documents_snapshot.rs");\n',
+                  'include!("application_runtime/documents_snapshot.rs");\ninclude!("application_runtime/storage_import.rs");\n',
+                  1,
+              )
+          if 'include!("application_runtime/storage_import_tests.rs");' not in text:
+              text += 'include!("application_runtime/storage_import_tests.rs");\n'
+          runtime.write_text(text, encoding='utf-8')
+
+          host = Path('android/app/src/main/kotlin/ai/mukei/android/BackendRuntimeHost.kt')
+          text = host.read_text(encoding='utf-8')
+          if 'security.optString("object_store", "unknown")' not in text:
+              text = text.replace(
+                  'security.optString("projections", "unknown"),\n',
+                  'security.optString("projections", "unknown"),\n                    security.optString("object_store", "unknown"),\n',
+                  1,
+              )
+          host.write_text(text, encoding='utf-8')
+
+          workflow = Path('.github/workflows/android-kotlin-ci.yml')
+          text = workflow.read_text(encoding='utf-8')
+          if 'temp/universal-storage-workspace-v0.1' not in text:
+              text = text.replace(
+                  'branches:\n      - Kotlin\n',
+                  'branches:\n      - Kotlin\n      - temp/universal-storage-workspace-v0.1\n',
+              )
+          workflow.write_text(text, encoding='utf-8')
+      - name: Remove one-shot port workflows
+        run: |
+          git rm .github/workflows/kotlin-selective-port.yml
+          git rm .github/workflows/kotlin-selective-port-audit.yml
+      - name: Format and verify patch
+        run: |
+          rustfmt --edition 2021 rust/crates/mukei-android-jni/src/runtime_registry.rs
+          rustfmt --edition 2021 rust/crates/mukei-android-jni/src/secure_runtime_jni.rs
+          rustfmt --edition 2021 rust/crates/mukei-android-jni/src/remote_tools_jni.rs
+          rustfmt --edition 2021 rust/crates/mukei-core/src/application_runtime.rs
+          rustfmt --edition 2021 rust/crates/mukei-core/src/application_runtime/foundation_state.rs
+          rustfmt --edition 2021 rust/crates/mukei-core/src/application_runtime/foundation_types.rs
+          rustfmt --edition 2021 rust/crates/mukei-core/src/application_runtime/persistence_flush.rs
+          rustfmt --edition 2021 rust/crates/mukei-core/src/application_runtime/tests.rs
+          git diff --check
+      - name: Verify Rust core and secure JNI
+        working-directory: rust
+        env:
+          RUSTFLAGS: -D warnings
+        run: |
+          cargo check -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets
+          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets
+          cargo clippy -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings
+          cargo test -p mukei-android-jni --lib --no-default-features --features secure_runtime
+      - name: Verify Android build matrix
+        run: |
+          gradle -p android \
+            :app:assembleDebug \
+            :app:assembleRelease \
+            :app:assembleOffline \
+            :app:testDebugUnitTest \
+            :app:lintDebug \
+            --stacktrace
+      - name: Commit reconciliation and push selected ports
+        run: |
+          git add -A
+          git diff --cached --check
+          git commit -m "fix(port): reconcile Kotlin runtime fixes with universal storage"
+          git push origin HEAD:temp/universal-storage-workspace-v0.1
+      - name: Publish success status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              context: 'kotlin-selective-port',
+              description: 'Selected Kotlin fixes cherry-picked and verified',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+      - name: Publish failure status
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'failure',
+              context: 'kotlin-selective-port',
+              description: 'Selected Kotlin port failed verification',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
