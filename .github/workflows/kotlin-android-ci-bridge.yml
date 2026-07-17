@@ -1,0 +1,54 @@
+name: kotlin-android-ci-bridge
+
+on:
+  pull_request_target:
+    types: [ opened, synchronize, reopened, ready_for_review ]
+    branches: [ Kotlin ]
+    paths:
+      - "android/**"
+      - "rust/Cargo.toml"
+      - "rust/crates/mukei-core/**"
+      - "rust/crates/mukei-android-jni/**"
+      - "rust/migrations/**"
+      - "rust/llama-cpp-prebuilt/**"
+      - ".github/workflows/android-kotlin-ci.yml"
+      - ".github/workflows/android-release-candidate.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kotlin-android-bridge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  announce:
+    if: ${{ github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Publish pending Android CI status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: 'pending',
+              context: 'android-kotlin-ci',
+              description: 'Android validation is running',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+
+  validate:
+    if: ${{ github.event.pull_request.draft == false }}
+    needs: announce
+    permissions:
+      contents: read
+      statuses: write
+    uses: MUKEI-lab/Mukei/.github/workflows/android-kotlin-ci.yml@Kotlin
+    with:
+      checkout_ref: refs/pull/${{ github.event.pull_request.number }}/merge
+      status_sha: ${{ github.event.pull_request.head.sha }}
