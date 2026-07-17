@@ -7,6 +7,7 @@ on:
       - "scripts/frontend/finalize-startup-bootstrap.py"
       - "scripts/frontend/finalize-safe-mode-actions.py"
       - "scripts/frontend/finalize-rag-prompt.py"
+      - ".github/workflows/android-emulator-smoke.yml"
       - ".github/workflows/finalize-startup-bootstrap.yml"
   workflow_dispatch:
 
@@ -38,22 +39,32 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path("qml/screens/RagRebuildPromptScreen.qml")
-          text = path.read_text(encoding="utf-8")
+          rag_path = Path("qml/screens/RagRebuildPromptScreen.qml")
+          rag_text = rag_path.read_text(encoding="utf-8")
           duplicate_import = 'import "../architecture"\nimport "../architecture"\n'
           duplicate_name = (
               '    objectName: "ragRebuildPromptScreen"\n'
               '    objectName: "ragRebuildPromptScreen"\n'
           )
-          while duplicate_import in text:
-              text = text.replace(duplicate_import, 'import "../architecture"\n', 1)
-          while duplicate_name in text:
-              text = text.replace(
+          while duplicate_import in rag_text:
+              rag_text = rag_text.replace(duplicate_import, 'import "../architecture"\n', 1)
+          while duplicate_name in rag_text:
+              rag_text = rag_text.replace(
                   duplicate_name,
                   '    objectName: "ragRebuildPromptScreen"\n',
                   1,
               )
-          path.write_text(text, encoding="utf-8")
+          rag_path.write_text(rag_text, encoding="utf-8")
+
+          emulator_path = Path(".github/workflows/android-emulator-smoke.yml")
+          emulator_text = emulator_path.read_text(encoding="utf-8")
+          old_probe = r'''BOOT_STATE="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"'''
+          new_probe = r'''BOOT_STATE="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"'''
+          if new_probe not in emulator_text:
+              if old_probe not in emulator_text:
+                  raise SystemExit("missing emulator boot-probe patch anchor")
+              emulator_text = emulator_text.replace(old_probe, new_probe, 1)
+          emulator_path.write_text(emulator_text, encoding="utf-8")
           PY
           cargo fmt --manifest-path rust/Cargo.toml --all
       - name: Commit canonical source
@@ -63,6 +74,7 @@ jobs:
           git config user.name "MUKEI Startup Finalizer"
           git config user.email "actions@users.noreply.github.com"
           git add \
+            .github/workflows/android-emulator-smoke.yml \
             qml/architecture/AppCoordinator.qml \
             qml/stores/LifecycleStore.qml \
             qml/screens/SafeModeScreen.qml \
