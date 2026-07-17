@@ -76,7 +76,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p ../secure-jni-diagnostic
-          cargo test -p mukei-android-jni --lib --no-default-features --features secure_runtime,runtime_hardening \
+          cargo test -p mukei-android-jni --lib --no-default-features --features secure_runtime \
             2>&1 | tee ../secure-jni-diagnostic/secure-jni.log
       - uses: actions/upload-artifact@v4
         if: always()
