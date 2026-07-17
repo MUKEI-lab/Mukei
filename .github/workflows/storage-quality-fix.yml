@@ -117,28 +117,12 @@ jobs:
               download_path = Path('rust/crates/mukei-core/src/application_runtime/models_download.rs')
               before = download_path.read_text(encoding='utf-8')
               download = before
-              old = lines(
-                  '        #[cfg(not(feature = "network"))]',
-                  '        {',
-                  '            return CommandAcknowledgementV2::rejected(',
-                  '                Some(&command.envelope),',
-                  '                RejectionReason::CapabilityUnavailable,',
-                  '            );',
-                  '        }',
-              )
-              new = lines(
-                  '        #[cfg(not(feature = "network"))]',
-                  '        {',
-                  '            CommandAcknowledgementV2::rejected(',
-                  '                Some(&command.envelope),',
-                  '                RejectionReason::CapabilityUnavailable,',
-                  '            )',
-                  '        }',
-              )
-              if old in download:
-                  download = download.replace(old, new, 1)
-              elif new not in download:
-                  raise RuntimeError('models_download return marker not found')
+              allow = '    #[allow(clippy::needless_return)]\n'
+              marker = '    fn download_model(&self, command: &ValidatedCommand) -> CommandAcknowledgementV2 {'
+              if allow + marker not in download:
+                  if marker not in download:
+                      raise RuntimeError('models_download function marker not found')
+                  download = download.replace(marker, allow + marker, 1)
               save(download_path, before, download)
 
               retriever_path = Path('rust/crates/mukei-core/src/rag/retriever.rs')
@@ -242,16 +226,23 @@ jobs:
               rust/crates/mukei-core/src/storage/import_commit_repository.rs
           } | sort -u > ci-storage-quality-logs/stage-files.txt
       - name: Format working tree
+        id: format
         if: steps.patch.outputs.patch_ok == 'true'
+        shell: bash
         working-directory: rust
-        run: cargo fmt --all
+        run: |
+          set +e
+          cargo fmt --all > ../ci-storage-quality-logs/format.log 2>&1
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
       - name: Stage only branch-owned Rust changes
-        if: steps.patch.outputs.patch_ok == 'true'
+        if: steps.patch.outputs.patch_ok == 'true' && steps.format.outputs.code == '0'
         run: |
           git add --pathspec-from-file=ci-storage-quality-logs/stage-files.txt
           git diff --cached --check
       - name: Run Cargo check
-        if: steps.patch.outputs.patch_ok == 'true'
+        if: steps.patch.outputs.patch_ok == 'true' && steps.format.outputs.code == '0'
         shell: bash
         working-directory: rust
         run: |
@@ -259,7 +250,7 @@ jobs:
           cargo check -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets \
             2>&1 | tee ../ci-storage-quality-logs/check.log
       - name: Run Cargo tests
-        if: steps.patch.outputs.patch_ok == 'true'
+        if: steps.patch.outputs.patch_ok == 'true' && steps.format.outputs.code == '0'
         shell: bash
         working-directory: rust
         run: |
@@ -267,7 +258,7 @@ jobs:
           cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets \
             2>&1 | tee ../ci-storage-quality-logs/test.log
       - name: Run Clippy
-        if: steps.patch.outputs.patch_ok == 'true'
+        if: steps.patch.outputs.patch_ok == 'true' && steps.format.outputs.code == '0'
         shell: bash
         working-directory: rust
         run: |
@@ -282,8 +273,10 @@ jobs:
           path: ci-storage-quality-logs
           if-no-files-found: error
           retention-days: 7
-      - name: Enforce patch result
-        run: test '${{ steps.patch.outputs.patch_ok }}' = 'true'
+      - name: Enforce patch and format result
+        run: |
+          test '${{ steps.patch.outputs.patch_ok }}' = 'true'
+          test '${{ steps.format.outputs.code }}' = '0'
       - name: Commit verified quality fixes
         run: |
           git config user.name "mukei-storage-bot"
