@@ -38,7 +38,6 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          import re
 
           path = Path('rust/crates/mukei-core/src/storage/migrations.rs')
           source = path.read_text(encoding='utf-8')
@@ -88,8 +87,7 @@ jobs:
               output.write(f'changed={str(changed).lower()}\n')
       - name: Format migration module
         if: steps.patch.outputs.changed == 'true'
-        working-directory: rust
-        run: cargo fmt --all
+        run: rustfmt --edition 2021 rust/crates/mukei-core/src/storage/migrations.rs
       - name: Verify embedded migration contract
         working-directory: rust
         run: cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite --test universal_storage_embedded_migrations -- --nocapture
