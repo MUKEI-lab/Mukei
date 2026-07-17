@@ -16,6 +16,7 @@ pub use tokio;
 
 // Public, platform-neutral contracts.
 #[cfg(feature = "tokio")]
+#[allow(missing_docs)]
 pub mod application_runtime;
 pub mod boundary;
 pub mod error;
