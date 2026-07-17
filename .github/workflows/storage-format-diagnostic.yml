@@ -1,0 +1,59 @@
+name: storage-format-diagnostic
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - .github/workflows/storage-format-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+      - name: Fetch Kotlin comparison ref
+        run: git fetch origin Kotlin:refs/remotes/origin/Kotlin
+      - name: Install Rust 1.82 rustfmt
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.82.0
+          components: rustfmt
+      - name: Capture formatter file sets
+        run: |
+          mkdir -p ci-format-diagnostic
+          cd rust
+          cargo fmt -p mukei-core
+          cd ..
+          git diff --name-only -- '*.rs' | sort -u > ci-format-diagnostic/formatted-files.txt
+          git diff --name-only origin/Kotlin...HEAD -- '*.rs' | sort -u > ci-format-diagnostic/branch-owned-files.txt
+          comm -23 ci-format-diagnostic/formatted-files.txt ci-format-diagnostic/branch-owned-files.txt > ci-format-diagnostic/unexpected-files.txt
+          git diff --stat > ci-format-diagnostic/diff-stat.txt
+      - name: Upload diagnostic artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-format-diagnostic-${{ github.sha }}
+          path: ci-format-diagnostic
+          if-no-files-found: error
+          retention-days: 7
+      - name: Publish status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              context: 'storage-format-diagnostic',
+              description: 'Rustfmt ownership diagnostics captured',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
