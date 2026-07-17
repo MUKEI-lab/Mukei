@@ -92,3 +92,41 @@ jobs:
           path: ${{ runner.temp }}/rag.log
           if-no-files-found: warn
           retention-days: 7
+
+  native-inference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.86.0
+      - name: Install native inference build dependencies
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y clang cmake ninja-build pkg-config libssl-dev perl make
+      - name: Build host inference capsule
+        run: |
+          set -euo pipefail
+          cmake -S rust/llama-cpp-prebuilt \
+            -B build/llama-host \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMUKEI_LLAMA_FORCE_REBUILD=ON
+          cmake --build build/llama-host --target mukei_llama_native_smoke
+          ctest --test-dir build/llama-host --output-on-failure
+      - name: Check native inference adapter
+        working-directory: rust
+        shell: bash
+        env:
+          MUKEI_LLAMA_NATIVE_LIB_DIR: ${{ github.workspace }}/rust/llama-cpp-prebuilt/prebuilt/host
+        run: |
+          set -o pipefail
+          cargo check -p mukei-android-jni \
+            --no-default-features \
+            --features native_inference \
+            2>&1 | tee "$RUNNER_TEMP/native-inference.log"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-inference-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-inference.log
+          if-no-files-found: warn
+          retention-days: 7
