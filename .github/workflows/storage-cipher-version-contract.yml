@@ -1,0 +1,132 @@
+name: storage-cipher-version-contract
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - .github/workflows/storage-cipher-version-contract.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  statuses: write
+
+env:
+  CARGO_TERM_COLOR: never
+  RUST_BACKTRACE: 1
+  RUSTFLAGS: -D warnings
+
+jobs:
+  patch-verify-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+      - name: Install Rust 1.82
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.82.0
+          components: clippy,rustfmt
+      - name: Make object store authoritative for encryption version
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if new in text:
+                  return text
+              if old not in text:
+                  raise SystemExit(f'missing marker: {label}')
+              return text.replace(old, new, 1)
+
+          object_path = Path('rust/crates/mukei-core/src/storage/object_store.rs')
+          object_text = object_path.read_text(encoding='utf-8')
+          object_text = replace_once(
+              object_text,
+              '        Ok(Self { root, cipher })\n    }\n\n    /// Encrypt and atomically publish an immutable object.',
+              '        Ok(Self { root, cipher })\n    }\n\n    /// Encryption generation encoded into newly published object headers.\n    pub fn encryption_version(&self) -> u32 {\n        self.cipher.version()\n    }\n\n    /// Encrypt and atomically publish an immutable object.',
+              'object store encryption version accessor',
+          )
+          object_path.write_text(object_text, encoding='utf-8')
+
+          staged_path = Path('rust/crates/mukei-core/src/storage/staged_import.rs')
+          staged = staged_path.read_text(encoding='utf-8')
+          staged = staged.replace('    encryption_version: u32,\n', '', 1)
+          staged = staged.replace('        encryption_version: u32,\n', '', 1)
+          staged = replace_once(
+              staged,
+              '        if max_import_bytes == 0 || encryption_version == 0 {',
+              '        if max_import_bytes == 0 || object_store.encryption_version() == 0 {',
+              'constructor configuration check',
+          )
+          staged = staged.replace('            encryption_version,\n', '', 1)
+          staged = replace_once(
+              staged,
+              '                encryption_version: self.encryption_version,',
+              '                encryption_version: self.object_store.encryption_version(),',
+              'import commit encryption version',
+          )
+          staged = replace_once(
+              staged,
+              '            DEFAULT_MAX_STAGED_IMPORT_BYTES,\n            1,\n        )',
+              '            DEFAULT_MAX_STAGED_IMPORT_BYTES,\n        )',
+              'test service constructor',
+          )
+          staged_path.write_text(staged, encoding='utf-8')
+      - name: Format core
+        working-directory: rust
+        run: cargo fmt -p mukei-core
+      - name: Patch whitespace
+        run: git diff --check
+      - name: Cargo check
+        working-directory: rust
+        run: cargo check -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets
+      - name: Targeted storage tests
+        working-directory: rust
+        run: cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite staged_import -- --nocapture
+      - name: Full tests
+        working-directory: rust
+        run: cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets
+      - name: Clippy
+        working-directory: rust
+        run: cargo clippy -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings
+      - name: Commit verified version contract
+        run: |
+          git config user.name "mukei-storage-bot"
+          git config user.email "mukei-storage-bot@users.noreply.github.com"
+          git add rust/crates/mukei-core/src/storage/object_store.rs rust/crates/mukei-core/src/storage/staged_import.rs
+          git diff --cached --check
+          git commit -m "fix(storage): derive import encryption version from object store"
+          git push origin HEAD:temp/universal-storage-workspace-v0.1
+      - name: Publish success status
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              context: 'storage-cipher-version-contract',
+              description: 'Cipher version contract verified',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+      - name: Publish failure status
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'failure',
+              context: 'storage-cipher-version-contract',
+              description: 'Cipher version contract verification failed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
