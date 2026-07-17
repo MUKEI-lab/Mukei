@@ -73,14 +73,7 @@ impl<C: ObjectCipher> ImmutableObjectStore<C> {
 
         if final_path.exists() {
             self.verify_existing(&final_path, &digest, plaintext_size)?;
-            return Ok(StoredObject {
-                object_id: StorageObjectId::new(),
-                plaintext_sha256: digest,
-                plaintext_size,
-                encrypted_size: fs::metadata(&final_path)?.len(),
-                relative_path,
-                deduplicated: true,
-            });
+            return self.stored_object(digest, plaintext_size, relative_path, true);
         }
 
         let parent = final_path
@@ -89,15 +82,20 @@ impl<C: ObjectCipher> ImmutableObjectStore<C> {
         fs::create_dir_all(parent)?;
         sync_directory(parent)?;
 
-        let associated_data = associated_data(&digest, plaintext_size, self.cipher.version());
+        let version = self.cipher.version();
+        let associated_data = associated_data(&digest, plaintext_size, version);
         let ciphertext = self
             .cipher
             .seal(plaintext, &associated_data)
             .map_err(ObjectStoreError::Encryption)?;
-        let encoded = encode_object(self.cipher.version(), &digest, plaintext_size, &ciphertext);
-        let temporary_path = parent.join(format!(".{}.{}.tmp", hex_digest(&digest), uuid::Uuid::new_v4()));
+        let encoded = encode_object(version, &digest, plaintext_size, &ciphertext);
+        let temporary_path = parent.join(format!(
+            ".{}.{}.tmp",
+            hex_digest(&digest),
+            uuid::Uuid::new_v4()
+        ));
 
-        let write_result = (|| -> Result<(), ObjectStoreError> {
+        let write_result = (|| -> Result<bool, ObjectStoreError> {
             let mut file = OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -106,17 +104,18 @@ impl<C: ObjectCipher> ImmutableObjectStore<C> {
             file.sync_all()?;
             drop(file);
 
-            match fs::rename(&temporary_path, &final_path) {
+            match publish_without_replace(&temporary_path, &final_path) {
                 Ok(()) => {
                     sync_directory(parent)?;
-                    Ok(())
+                    Ok(false)
                 }
-                Err(error) if final_path.exists() => {
-                    // A racing writer won. Never replace it: verify its full
-                    // plaintext identity before treating this write as dedup.
-                    let _ = fs::remove_file(&temporary_path);
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // A racing writer won. The destination was never replaced;
+                    // verify the winner before accepting this as deduplication.
+                    fs::remove_file(&temporary_path)?;
                     self.verify_existing(&final_path, &digest, plaintext_size)
-                        .map_err(|_| ObjectStoreError::CorruptDeduplicatedObject)
+                        .map_err(|_| ObjectStoreError::CorruptDeduplicatedObject)?;
+                    Ok(true)
                 }
                 Err(error) => Err(ObjectStoreError::Io(error)),
             }
@@ -125,16 +124,8 @@ impl<C: ObjectCipher> ImmutableObjectStore<C> {
         if write_result.is_err() {
             let _ = fs::remove_file(&temporary_path);
         }
-        write_result?;
-
-        Ok(StoredObject {
-            object_id: StorageObjectId::new(),
-            plaintext_sha256: digest,
-            plaintext_size,
-            encrypted_size: fs::metadata(&final_path)?.len(),
-            relative_path,
-            deduplicated: false,
-        })
+        let deduplicated = write_result?;
+        self.stored_object(digest, plaintext_size, relative_path, deduplicated)
     }
 
     pub fn read_verified(&self, object: &StoredObject) -> Result<Vec<u8>, ObjectStoreError> {
@@ -149,6 +140,24 @@ impl<C: ObjectCipher> ImmutableObjectStore<C> {
             .map_err(ObjectStoreError::Decryption)?;
         verify_plaintext(&plaintext, &digest, size)?;
         Ok(plaintext)
+    }
+
+    fn stored_object(
+        &self,
+        digest: [u8; SHA256_LEN],
+        plaintext_size: u64,
+        relative_path: PathBuf,
+        deduplicated: bool,
+    ) -> Result<StoredObject, ObjectStoreError> {
+        let encrypted_size = fs::metadata(self.root.join(&relative_path))?.len();
+        Ok(StoredObject {
+            object_id: StorageObjectId::new(),
+            plaintext_sha256: digest,
+            plaintext_size,
+            encrypted_size,
+            relative_path,
+            deduplicated,
+        })
     }
 
     fn verify_existing(
@@ -169,9 +178,20 @@ impl<C: ObjectCipher> ImmutableObjectStore<C> {
     }
 }
 
+/// Publish a fully-synced temporary object without ever replacing an existing
+/// destination. `rename` is intentionally not used because POSIX rename may
+/// atomically overwrite the winner of a concurrent publication race.
+fn publish_without_replace(temporary_path: &Path, final_path: &Path) -> std::io::Result<()> {
+    fs::hard_link(temporary_path, final_path)?;
+    fs::remove_file(temporary_path)?;
+    Ok(())
+}
+
 fn object_relative_path(digest: &[u8; SHA256_LEN], size: u64) -> PathBuf {
     let hex = hex_digest(digest);
-    PathBuf::from(&hex[0..2]).join(&hex[2..4]).join(format!("{hex}-{size}.mobj"))
+    PathBuf::from(&hex[0..2])
+        .join(&hex[2..4])
+        .join(format!("{hex}-{size}.mobj"))
 }
 
 fn associated_data(digest: &[u8; SHA256_LEN], size: u64, version: u32) -> Vec<u8> {
@@ -279,12 +299,28 @@ mod tests {
         let first = store.put(plaintext).unwrap();
         assert!(!first.deduplicated);
         let bytes_on_disk = fs::read(directory.path().join(&first.relative_path)).unwrap();
-        assert!(!bytes_on_disk.windows(plaintext.len()).any(|window| window == plaintext));
+        assert!(!bytes_on_disk
+            .windows(plaintext.len())
+            .any(|window| window == plaintext));
         assert_eq!(store.read_verified(&first).unwrap(), plaintext);
 
         let second = store.put(plaintext).unwrap();
         assert!(second.deduplicated);
         assert_eq!(first.relative_path, second.relative_path);
+    }
+
+    #[test]
+    fn no_replace_publication_preserves_existing_destination() {
+        let directory = tempfile::tempdir().unwrap();
+        let temporary = directory.path().join("temporary");
+        let destination = directory.path().join("destination");
+        fs::write(&temporary, b"new").unwrap();
+        fs::write(&destination, b"winner").unwrap();
+
+        let error = publish_without_replace(&temporary, &destination).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&destination).unwrap(), b"winner");
+        assert_eq!(fs::read(&temporary).unwrap(), b"new");
     }
 
     #[test]
