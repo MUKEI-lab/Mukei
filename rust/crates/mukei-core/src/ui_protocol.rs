@@ -13,7 +13,7 @@ use serde_json::Value;
 /// Current incompatible protocol generation.
 pub const PROTOCOL_MAJOR: u16 = 2;
 /// Current backward-compatible protocol generation.
-pub const PROTOCOL_MINOR: u16 = 0;
+pub const PROTOCOL_MINOR: u16 = 1;
 /// Oldest peer major accepted by this implementation.
 pub const MIN_SUPPORTED_PEER_MAJOR: u16 = 2;
 /// Maximum serialized command envelope accepted by a native transport.
@@ -223,6 +223,8 @@ pub enum CommandType {
     DocumentRevoke,
     /// Retry document ingestion.
     DocumentRetryIngestion,
+    /// Import a selected Android document into the active chat workspace.
+    StorageImportFile,
     /// Persist one product setting.
     SettingsUpdate,
     /// Resume an interrupted response.
@@ -246,6 +248,7 @@ impl CommandType {
             "document.grant" => Some(Self::DocumentGrant),
             "document.revoke" => Some(Self::DocumentRevoke),
             "document.retry_ingestion" => Some(Self::DocumentRetryIngestion),
+            "storage.import_file" => Some(Self::StorageImportFile),
             "settings.update" => Some(Self::SettingsUpdate),
             "recovery.resume" => Some(Self::RecoveryResume),
             "recovery.regenerate" => Some(Self::RecoveryRegenerate),
@@ -267,6 +270,7 @@ impl CommandType {
             Self::DocumentGrant => "document.grant",
             Self::DocumentRevoke => "document.revoke",
             Self::DocumentRetryIngestion => "document.retry_ingestion",
+            Self::StorageImportFile => "storage.import_file",
             Self::SettingsUpdate => "settings.update",
             Self::RecoveryResume => "recovery.resume",
             Self::RecoveryRegenerate => "recovery.regenerate",
@@ -283,6 +287,7 @@ impl CommandType {
                 | Self::DocumentGrant
                 | Self::DocumentRevoke
                 | Self::DocumentRetryIngestion
+                | Self::StorageImportFile
                 | Self::RecoveryResume
                 | Self::RecoveryRegenerate
         )
@@ -336,6 +341,17 @@ pub struct DocumentGrantPayload {
     pub mime_type: String,
 }
 
+/// Android document selected for encrypted workspace import.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageImportPayload {
+    /// Opaque `content://` URI handled only by the Android document port.
+    pub target: String,
+    /// User-visible filename validated again by storage admission policy.
+    pub display_name: String,
+    /// MIME type reported by Android.
+    pub mime_type: String,
+}
+
 /// Payload containing one document identity.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentPayload {
@@ -369,6 +385,8 @@ pub enum ValidatedCommandPayload {
     DocumentGrant(DocumentGrantPayload),
     /// Document identity.
     Document(DocumentPayload),
+    /// Selected document destined for encrypted workspace storage.
+    StorageImport(StorageImportPayload),
     /// Setting mutation.
     SettingUpdate(SettingUpdatePayload),
 }
@@ -460,8 +478,12 @@ impl CommandAcknowledgementV2 {
     pub fn rejected(envelope: Option<&CommandEnvelopeV2>, reason: RejectionReason) -> Self {
         Self {
             protocol_version: ProtocolVersion::CURRENT,
-            command_id: envelope.map(|value| value.command_id.clone()).unwrap_or_default(),
-            request_id: envelope.map(|value| value.request_id.clone()).unwrap_or_default(),
+            command_id: envelope
+                .map(|value| value.command_id.clone())
+                .unwrap_or_default(),
+            request_id: envelope
+                .map(|value| value.request_id.clone())
+                .unwrap_or_default(),
             correlation_id: envelope
                 .map(|value| value.correlation_id.clone())
                 .unwrap_or_default(),
@@ -628,9 +650,9 @@ pub fn valid_protocol_id(value: &str, max_len: usize) -> bool {
     len > 0
         && len <= max_len
         && value == value.trim()
-        && value
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | ':' | '/'))
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | ':' | '/')
+        })
 }
 
 fn optional_protocol_id_valid(value: Option<&str>) -> bool {
@@ -673,7 +695,9 @@ fn validate_scope_for_command(
     let Some(scope) = scope else {
         return if matches!(
             command_type,
-            CommandType::RecoveryResume | CommandType::RecoveryRegenerate
+            CommandType::RecoveryResume
+                | CommandType::RecoveryRegenerate
+                | CommandType::StorageImportFile
         ) {
             Err(RejectionReason::StaleScope)
         } else {
@@ -731,6 +755,11 @@ fn validate_scope_for_command(
                     .as_deref()
                     .is_some_and(|identity| identity != value.model_id)
             {
+                return Err(RejectionReason::StaleScope);
+            }
+        }
+        (CommandType::StorageImportFile, ValidatedCommandPayload::StorageImport(_)) => {
+            if scope.conversation_id.is_none() || has_model || has_document {
                 return Err(RejectionReason::StaleScope);
             }
         }
@@ -845,6 +874,19 @@ pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand,
             }
             ValidatedCommandPayload::DocumentGrant(value)
         }
+        CommandType::StorageImportFile => {
+            let value: StorageImportPayload = serde_json::from_value(envelope.payload.clone())
+                .map_err(|_| RejectionReason::InvalidPayload)?;
+            if !non_empty_bounded(&value.target, 8192)
+                || !value.target.starts_with("content://")
+                || value.target.chars().any(char::is_control)
+                || !non_empty_bounded(&value.display_name, 512)
+                || !non_empty_bounded(&value.mime_type, 256)
+            {
+                return Err(RejectionReason::InvalidPayload);
+            }
+            ValidatedCommandPayload::StorageImport(value)
+        }
         CommandType::DocumentRevoke | CommandType::DocumentRetryIngestion => {
             let value: DocumentPayload = serde_json::from_value(envelope.payload.clone())
                 .map_err(|_| RejectionReason::InvalidPayload)?;
@@ -918,7 +960,9 @@ mod tests {
         assert!(!snapshot
             .capabilities
             .iter()
-            .any(|value| value.contains("legacy") || value.contains("qml") || value.contains("qt")));
+            .any(|value| value.contains("legacy")
+                || value.contains("qml")
+                || value.contains("qt")));
     }
 
     #[test]

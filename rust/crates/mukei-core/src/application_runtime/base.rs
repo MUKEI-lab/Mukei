@@ -36,6 +36,8 @@ impl MukeiRuntime {
             agent_loop: RwLock::new(None),
             projection_store: RwLock::new(None),
             rag_service: RwLock::new(None),
+            #[cfg(feature = "rusqlite")]
+            storage_importer: RwLock::new(services.storage_importer),
             remote_tool_secrets: Mutex::new(None),
             remote_policy: RwLock::new(crate::tools::RemoteFeaturePolicy::LocalOnly),
             closed: AtomicBool::new(false),
@@ -91,6 +93,15 @@ impl MukeiRuntime {
         }
         #[cfg(feature = "network")]
         commands.push(CommandType::ModelDownload);
+        #[cfg(feature = "rusqlite")]
+        if self
+            .storage_importer
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some()
+        {
+            commands.push(CommandType::StorageImportFile);
+        }
         ProtocolCapabilitySnapshot::for_commands(&commands)
             .with_transport(CAP_EVENT_GAP_REPORTING)
             .with_transport(CAP_PLATFORM_REQUEST_BROKER)

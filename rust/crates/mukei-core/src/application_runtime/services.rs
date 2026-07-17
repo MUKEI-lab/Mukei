@@ -48,6 +48,18 @@ impl MukeiRuntime {
         }
     }
 
+    /// Attach the encrypted staged-file importer before capability negotiation.
+    #[cfg(feature = "rusqlite")]
+    pub fn attach_storage_importer(
+        &self,
+        importer: Arc<dyn crate::storage::StagedFileImporter>,
+    ) {
+        *self
+            .storage_importer
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(importer);
+    }
+
     /// Install transient, already-unwrapped provider credentials.
     pub fn configure_remote_tools(
         &self,

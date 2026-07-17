@@ -113,6 +113,9 @@ pub struct RuntimeServices {
     /// Production inference backend factory. Absence is represented truthfully
     /// and causes model activation/chat commands to fail closed.
     pub backend_factory: Option<Arc<dyn InferenceBackendFactory>>,
+    /// Encrypted staged-file importer. Absence keeps storage import capability hidden.
+    #[cfg(feature = "rusqlite")]
+    pub storage_importer: Option<Arc<dyn crate::storage::StagedFileImporter>>,
 }
 
 /// Runtime lifecycle state.

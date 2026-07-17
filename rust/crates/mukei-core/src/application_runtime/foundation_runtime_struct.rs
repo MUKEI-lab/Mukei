@@ -16,6 +16,8 @@ pub struct MukeiRuntime {
     agent_loop: RwLock<Option<Arc<AgentLoop>>>,
     projection_store: RwLock<Option<Arc<dyn RuntimeProjectionStore>>>,
     rag_service: RwLock<Option<Arc<dyn RuntimeRagService>>>,
+    #[cfg(feature = "rusqlite")]
+    storage_importer: RwLock<Option<Arc<dyn crate::storage::StagedFileImporter>>>,
     remote_tool_secrets: Mutex<Option<RemoteToolSecrets>>,
     remote_policy: RwLock<crate::tools::RemoteFeaturePolicy>,
     closed: AtomicBool,

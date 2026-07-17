@@ -65,6 +65,7 @@ impl CommandRouter {
             CommandType::DocumentGrant => runtime.grant_document(command),
             CommandType::DocumentRevoke => runtime.revoke_document(command),
             CommandType::DocumentRetryIngestion => runtime.retry_document_ingestion(command),
+            CommandType::StorageImportFile => runtime.import_storage_file(command),
             CommandType::SettingsUpdate => runtime.update_setting(command),
             CommandType::RecoveryResume => runtime.recover_chat(command, false),
             CommandType::RecoveryRegenerate => runtime.recover_chat(command, true),

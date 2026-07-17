@@ -51,7 +51,10 @@ fn import_requires_conversation_scope() {
 fn import_rejects_non_content_targets() {
     let mut value = command();
     value.payload["target"] = json!("/sdcard/Download/notes.txt");
-    assert_eq!(validate_command(value), Err(RejectionReason::InvalidPayload));
+    assert_eq!(
+        validate_command(value),
+        Err(RejectionReason::InvalidPayload)
+    );
 }
 
 #[test]
