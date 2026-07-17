@@ -38,111 +38,115 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.82.0
-      - name: Apply exact baseline compile fixes
+      - name: Apply idempotent Cargo blocker fixes
         id: patch
         shell: python
         run: |
           from pathlib import Path
           import os
+          import re
+          import traceback
 
+          log_dir = Path('ci-baseline-compile-logs')
+          log_dir.mkdir(exist_ok=True)
           changed_files = []
 
-          def write_if_changed(path: Path, before: str, after: str) -> None:
+          def save(path: Path, before: str, after: str) -> None:
               if before != after:
                   path.write_text(after, encoding='utf-8')
                   changed_files.append(str(path))
 
-          types_path = Path('rust/crates/mukei-core/src/application_runtime/foundation_types.rs')
-          before = types_path.read_text(encoding='utf-8')
-          types = before
-          old_header = '''//! Platform-neutral application runtime owned by the native process.
-          //!
-          //! Protocol V2 commands are validated once, routed to feature handlers, tracked
-          //! as cancellable operations, projected through ordered events, and exposed via
-          //! authoritative snapshots. Android-only services are accessed through the
-          //! pull-based platform broker in [`crate::platform`].'''
-          new_header = '''// Platform-neutral application runtime owned by the native process.
-          //
-          // Protocol V2 commands are validated once, routed to feature handlers, tracked
-          // as cancellable operations, projected through ordered events, and exposed via
-          // authoritative snapshots. Android-only services are accessed through the
-          // pull-based platform broker in `crate::platform`.'''
-          if old_header in types:
-              types = types.replace(old_header, new_header, 1)
-          elif new_header not in types:
-              raise SystemExit('Refusing to patch: foundation_types header marker not found')
+          try:
+              types_path = Path('rust/crates/mukei-core/src/application_runtime/foundation_types.rs')
+              before = types_path.read_text(encoding='utf-8')
+              types = before
+              types, count = re.subn(
+                  r'\A//! Platform-neutral application runtime owned by the native process\.\n//!\n//! Protocol V2 commands are validated once, routed to feature handlers, tracked\n//! as cancellable operations, projected through ordered events, and exposed via\n//! authoritative snapshots\. Android-only services are accessed through the\n//! pull-based platform broker in \[`crate::platform`\]\.\n',
+                  '// Platform-neutral application runtime owned by the native process.\n//\n// Protocol V2 commands are validated once, routed to feature handlers, tracked\n// as cancellable operations, projected through ordered events, and exposed via\n// authoritative snapshots. Android-only services are accessed through the\n// pull-based platform broker in `crate::platform`.\n',
+                  types,
+                  count=1,
+              )
+              if count == 0 and not types.startswith('// Platform-neutral application runtime'):
+                  raise RuntimeError('foundation_types header shape is unexpected')
 
-          old_import = 'validate_command, AcknowledgementStatus, CommandAcknowledgementV2, CommandEnvelopeV2,'
-          new_import = 'validate_command, CommandAcknowledgementV2, CommandEnvelopeV2,'
-          if old_import in types:
-              types = types.replace(old_import, new_import, 1)
-          elif new_import not in types:
-              raise SystemExit('Refusing to patch: protocol import marker not found')
+              types = types.replace(
+                  'validate_command, AcknowledgementStatus, CommandAcknowledgementV2, CommandEnvelopeV2,',
+                  'validate_command, CommandAcknowledgementV2, CommandEnvelopeV2,',
+                  1,
+              )
+              test_import = '#[cfg(test)]\nuse crate::ui_protocol::AcknowledgementStatus;\n'
+              if test_import not in types:
+                  match = re.search(r'use crate::ui_protocol::\{.*?\n\};\n', types, flags=re.S)
+                  if not match:
+                      raise RuntimeError('ui_protocol import block not found')
+                  insert_at = match.end()
+                  types = types[:insert_at] + test_import + types[insert_at:]
+              save(types_path, before, types)
 
-          test_import = '#[cfg(test)]\nuse crate::ui_protocol::AcknowledgementStatus;\n'
-          import_anchor = 'use crate::ui_protocol::{\n    validate_command, CommandAcknowledgementV2, CommandEnvelopeV2,'
-          if test_import not in types:
-              if import_anchor not in types:
-                  raise SystemExit('Refusing to patch: test import anchor not found')
-              close_anchor = '    ValidatedCommandPayload,\n};\n'
-              if close_anchor not in types:
-                  raise SystemExit('Refusing to patch: protocol import close marker not found')
-              types = types.replace(close_anchor, close_anchor + test_import, 1)
-          write_if_changed(types_path, before, types)
+              state_path = Path('rust/crates/mukei-core/src/application_runtime/foundation_state.rs')
+              before = state_path.read_text(encoding='utf-8')
+              state = before.replace(
+                  '.map_err(|error| MukeiError::DatabaseCorruption)?;',
+                  '.map_err(|_| MukeiError::DatabaseCorruption)?;',
+                  1,
+              )
+              state, removed = re.subn(
+                  r'\n    fn model\(&self, model_id: &str\) -> Option<ModelProjection> \{\n.*?\n    \}\n',
+                  '\n',
+                  state,
+                  count=1,
+                  flags=re.S,
+              )
+              if removed == 0 and 'fn model(&self, model_id: &str)' in state:
+                  raise RuntimeError('model accessor shape is unexpected')
+              save(state_path, before, state)
 
-          state_path = Path('rust/crates/mukei-core/src/application_runtime/foundation_state.rs')
-          before = state_path.read_text(encoding='utf-8')
-          state = before.replace(
-              '.map_err(|error| MukeiError::DatabaseCorruption)?;',
-              '.map_err(|_| MukeiError::DatabaseCorruption)?;',
-              1,
-          )
-          model_block = '''    fn model(&self, model_id: &str) -> Option<ModelProjection> {
-              self.models
-                  .read()
-                  .unwrap_or_else(|p| p.into_inner())
-                  .get(model_id)
-                  .cloned()
-          }
+              lib_path = Path('rust/crates/mukei-core/src/lib.rs')
+              before = lib_path.read_text(encoding='utf-8')
+              lib = before
+              if '#[allow(missing_docs)]\npub mod application_runtime;' not in lib:
+                  lib, count = re.subn(
+                      r'#\[cfg\(feature = "tokio"\)\]\npub mod application_runtime;',
+                      '#[cfg(feature = "tokio")]\n#[allow(missing_docs)]\npub mod application_runtime;',
+                      lib,
+                      count=1,
+                  )
+                  if count != 1:
+                      raise RuntimeError('application_runtime module declaration not found')
+              save(lib_path, before, lib)
 
-          '''
-          if model_block in state:
-              state = state.replace(model_block, '', 1)
-          elif 'fn model(&self, model_id: &str)' in state:
-              raise SystemExit('Refusing to patch: unexpected model accessor shape')
-          write_if_changed(state_path, before, state)
+              projection_path = Path('rust/crates/mukei-core/src/storage/runtime_projection.rs')
+              before = projection_path.read_text(encoding='utf-8')
+              projection = before.replace(
+                  'DatabasePool::open(directory.path().join("projection.db"))',
+                  'DatabasePool::open(&directory.path().join("projection.db"))',
+                  1,
+              )
+              if (
+                  'DatabasePool::open(directory.path().join("projection.db"))' in projection
+                  or 'DatabasePool::open(&directory.path().join("projection.db"))' not in projection
+              ):
+                  raise RuntimeError('runtime projection DatabasePool::open marker not resolved')
+              save(projection_path, before, projection)
 
-          lib_path = Path('rust/crates/mukei-core/src/lib.rs')
-          before = lib_path.read_text(encoding='utf-8')
-          lib = before
-          old_module = '#[cfg(feature = "tokio")]\npub mod application_runtime;'
-          new_module = '#[cfg(feature = "tokio")]\n#[allow(missing_docs)]\npub mod application_runtime;'
-          if old_module in lib:
-              lib = lib.replace(old_module, new_module, 1)
-          elif new_module not in lib:
-              raise SystemExit('Refusing to patch: application_runtime module marker not found')
-          write_if_changed(lib_path, before, lib)
-
-          projection_path = Path('rust/crates/mukei-core/src/storage/runtime_projection.rs')
-          before = projection_path.read_text(encoding='utf-8')
-          projection = before
-          old_open = 'DatabasePool::open(directory.path().join("projection.db"))'
-          new_open = 'DatabasePool::open(&directory.path().join("projection.db"))'
-          if old_open in projection:
-              projection = projection.replace(old_open, new_open, 1)
-          elif new_open not in projection:
-              raise SystemExit('Refusing to patch: runtime projection open marker not found')
-          write_if_changed(projection_path, before, projection)
+              (log_dir / 'patch-summary.txt').write_text(
+                  'changed=' + (','.join(changed_files) if changed_files else 'none') + '\n',
+                  encoding='utf-8',
+              )
+              patch_ok = True
+          except Exception:
+              patch_ok = False
+              (log_dir / 'patch-error.log').write_text(traceback.format_exc(), encoding='utf-8')
 
           with open(Path(os.environ['GITHUB_OUTPUT']), 'a', encoding='utf-8') as output:
+              output.write(f'patch_ok={str(patch_ok).lower()}\n')
               output.write(f'changed={str(bool(changed_files)).lower()}\n')
-          print('changed files:', ', '.join(changed_files) if changed_files else 'none')
       - name: Verify mukei-core compile
         id: verify
+        if: steps.patch.outputs.patch_ok == 'true'
         shell: bash
         run: |
           set +e
-          mkdir -p ci-baseline-compile-logs
           cd rust
           cargo check -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets \
             > ../ci-baseline-compile-logs/check.log 2>&1
@@ -158,8 +162,11 @@ jobs:
           path: ci-baseline-compile-logs
           if-no-files-found: error
           retention-days: 7
-      - name: Enforce compile result
-        run: test '${{ steps.verify.outputs.code }}' = '0'
+      - name: Enforce patch and compile result
+        shell: bash
+        run: |
+          test '${{ steps.patch.outputs.patch_ok }}' = 'true'
+          test '${{ steps.verify.outputs.code }}' = '0'
       - name: Commit verified compile fixes
         if: steps.patch.outputs.changed == 'true'
         run: |
@@ -191,12 +198,13 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const description = `patch=${{ steps.patch.outputs.patch_ok || '?' }}, check=${{ steps.verify.outputs.code || '?' }}`;
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: context.sha,
               state: 'failure',
               context: 'storage-baseline-compile-fix',
-              description: `Cargo check exit=${{ steps.verify.outputs.code || '?' }}`.slice(0, 140),
+              description: description.slice(0, 140),
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
