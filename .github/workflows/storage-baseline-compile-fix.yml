@@ -10,6 +10,7 @@ on:
       - rust/crates/mukei-core/src/application_runtime/foundation_types.rs
       - rust/crates/mukei-core/src/application_runtime/foundation_state.rs
       - rust/crates/mukei-core/src/storage/runtime_projection.rs
+      - rust/crates/mukei-core/src/ui_protocol.rs
   workflow_dispatch:
 
 concurrency:
@@ -129,6 +130,27 @@ jobs:
                   raise RuntimeError('runtime projection DatabasePool::open marker not resolved')
               save(projection_path, before, projection)
 
+              protocol_path = Path('rust/crates/mukei-core/src/ui_protocol.rs')
+              before = protocol_path.read_text(encoding='utf-8')
+              protocol = before
+              constant = 'pub const CAP_SCOPED_CHAT_OPERATIONS: &str = "scoped_chat_operations";'
+              if constant not in protocol:
+                  anchor = '/// Capability: command-correlated operation lifecycle events.\npub const CAP_OPERATION_LIFECYCLE_EVENTS: &str = "operation_lifecycle_events";\n'
+                  if anchor not in protocol:
+                      raise RuntimeError('protocol capability constant anchor not found')
+                  protocol = protocol.replace(
+                      anchor,
+                      anchor + '/// Capability: chat operations require explicit conversation, branch, and operation scope.\n' + constant + '\n',
+                      1,
+                  )
+              capability_entry = '                CAP_SCOPED_CHAT_OPERATIONS.into(),\n'
+              if capability_entry not in protocol:
+                  anchor = '                CAP_OPERATION_LIFECYCLE_EVENTS.into(),\n'
+                  if anchor not in protocol:
+                      raise RuntimeError('protocol capability vector anchor not found')
+                  protocol = protocol.replace(anchor, anchor + capability_entry, 1)
+              save(protocol_path, before, protocol)
+
               (log_dir / 'patch-summary.txt').write_text(
                   'changed=' + (','.join(changed_files) if changed_files else 'none') + '\n',
                   encoding='utf-8',
@@ -176,7 +198,8 @@ jobs:
             rust/crates/mukei-core/src/lib.rs \
             rust/crates/mukei-core/src/application_runtime/foundation_types.rs \
             rust/crates/mukei-core/src/application_runtime/foundation_state.rs \
-            rust/crates/mukei-core/src/storage/runtime_projection.rs
+            rust/crates/mukei-core/src/storage/runtime_projection.rs \
+            rust/crates/mukei-core/src/ui_protocol.rs
           git commit -m "fix(core): repair mukei-core Cargo blockers"
           git push origin HEAD:temp/universal-storage-workspace-v0.1
       - name: Publish success status
