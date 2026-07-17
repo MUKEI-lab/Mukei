@@ -1,0 +1,240 @@
+name: whole-codebase-production-audit
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - .github/workflows/whole-codebase-production-audit.yml
+  workflow_dispatch:
+
+concurrency:
+  group: whole-codebase-production-audit
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  statuses: write
+
+env:
+  CARGO_TERM_COLOR: never
+  RUST_BACKTRACE: 1
+
+jobs:
+  publish-pending:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'pending',
+              context: 'whole-codebase-production-audit',
+              description: 'Whole-codebase production audit running',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+
+  rust-workspace:
+    needs: publish-pending
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.82.0
+          components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+      - name: Full Rust workspace audit
+        working-directory: rust
+        shell: bash
+        run: |
+          set -u
+          mkdir -p ../audit-rust
+          failed=0
+          run_check() {
+            name="$1"
+            shift
+            echo "===== ${name} =====" | tee "../audit-rust/${name}.log"
+            set +e
+            "$@" 2>&1 | tee -a "../audit-rust/${name}.log"
+            rc=${PIPESTATUS[0]}
+            set -e
+            printf '%s=%s\n' "$name" "$rc" | tee -a ../audit-rust/results.txt
+            if [ "$rc" -ne 0 ]; then failed=1; fi
+          }
+          run_check fmt cargo fmt --all --check
+          run_check check cargo check --workspace --all-targets
+          run_check test cargo test --workspace --all-targets
+          run_check clippy cargo clippy --workspace --all-targets -- -D warnings
+          run_check core_all_features cargo check -p mukei-core --all-features --all-targets
+          run_check jni_all_features cargo check -p mukei-android-jni --all-features --all-targets
+          run_check docs cargo doc --workspace --no-deps
+          exit "$failed"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: whole-audit-rust-${{ github.sha }}
+          path: audit-rust
+          if-no-files-found: error
+          retention-days: 7
+
+  android-build:
+    needs: publish-pending
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+      - name: Android build, tests, lint and dependency report
+        shell: bash
+        run: |
+          set -u
+          mkdir -p audit-android
+          failed=0
+          run_gradle() {
+            name="$1"
+            shift
+            echo "===== ${name} =====" | tee "audit-android/${name}.log"
+            set +e
+            gradle -p android "$@" --stacktrace 2>&1 | tee -a "audit-android/${name}.log"
+            rc=${PIPESTATUS[0]}
+            set -e
+            printf '%s=%s\n' "$name" "$rc" | tee -a audit-android/results.txt
+            if [ "$rc" -ne 0 ]; then failed=1; fi
+          }
+          run_gradle compile :core:protocol:compileDebugKotlin :core:native:compileDebugKotlin :core:designsystem:compileDebugKotlin :app:compileDebugKotlin
+          run_gradle unit_tests :core:protocol:testDebugUnitTest :core:native:testDebugUnitTest :core:designsystem:testDebugUnitTest :app:testDebugUnitTest
+          run_gradle lint :app:lintDebug :app:lintRelease
+          run_gradle assemble_debug :app:assembleDebug
+          run_gradle assemble_release :app:assembleRelease
+          run_gradle assemble_offline :app:assembleOffline
+          run_gradle dependencies :app:dependencies
+          exit "$failed"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: whole-audit-android-${{ github.sha }}
+          path: audit-android
+          if-no-files-found: error
+          retention-days: 7
+
+  supply-chain:
+    needs: publish-pending
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+      - name: Rust dependency advisory audit
+        working-directory: rust
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ../audit-supply-chain
+          cargo install cargo-audit --locked 2>&1 | tee ../audit-supply-chain/install.log
+          cargo audit 2>&1 | tee ../audit-supply-chain/cargo-audit.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: whole-audit-supply-chain-${{ github.sha }}
+          path: audit-supply-chain
+          if-no-files-found: warn
+          retention-days: 7
+
+  static-risk-scan:
+    needs: publish-pending
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan production sources and CI contracts
+        shell: bash
+        run: |
+          set -u
+          mkdir -p audit-static
+          failed=0
+          {
+            echo '## TODO/FIXME/HACK markers'
+            git grep -n -E 'TODO|FIXME|HACK|XXX' -- ':!*.lock' ':!*.md' || true
+            echo
+            echo '## Rust unfinished macros'
+            git grep -n -E 'todo!\(|unimplemented!\(' -- 'rust/**/*.rs' || true
+            echo
+            echo '## Rust panic/unwrap/expect in non-test source'
+            git grep -n -E 'panic!\(|\.unwrap\(\)|\.expect\(' -- 'rust/crates/**/*.rs' | grep -v '/tests/' | grep -v '#\[cfg(test)\]' || true
+            echo
+            echo '## Unsafe declarations'
+            git grep -n -E '\bunsafe\b' -- 'rust/crates/**/*.rs' || true
+            echo
+            echo '## Android risky manifest settings'
+            git grep -n -E 'usesCleartextTraffic="true"|allowBackup="true"|debuggable="true"|android:exported="true"' -- 'android/**/AndroidManifest.xml' || true
+            echo
+            echo '## Stale CI crate references'
+            git grep -n -E 'mukei-bridge|mukei-ffi-shim' -- '.github/workflows/*.yml' || true
+          } | tee audit-static/findings.txt
+
+          if git grep -n -E 'todo!\(|unimplemented!\(' -- 'rust/crates/**/*.rs' > audit-static/unfinished.txt; then
+            failed=1
+          fi
+          if git grep -n -E 'usesCleartextTraffic="true"|allowBackup="true"|debuggable="true"' -- 'android/**/AndroidManifest.xml' > audit-static/risky-manifest.txt; then
+            failed=1
+          fi
+          if git grep -n -E 'mukei-bridge|mukei-ffi-shim' -- '.github/workflows/*.yml' > audit-static/stale-ci.txt; then
+            failed=1
+          fi
+          exit "$failed"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: whole-audit-static-${{ github.sha }}
+          path: audit-static
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-result:
+    if: always()
+    needs:
+      - rust-workspace
+      - android-build
+      - supply-chain
+      - static-risk-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const results = {
+              rust: '${{ needs.rust-workspace.result }}',
+              android: '${{ needs.android-build.result }}',
+              supply: '${{ needs.supply-chain.result }}',
+              static: '${{ needs.static-risk-scan.result }}'
+            };
+            const success = Object.values(results).every(value => value === 'success');
+            const description = success
+              ? 'Whole-codebase production audit passed'
+              : Object.entries(results).map(([key, value]) => `${key}=${value}`).join(', ').slice(0, 140);
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: success ? 'success' : 'failure',
+              context: 'whole-codebase-production-audit',
+              description,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+            if (!success) core.setFailed(description);
