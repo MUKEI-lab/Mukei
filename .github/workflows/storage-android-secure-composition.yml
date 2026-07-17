@@ -1,0 +1,708 @@
+name: storage-android-secure-composition
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - .github/workflows/storage-android-secure-composition.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  statuses: write
+
+env:
+  CARGO_TERM_COLOR: never
+  RUST_BACKTRACE: 1
+  RUSTFLAGS: -D warnings
+
+jobs:
+  patch-verify-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.82.0
+          components: clippy,rustfmt
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Apply secure Android storage composition
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if new in text:
+                  return text
+              if old not in text:
+                  raise SystemExit(f"missing patch marker: {label}")
+              return text.replace(old, new, 1)
+
+          workspace_path = Path('rust/Cargo.toml')
+          workspace = workspace_path.read_text(encoding='utf-8')
+          workspace = replace_once(
+              workspace,
+              'subtle = "2.5"\n',
+              'subtle = "2.5"\naes-gcm = "0.10.3"\n',
+              'workspace aes-gcm dependency',
+          )
+          workspace_path.write_text(workspace, encoding='utf-8')
+
+          core_manifest_path = Path('rust/crates/mukei-core/Cargo.toml')
+          core_manifest = core_manifest_path.read_text(encoding='utf-8')
+          core_manifest = replace_once(
+              core_manifest,
+              'subtle       = { workspace = true }\n',
+              'subtle       = { workspace = true }\naes-gcm      = { workspace = true }\ngetrandom    = { workspace = true }\n',
+              'core crypto dependencies',
+          )
+          core_manifest_path.write_text(core_manifest, encoding='utf-8')
+
+          object_path = Path('rust/crates/mukei-core/src/storage/object_store.rs')
+          object_text = object_path.read_text(encoding='utf-8')
+          object_text = replace_once(
+              object_text,
+              'use crate::storage::universal::StorageObjectId;\nuse sha2::{Digest, Sha256};',
+              'use crate::storage::universal::StorageObjectId;\nuse aes_gcm::{\n    aead::{Aead, Payload},\n    Aes256Gcm, KeyInit, Nonce,\n};\nuse sha2::{Digest, Sha256};',
+              'object-store aes imports',
+          )
+          object_text = replace_once(
+              object_text,
+              'use std::path::{Path, PathBuf};\n',
+              'use std::path::{Path, PathBuf};\nuse zeroize::{Zeroize, Zeroizing};\n',
+              'object-store zeroize import',
+          )
+          object_text = replace_once(
+              object_text,
+              'const SHA256_LEN: usize = 32;\n',
+              'const SHA256_LEN: usize = 32;\nconst AES_GCM_NONCE_LEN: usize = 12;\nconst AES_GCM_TAG_LEN: usize = 16;\nconst AES_GCM_CIPHER_VERSION: u32 = 1;\n',
+              'object-store aes constants',
+          )
+          cipher_block = '''
+/// AES-256-GCM object cipher backed by one process-resident data-encryption key.
+///
+/// Android production boot unwraps this key through Android Keystore and passes
+/// the raw bytes across JNI exactly once. The key is zeroized when the runtime
+/// drops; every object receives a fresh random 96-bit nonce and authenticates
+/// the immutable object's digest/size/version metadata as associated data.
+pub struct Aes256GcmObjectCipher {
+    key: Zeroizing<[u8; 32]>,
+}
+
+impl Aes256GcmObjectCipher {
+    pub fn new(key: [u8; 32]) -> Self {
+        Self {
+            key: Zeroizing::new(key),
+        }
+    }
+
+    fn cipher(&self) -> Result<Aes256Gcm, String> {
+        Aes256Gcm::new_from_slice(&*self.key)
+            .map_err(|_| "invalid AES-256-GCM key length".to_string())
+    }
+}
+
+impl ObjectCipher for Aes256GcmObjectCipher {
+    fn version(&self) -> u32 {
+        AES_GCM_CIPHER_VERSION
+    }
+
+    fn seal(&self, plaintext: &[u8], associated_data: &[u8]) -> Result<Vec<u8>, String> {
+        let mut nonce_bytes = [0_u8; AES_GCM_NONCE_LEN];
+        getrandom::getrandom(&mut nonce_bytes)
+            .map_err(|_| "secure random nonce generation failed".to_string())?;
+        let ciphertext = self
+            .cipher()?
+            .encrypt(
+                Nonce::from_slice(&nonce_bytes),
+                Payload {
+                    msg: plaintext,
+                    aad: associated_data,
+                },
+            )
+            .map_err(|_| "AES-256-GCM encryption failed".to_string())?;
+        let mut sealed = Vec::with_capacity(AES_GCM_NONCE_LEN + ciphertext.len());
+        sealed.extend_from_slice(&nonce_bytes);
+        sealed.extend_from_slice(&ciphertext);
+        nonce_bytes.zeroize();
+        Ok(sealed)
+    }
+
+    fn open(&self, ciphertext: &[u8], associated_data: &[u8]) -> Result<Vec<u8>, String> {
+        if ciphertext.len() < AES_GCM_NONCE_LEN + AES_GCM_TAG_LEN {
+            return Err("AES-256-GCM envelope is truncated".to_string());
+        }
+        let (nonce, encrypted) = ciphertext.split_at(AES_GCM_NONCE_LEN);
+        self.cipher()?
+            .decrypt(
+                Nonce::from_slice(nonce),
+                Payload {
+                    msg: encrypted,
+                    aad: associated_data,
+                },
+            )
+            .map_err(|_| "AES-256-GCM authentication failed".to_string())
+    }
+}
+
+'''
+          object_text = replace_once(
+              object_text,
+              'pub struct ImmutableObjectStore<C> {\n',
+              cipher_block + 'pub struct ImmutableObjectStore<C> {\n',
+              'production object cipher',
+          )
+          cipher_tests = '''    #[test]
+    fn aes_gcm_cipher_authenticates_ciphertext_and_associated_data() {
+        let cipher = Aes256GcmObjectCipher::new([0x5a; 32]);
+        let plaintext = b"workspace secret";
+        let aad = b"object-metadata";
+        let sealed = cipher.seal(plaintext, aad).unwrap();
+
+        assert_ne!(sealed.as_slice(), plaintext);
+        assert_eq!(cipher.open(&sealed, aad).unwrap(), plaintext);
+
+        let mut tampered = sealed.clone();
+        *tampered.last_mut().unwrap() ^= 0x01;
+        assert!(cipher.open(&tampered, aad).is_err());
+        assert!(cipher.open(&sealed, b"different-metadata").is_err());
+    }
+
+    #[test]
+    fn aes_gcm_cipher_uses_fresh_nonce_per_publication() {
+        let cipher = Aes256GcmObjectCipher::new([0x33; 32]);
+        let first = cipher.seal(b"same", b"same-aad").unwrap();
+        let second = cipher.seal(b"same", b"same-aad").unwrap();
+        assert_ne!(&first[..AES_GCM_NONCE_LEN], &second[..AES_GCM_NONCE_LEN]);
+        assert_ne!(first, second);
+    }
+
+'''
+          object_text = replace_once(
+              object_text,
+              '    #[test]\n    fn publishes_ciphertext_and_deduplicates_without_overwrite() {\n',
+              cipher_tests + '    #[test]\n    fn publishes_ciphertext_and_deduplicates_without_overwrite() {\n',
+              'production cipher tests',
+          )
+          object_path.write_text(object_text, encoding='utf-8')
+
+          storage_mod_path = Path('rust/crates/mukei-core/src/storage/mod.rs')
+          storage_mod = storage_mod_path.read_text(encoding='utf-8')
+          storage_mod = replace_once(
+              storage_mod,
+              'pub use object_store::{ImmutableObjectStore, ObjectCipher, ObjectStoreError, StoredObject};',
+              'pub use object_store::{\n    Aes256GcmObjectCipher, ImmutableObjectStore, ObjectCipher, ObjectStoreError, StoredObject,\n};',
+              'object cipher export',
+          )
+          storage_mod_path.write_text(storage_mod, encoding='utf-8')
+
+          secure_path = Path('rust/crates/mukei-android-jni/src/secure_runtime_jni.rs')
+          secure = secure_path.read_text(encoding='utf-8')
+          secure = replace_once(
+              secure,
+              'use std::panic::{catch_unwind, AssertUnwindSafe};\n',
+              '''use std::panic::{catch_unwind, AssertUnwindSafe};
+
+fn generate_32_byte_key(env: &mut JNIEnv<'_>) -> jbyteArray {
+    let mut key = [0_u8; 32];
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        getrandom::getrandom(&mut key).map_err(|_| ())?;
+        Ok::<_, ()>(super::to_java_bytes(env, &key))
+    }))
+    .ok()
+    .and_then(Result::ok)
+    .unwrap_or(std::ptr::null_mut());
+    key.zeroize();
+    result
+}
+''',
+              'secure key generator helper',
+          )
+          old_database_generator = '''#[no_mangle]
+pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_generateDatabaseKey(
+    mut env: JNIEnv<'_>,
+    _this: JObject<'_>,
+) -> jbyteArray {
+    let mut key = [0_u8; 32];
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        getrandom::getrandom(&mut key).map_err(|_| ())?;
+        Ok::<_, ()>(super::to_java_bytes(&mut env, &key))
+    }))
+    .ok()
+    .and_then(Result::ok)
+    .unwrap_or(std::ptr::null_mut());
+    key.zeroize();
+    result
+}
+'''
+          new_database_generator = '''#[no_mangle]
+pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_generateDatabaseKey(
+    mut env: JNIEnv<'_>,
+    _this: JObject<'_>,
+) -> jbyteArray {
+    generate_32_byte_key(&mut env)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_generateObjectStoreKey(
+    mut env: JNIEnv<'_>,
+    _this: JObject<'_>,
+) -> jbyteArray {
+    generate_32_byte_key(&mut env)
+}
+'''
+          secure = replace_once(
+              secure,
+              old_database_generator,
+              new_database_generator,
+              'object key JNI generator',
+          )
+          secure = replace_once(
+              secure,
+              '    use std::path::{Component, Path};\n',
+              '    use std::path::{Component, Path, PathBuf};\n',
+              'owned app root import',
+          )
+          secure = replace_once(
+              secure,
+              '''    use mukei_core::storage::{
+        DatabaseEncryptionStatus, DatabasePool, Migrator, RuntimeProjectionRepository,
+    };''',
+              '''    use mukei_core::storage::{
+        Aes256GcmObjectCipher, DatabaseEncryptionStatus, DatabasePool, ImmutableObjectStore,
+        Migrator, RuntimeProjectionRepository, StagedFileImporter, StagedPlaintextCleanup,
+        WorkspaceStagedImportService, DEFAULT_MAX_STAGED_IMPORT_BYTES,
+    };''',
+              'secure storage imports',
+          )
+          secure = replace_once(
+              secure,
+              '''    struct SecureResources {
+        _database: Arc<DatabasePool>,
+        encryption_status: DatabaseEncryptionStatus,
+        rag_ready: bool,
+    }''',
+              '''    struct SecureResources {
+        _database: Arc<DatabasePool>,
+        encryption_status: DatabaseEncryptionStatus,
+        object_store_ready: bool,
+        staged_cleanup_removed: usize,
+        staged_cleanup_unsafe_paths: usize,
+        rag_ready: bool,
+    }''',
+              'secure resource status',
+          )
+          secure = replace_once(
+              secure,
+              '''    fn app_private_root(app_data_dir: &str) -> Result<&Path, ()> {
+        let root = Path::new(app_data_dir);
+        if !root.is_absolute()
+            || root
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
+        {
+            return Err(());
+        }
+        Ok(root)
+    }''',
+              '''    fn app_private_root(app_data_dir: &str) -> Result<PathBuf, ()> {
+        let root = PathBuf::from(app_data_dir);
+        if !root.is_absolute()
+            || root
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
+        {
+            return Err(());
+        }
+        Ok(root)
+    }''',
+              'owned app-private root',
+          )
+          secure = replace_once(
+              secure,
+              '''        config_json: JByteArray<'_>,
+        database_key: JByteArray<'_>,
+    ) -> jlong {''',
+              '''        config_json: JByteArray<'_>,
+        database_key: JByteArray<'_>,
+        object_store_key: JByteArray<'_>,
+    ) -> jlong {''',
+              'secure runtime object key parameter',
+          )
+          secure = secure.replace('install_security_boundary(app_data_root)', 'install_security_boundary(&app_data_root)', 1)
+          secure = replace_once(
+              secure,
+              '''            if key_bytes.len() != 32 {
+                key_bytes.zeroize();
+                return 0;
+            }
+
+            let config_path = app_data_root.join("mukei.toml");''',
+              '''            if key_bytes.len() != 32 {
+                key_bytes.zeroize();
+                return 0;
+            }
+            let mut object_key_bytes = match env.convert_byte_array(&object_store_key) {
+                Ok(bytes) => bytes,
+                Err(_) => {
+                    key_bytes.zeroize();
+                    return 0;
+                }
+            };
+            if object_key_bytes.len() != 32 {
+                key_bytes.zeroize();
+                object_key_bytes.zeroize();
+                return 0;
+            }
+            let object_key: [u8; 32] = match object_key_bytes.as_slice().try_into() {
+                Ok(value) => value,
+                Err(_) => {
+                    key_bytes.zeroize();
+                    object_key_bytes.zeroize();
+                    return 0;
+                }
+            };
+            object_key_bytes.zeroize();
+            let object_cipher = Aes256GcmObjectCipher::new(object_key);
+
+            let config_path = app_data_root.join("mukei.toml");''',
+              'object key validation',
+          )
+          secure = replace_once(
+              secure,
+              '''            let services = super::super::runtime_services(&config);
+            let runtime = match MukeiRuntime::create_with_services(config, services) {''',
+              '''            let staging_root = app_data_root.join("documents");
+            let cleanup_report = match migration_runtime.block_on(
+                StagedPlaintextCleanup::sweep_terminal(&database_pool, &staging_root),
+            ) {
+                Ok(report) => report,
+                Err(error) => {
+                    mukei_core::diagnostics::logger::log_error(&error);
+                    return 0;
+                }
+            };
+            let object_store = match ImmutableObjectStore::open(
+                app_data_root.join("objects"),
+                object_cipher,
+            ) {
+                Ok(store) => Arc::new(store),
+                Err(error) => {
+                    tracing::error!(code = "object_store_open_failed", error = %error);
+                    return 0;
+                }
+            };
+            let importer: Arc<dyn StagedFileImporter> = match WorkspaceStagedImportService::new(
+                Arc::clone(&database_pool),
+                object_store,
+                staging_root,
+                DEFAULT_MAX_STAGED_IMPORT_BYTES,
+            ) {
+                Ok(service) => Arc::new(service),
+                Err(error) => {
+                    tracing::error!(code = error.code(), "workspace importer unavailable");
+                    return 0;
+                }
+            };
+
+            let mut services = super::super::runtime_services(&config);
+            services.storage_importer = Some(importer);
+            let runtime = match MukeiRuntime::create_with_services(config, services) {''',
+              'secure importer composition',
+          )
+          secure = secure.replace('app_data_root,\n                Arc::clone(&database_pool),', '&app_data_root,\n                Arc::clone(&database_pool),', 1)
+          secure = replace_once(
+              secure,
+              '''                    _database: database_pool,
+                    encryption_status,
+                    rag_ready,''',
+              '''                    _database: database_pool,
+                    encryption_status,
+                    object_store_ready: true,
+                    staged_cleanup_removed: cleanup_report.removed,
+                    staged_cleanup_unsafe_paths: cleanup_report.unsafe_paths,
+                    rag_ready,''',
+              'secure resource insertion',
+          )
+          secure = replace_once(
+              secure,
+              '''                "projections": "encrypted",
+                "rag": if resources.rag_ready { "ready" } else { "artifacts_required" },''',
+              '''                "projections": "encrypted",
+                "object_store": if resources.object_store_ready { "encrypted" } else { "unavailable" },
+                "staged_plaintext_cleanup": {
+                    "removed": resources.staged_cleanup_removed,
+                    "unsafe_paths": resources.staged_cleanup_unsafe_paths,
+                },
+                "rag": if resources.rag_ready { "ready" } else { "artifacts_required" },''',
+              'secure status object store',
+          )
+          secure = replace_once(
+              secure,
+              '''        _config_json: JByteArray<'_>,
+        _database_key: JByteArray<'_>,
+    ) -> jlong {''',
+              '''        _config_json: JByteArray<'_>,
+        _database_key: JByteArray<'_>,
+        _object_store_key: JByteArray<'_>,
+    ) -> jlong {''',
+              'non-secure JNI object key parameter',
+          )
+          secure_path.write_text(secure, encoding='utf-8')
+
+          gateway_path = Path('android/core/native/src/main/kotlin/ai/mukei/android/core/nativebridge/MukeiNativeGateway.kt')
+          gateway = gateway_path.read_text(encoding='utf-8')
+          gateway = replace_once(
+              gateway,
+              '''        fun createSecure(
+            configJson: ByteArray,
+            databaseKey: ByteArray,
+        ): RustNativeGateway {
+            require(configJson.isNotEmpty()) { "Runtime configuration must not be empty" }
+            require(databaseKey.size == 32) { "SQLCipher key must be exactly 32 bytes" }
+            val handle = NativeBindings.createSecureRuntime(configJson, databaseKey)''',
+              '''        fun createSecure(
+            configJson: ByteArray,
+            databaseKey: ByteArray,
+            objectStoreKey: ByteArray,
+        ): RustNativeGateway {
+            require(configJson.isNotEmpty()) { "Runtime configuration must not be empty" }
+            require(databaseKey.size == 32) { "SQLCipher key must be exactly 32 bytes" }
+            require(objectStoreKey.size == 32) { "Object-store key must be exactly 32 bytes" }
+            val handle = NativeBindings.createSecureRuntime(configJson, databaseKey, objectStoreKey)''',
+              'gateway secure object key',
+          )
+          gateway = replace_once(
+              gateway,
+              '    external fun generateDatabaseKey(): ByteArray\n',
+              '    external fun generateDatabaseKey(): ByteArray\n    external fun generateObjectStoreKey(): ByteArray\n',
+              'object key native binding',
+          )
+          gateway = replace_once(
+              gateway,
+              '''    external fun createSecureRuntime(
+        configJson: ByteArray,
+        databaseKey: ByteArray,
+    ): Long''',
+              '''    external fun createSecureRuntime(
+        configJson: ByteArray,
+        databaseKey: ByteArray,
+        objectStoreKey: ByteArray,
+    ): Long''',
+              'native secure runtime object key',
+          )
+          gateway_path.write_text(gateway, encoding='utf-8')
+
+          factory_path = Path('android/core/native/src/main/kotlin/ai/mukei/android/core/nativebridge/SecureRuntimeFactory.kt')
+          factory = factory_path.read_text(encoding='utf-8')
+          factory = factory.replace(
+              '/** Secure Android composition root for SQLCipher and wrapped provider secrets. */',
+              '/** Secure Android composition root for SQLCipher, encrypted objects and wrapped secrets. */',
+              1,
+          )
+          factory = replace_once(
+              factory,
+              '''        val keyFile = secureFile(filesRoot, DATABASE_KEY_FILE)
+        val rawKey = if (keyFile.exists()) {
+            unwrapDatabaseKey(keyFile)
+        } else {
+            createAndPersistDatabaseKey(keyFile)
+        }
+        val gateway = try {
+            RustNativeGateway.createSecure(configJson, rawKey)
+        } finally {
+            rawKey.fill(0)
+        }''',
+              '''        val databaseKeyFile = secureFile(filesRoot, DATABASE_KEY_FILE)
+        val databaseKey = if (databaseKeyFile.exists()) {
+            unwrapDatabaseKey(databaseKeyFile)
+        } else {
+            createAndPersistDatabaseKey(databaseKeyFile)
+        }
+        val objectKeyFile = secureFile(filesRoot, OBJECT_STORE_KEY_FILE)
+        val objectStoreKey = try {
+            if (objectKeyFile.exists()) {
+                unwrapObjectStoreKey(objectKeyFile)
+            } else {
+                createAndPersistObjectStoreKey(objectKeyFile)
+            }
+        } catch (failure: Throwable) {
+            databaseKey.fill(0)
+            throw failure
+        }
+        val gateway = try {
+            RustNativeGateway.createSecure(configJson, databaseKey, objectStoreKey)
+        } finally {
+            databaseKey.fill(0)
+            objectStoreKey.fill(0)
+        }''',
+              'secure factory separate keys',
+          )
+          object_key_functions = '''
+    private fun createAndPersistObjectStoreKey(keyFile: File): ByteArray {
+        val rawKey = try {
+            NativeBindings.generateObjectStoreKey()
+        } catch (failure: Throwable) {
+            throw SecurityBootstrapException("object_store_key_generation_failed", failure)
+        }
+        if (rawKey.size != OBJECT_STORE_KEY_BYTES) {
+            rawKey.fill(0)
+            throw SecurityBootstrapException("object_store_key_generation_failed")
+        }
+        return try {
+            val wrapped = wrap(rawKey)
+            try {
+                writeAtomically(keyFile, wrapped)
+            } finally {
+                wrapped.fill(0)
+            }
+            rawKey
+        } catch (failure: Exception) {
+            rawKey.fill(0)
+            if (failure is SecurityBootstrapException) throw failure
+            throw SecurityBootstrapException("object_store_key_creation_failed", failure)
+        }
+    }
+
+    private fun unwrapObjectStoreKey(keyFile: File): ByteArray {
+        val raw = unwrapSecretFile(keyFile)
+        if (raw.size != OBJECT_STORE_KEY_BYTES) {
+            raw.fill(0)
+            throw SecurityBootstrapException("object_store_key_length_invalid")
+        }
+        return raw
+    }
+
+'''
+          factory = replace_once(
+              factory,
+              '    private fun unwrapSecretFile(file: File): ByteArray {\n',
+              object_key_functions + '    private fun unwrapSecretFile(file: File): ByteArray {\n',
+              'object key persistence functions',
+          )
+          factory = replace_once(
+              factory,
+              '    private const val DATABASE_KEY_FILE = "$SECRETS_DIRECTORY/db_key.enc"\n    private const val DATABASE_KEY_BYTES = 32\n',
+              '    private const val DATABASE_KEY_FILE = "$SECRETS_DIRECTORY/db_key.enc"\n    private const val OBJECT_STORE_KEY_FILE = "$SECRETS_DIRECTORY/object_store_key.enc"\n    private const val DATABASE_KEY_BYTES = 32\n    private const val OBJECT_STORE_KEY_BYTES = 32\n',
+              'object key constants',
+          )
+          factory_path.write_text(factory, encoding='utf-8')
+
+          processor_path = Path('android/core/native/src/main/kotlin/ai/mukei/android/core/nativebridge/AndroidPlatformRequestProcessor.kt')
+          processor = processor_path.read_text(encoding='utf-8')
+          processor = processor.replace(
+              'private const val MAX_STAGED_DOCUMENT_BYTES = 256L * 1024L * 1024L',
+              'private const val MAX_STAGED_DOCUMENT_BYTES = 32L * 1024L * 1024L',
+              1,
+          )
+          processor_path.write_text(processor, encoding='utf-8')
+
+          host_path = Path('android/app/src/main/kotlin/ai/mukei/android/BackendRuntimeHost.kt')
+          host = host_path.read_text(encoding='utf-8')
+          host = replace_once(
+              host,
+              '''                    security.optString("projections", "unknown"),
+                    security.optString("rag", "unknown"),''',
+              '''                    security.optString("projections", "unknown"),
+                    security.optString("object_store", "unknown"),
+                    security.optString("rag", "unknown"),''',
+              'backend security summary object store',
+          )
+          host_path.write_text(host, encoding='utf-8')
+
+      - name: Format modified Rust files
+        working-directory: rust
+        run: |
+          rustfmt --edition 2021 crates/mukei-core/src/storage/object_store.rs
+          rustfmt --edition 2021 crates/mukei-core/src/storage/mod.rs
+          rustfmt --edition 2021 crates/mukei-android-jni/src/secure_runtime_jni.rs
+
+      - name: Verify patch whitespace
+        run: git diff --check
+
+      - name: Core Cargo check
+        working-directory: rust
+        run: cargo check -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets
+
+      - name: Object-store and staged-import tests
+        working-directory: rust
+        run: cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite storage:: -- --nocapture
+
+      - name: Full core tests
+        working-directory: rust
+        run: cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets
+
+      - name: Core Clippy
+        working-directory: rust
+        run: cargo clippy -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings
+
+      - name: Secure JNI tests
+        working-directory: rust
+        run: cargo test -p mukei-android-jni --lib --no-default-features --features secure_runtime,runtime_hardening
+
+      - name: Compile Kotlin secure bridge
+        run: >-
+          gradle -p android
+          :core:native:compileDebugKotlin
+          :app:compileDebugKotlin
+          --stacktrace
+
+      - name: Commit verified secure composition
+        run: |
+          git config user.name "mukei-storage-bot"
+          git config user.email "mukei-storage-bot@users.noreply.github.com"
+          git add \
+            rust/Cargo.toml \
+            rust/crates/mukei-core/Cargo.toml \
+            rust/crates/mukei-core/src/storage/object_store.rs \
+            rust/crates/mukei-core/src/storage/mod.rs \
+            rust/crates/mukei-android-jni/src/secure_runtime_jni.rs \
+            android/core/native/src/main/kotlin/ai/mukei/android/core/nativebridge/MukeiNativeGateway.kt \
+            android/core/native/src/main/kotlin/ai/mukei/android/core/nativebridge/SecureRuntimeFactory.kt \
+            android/core/native/src/main/kotlin/ai/mukei/android/core/nativebridge/AndroidPlatformRequestProcessor.kt \
+            android/app/src/main/kotlin/ai/mukei/android/BackendRuntimeHost.kt
+          git diff --cached --check
+          git commit -m "feat(storage): compose Keystore-backed encrypted imports on Android"
+          git push origin HEAD:temp/universal-storage-workspace-v0.1
+
+      - name: Publish success status
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              context: 'storage-android-secure-composition',
+              description: 'Keystore-backed Android storage composition verified',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+
+      - name: Publish failure status
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'failure',
+              context: 'storage-android-secure-composition',
+              description: 'Secure Android storage composition failed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
