@@ -1,0 +1,147 @@
+name: storage-writer-bound
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - .github/workflows/storage-writer-bound.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: storage-writer-bound
+  cancel-in-progress: false
+
+jobs:
+  harden:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+
+      - name: Verify isolated branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="$(git branch --show-current)"
+          test "$branch" = "temp/universal-storage-workspace-v0.1"
+          test "$branch" != "Kotlin"
+
+      - uses: dtolnay/rust-toolchain@1.82.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Apply fail-closed writer bound
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("rust/crates/mukei-core/src/storage/object_store.rs")
+          text = path.read_text()
+
+          old_error = '''    #[error("existing deduplicated object is missing or corrupt")]
+              CorruptDeduplicatedObject,
+          }'''.replace("              ", "    ")
+          new_error = '''    #[error("existing deduplicated object is missing or corrupt")]
+              CorruptDeduplicatedObject,
+              #[error("encrypted object exceeds the supported size limit")]
+              ObjectTooLarge,
+          }'''.replace("              ", "    ")
+          if old_error not in text:
+              raise SystemExit("error enum anchor not found")
+          text = text.replace(old_error, new_error, 1)
+
+          old_seal = '''        let ciphertext = self
+              .cipher
+              .seal(plaintext, &associated_data)
+              .map_err(ObjectStoreError::Encryption)?;
+          let encoded = encode_object(version, &digest, plaintext_size, &ciphertext);'''.replace("              ", "            ")
+          new_seal = '''        let ciphertext = self
+              .cipher
+              .seal(plaintext, &associated_data)
+              .map_err(ObjectStoreError::Encryption)?;
+          if !encoded_size_fits(ciphertext.len() as u64) {
+              return Err(ObjectStoreError::ObjectTooLarge);
+          }
+          let encoded = encode_object(version, &digest, plaintext_size, &ciphertext);'''.replace("              ", "            ")
+          if old_seal not in text:
+              raise SystemExit("writer anchor not found")
+          text = text.replace(old_seal, new_seal, 1)
+
+          old_read = '''    if actual_remaining != encrypted_size
+              || encrypted_size > MAX_ENCODED_OBJECT_BYTES
+              || encrypted_size > usize::MAX as u64
+          {
+              return Err(ObjectStoreError::MalformedObject);
+          }
+          let mut ciphertext = vec![0u8; encrypted_size as usize];'''.replace("              ", "        ")
+          new_read = '''    if actual_remaining != encrypted_size || !encoded_size_fits(encrypted_size) {
+              return Err(ObjectStoreError::MalformedObject);
+          }
+          let encrypted_size = usize::try_from(encrypted_size)
+              .map_err(|_| ObjectStoreError::MalformedObject)?;
+          let mut ciphertext = vec![0u8; encrypted_size];'''.replace("              ", "        ")
+          if old_read not in text:
+              raise SystemExit("reader anchor not found")
+          text = text.replace(old_read, new_read, 1)
+
+          helper_anchor = '''fn verify_plaintext(
+          '''
+          helper = '''fn encoded_size_fits(encrypted_size: u64) -> bool {
+              encrypted_size <= MAX_ENCODED_OBJECT_BYTES && usize::try_from(encrypted_size).is_ok()
+          }
+
+          fn verify_plaintext(
+          '''.replace("              ", "    ")
+          if helper_anchor not in text:
+              raise SystemExit("helper anchor not found")
+          text = text.replace(helper_anchor, helper, 1)
+
+          test_anchor = '''    #[test]
+              fn rejects_oversized_sparse_object_before_ciphertext_allocation() {'''.replace("              ", "    ")
+          boundary_test = '''    #[test]
+              fn encoded_size_limit_is_shared_by_writer_and_reader() {
+                  assert!(encoded_size_fits(MAX_ENCODED_OBJECT_BYTES));
+                  assert!(!encoded_size_fits(MAX_ENCODED_OBJECT_BYTES + 1));
+              }
+
+              #[test]
+              fn rejects_oversized_sparse_object_before_ciphertext_allocation() {'''.replace("              ", "    ")
+          if test_anchor not in text:
+              raise SystemExit("test anchor not found")
+          text = text.replace(test_anchor, boundary_test, 1)
+
+          path.write_text(text)
+
+      - name: Format
+        run: cargo fmt --manifest-path rust/Cargo.toml
+
+      - name: Verify allowed files
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only)"
+          test "$changed" = "rust/crates/mukei-core/src/storage/object_store.rs"
+
+      - name: Check
+        run: cargo check --manifest-path rust/Cargo.toml -p mukei-core --all-targets
+
+      - name: Test encrypted object store
+        run: cargo test --manifest-path rust/Cargo.toml -p mukei-core storage::object_store::tests
+
+      - name: Clippy
+        run: cargo clippy --manifest-path rust/Cargo.toml -p mukei-core --all-targets -- -D warnings
+
+      - name: Commit validated hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust/crates/mukei-core/src/storage/object_store.rs
+          git commit -m "fix(storage): reject unreadable oversized object writes"
+          git push origin HEAD:temp/universal-storage-workspace-v0.1
