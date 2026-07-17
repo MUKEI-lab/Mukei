@@ -153,21 +153,26 @@ jobs:
           cargo install cargo-ndk --version "${CARGO_NDK_VERSION}" --locked
       - name: Build ABI-matched native runtime and inference capsules
         id: native-release
+        continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
           bash scripts/android/ci_release_native.sh 2>&1 |
             tee "$RUNNER_TEMP/mukei-release-native.log"
       - name: Upload native release failure log
-        if: ${{ steps.native-release.outcome == 'failure' }}
+        if: ${{ always() && steps.native-release.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
           name: native-release-failure-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           retention-days: 7
           path: ${{ runner.temp }}/mukei-release-native.log
+      - name: Enforce native release build
+        if: ${{ steps.native-release.outcome == 'failure' }}
+        run: exit 1
       - name: Build R8-shrunk ABI release APKs
         id: release-gradle
+        continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
@@ -176,13 +181,16 @@ jobs:
             :app:assembleRelease \
             --stacktrace 2>&1 | tee "$RUNNER_TEMP/mukei-release-gradle.log"
       - name: Upload release Gradle failure log
-        if: ${{ steps.release-gradle.outcome == 'failure' }}
+        if: ${{ always() && steps.release-gradle.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
           name: release-gradle-failure-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           retention-days: 7
           path: ${{ runner.temp }}/mukei-release-gradle.log
+      - name: Enforce release Gradle build
+        if: ${{ steps.release-gradle.outcome == 'failure' }}
+        run: exit 1
       - name: Verify ABI, JNI and R8 outputs
         shell: bash
         run: |
