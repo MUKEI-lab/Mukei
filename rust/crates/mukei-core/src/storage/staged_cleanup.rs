@@ -123,6 +123,15 @@ fn sweep_paths(
             continue;
         }
 
+        // Reject symlinks in every existing component, not only at the final
+        // filename. Otherwise `nested/file.txt` could traverse a symlinked
+        // `nested` directory and remove plaintext outside the staging jail.
+        if path_contains_symlink(&canonical_root, relative)? {
+            report.unsafe_paths += 1;
+            examined_transaction_ids.push(staged_path.transaction_id);
+            continue;
+        }
+
         let candidate = canonical_root.join(relative);
         let metadata = match fs::symlink_metadata(&candidate) {
             Ok(metadata) => metadata,
@@ -158,6 +167,23 @@ fn sweep_paths(
     }
 
     Ok((report, examined_transaction_ids))
+}
+
+fn path_contains_symlink(root: &Path, relative: &Path) -> Result<bool> {
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(segment) = component else {
+            continue;
+        };
+        current.push(segment);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(cleanup_io_error(error)),
+        }
+    }
+    Ok(false)
 }
 
 fn cleanup_io_error(error: std::io::Error) -> MukeiError {
@@ -273,6 +299,38 @@ mod tests {
         assert_eq!(second_report.removed, 1);
         assert!(!staging.join("first.txt").exists());
         assert!(!staging.join("second.txt").exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rejects_symlinked_parent_components() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let staging = root.path().join("staging");
+        let outside = root.path().join("outside");
+        fs::create_dir_all(&staging).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.txt"), b"secret").unwrap();
+        symlink(&outside, staging.join("nested")).unwrap();
+
+        let pool = DatabasePool::open(&root.path().join("storage.db")).unwrap();
+        Migrator::embedded().apply_pending(&pool).await.unwrap();
+        let workspace = UniversalStorageRepository::ensure_workspace(
+            &pool,
+            ChatId::parse("symlink-cleanup-chat").unwrap(),
+        )
+        .await
+        .unwrap();
+        failed_import(&pool, &workspace, "nested/secret.txt", 6).await;
+
+        let report = StagedPlaintextCleanup::sweep_terminal(&pool, &staging)
+            .await
+            .unwrap();
+        assert_eq!(report.examined, 1);
+        assert_eq!(report.unsafe_paths, 1);
+        assert_eq!(report.removed, 0);
+        assert!(outside.join("secret.txt").exists());
     }
 
     #[tokio::test]
