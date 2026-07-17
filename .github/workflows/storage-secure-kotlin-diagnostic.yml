@@ -44,11 +44,16 @@ jobs:
           lines = source[start:end].splitlines()
           script = "\n".join(line[10:] if line.startswith("          ") else line for line in lines) + "\n"
           exec(compile(script, '/tmp/apply_verifier_patch.py', 'exec'), {'__name__': '__main__'})
-      - name: Kotlin compile with focused log
+      - name: Kotlin compile with focused log and source capture
         shell: bash
         run: |
           set -o pipefail
           mkdir -p secure-kotlin-diagnostic
+          cp android/core/native/src/main/kotlin/ai/mukei/android/core/nativebridge/SecureRuntimeFactory.kt \
+            secure-kotlin-diagnostic/SecureRuntimeFactory.kt
+          nl -ba secure-kotlin-diagnostic/SecureRuntimeFactory.kt \
+            | sed -n '24,56p' \
+            | tee secure-kotlin-diagnostic/SecureRuntimeFactory-lines-24-56.txt
           gradle -p android :core:native:compileDebugKotlin :app:compileDebugKotlin --stacktrace \
             2>&1 | tee secure-kotlin-diagnostic/kotlin-compile.log
       - uses: actions/upload-artifact@v4
