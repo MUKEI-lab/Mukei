@@ -105,7 +105,7 @@ jobs:
           )
           if fused_declaration in factory:
               factory = factory.replace(fused_declaration, separated_declaration, 1)
-          if re.search(r'\)\s{8,}(?:val|var|fun|private|return)\b', factory):
+          if re.search(r'\)[ \t]{8,}(?:val|var|fun|private|return)\b', factory):
               raise SystemExit('generated Kotlin contains a fused declaration')
           factory_path.write_text(factory, encoding='utf-8')
 
