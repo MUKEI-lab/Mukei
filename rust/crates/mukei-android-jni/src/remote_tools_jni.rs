@@ -1,8 +1,3 @@
-use jni::objects::{JByteArray, JObject};
-use jni::sys::{jbyteArray, jlong};
-use jni::JNIEnv;
-use zeroize::{Zeroize, Zeroizing};
-
 const MAX_PROVIDER_KEY_BYTES: usize = 16 * 1024;
 
 #[no_mangle]
@@ -19,13 +14,21 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_co
         };
         let mut brave_bytes = match env.convert_byte_array(&brave_key) {
             Ok(value) => value,
-            Err(_) => return super::error_payload("invalid_remote_credentials", "Unreadable Brave credential."),
+            Err(_) => {
+                return super::error_payload(
+                    "invalid_remote_credentials",
+                    "Unreadable Brave credential.",
+                )
+            }
         };
         let mut tavily_bytes = match env.convert_byte_array(&tavily_key) {
             Ok(value) => value,
             Err(_) => {
                 brave_bytes.zeroize();
-                return super::error_payload("invalid_remote_credentials", "Unreadable Tavily credential.");
+                return super::error_payload(
+                    "invalid_remote_credentials",
+                    "Unreadable Tavily credential.",
+                );
             }
         };
         if brave_bytes.is_empty()
@@ -46,7 +49,10 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_co
                 let mut bytes = error.into_bytes();
                 bytes.zeroize();
                 tavily_bytes.zeroize();
-                return super::error_payload("invalid_remote_credentials", "Brave credential is not UTF-8.");
+                return super::error_payload(
+                    "invalid_remote_credentials",
+                    "Brave credential is not UTF-8.",
+                );
             }
         };
         let tavily = match String::from_utf8(std::mem::take(&mut tavily_bytes)) {
@@ -54,7 +60,10 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_co
             Err(error) => {
                 let mut bytes = error.into_bytes();
                 bytes.zeroize();
-                return super::error_payload("invalid_remote_credentials", "Tavily credential is not UTF-8.");
+                return super::error_payload(
+                    "invalid_remote_credentials",
+                    "Tavily credential is not UTF-8.",
+                );
             }
         };
         match runtime.configure_remote_tools(brave, tavily) {

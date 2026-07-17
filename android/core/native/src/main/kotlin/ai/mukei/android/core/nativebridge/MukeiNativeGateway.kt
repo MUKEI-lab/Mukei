@@ -127,15 +127,15 @@ class RustNativeGateway private constructor(
             val handle = NativeBindings.createRuntime(configJson)
             check(handle > 0L) { "Native runtime creation failed" }
             return RustNativeGateway(handle, secureRuntime = false)
-        }
-
-        fun createSecure(
-            configJson: ByteArray,
-            databaseKey: ByteArray,
+        }        fun createSecure(
+  configJson: ByteArray,
+  databaseKey: ByteArray,
+  objectStoreKey: ByteArray,
         ): RustNativeGateway {
-            require(configJson.isNotEmpty()) { "Runtime configuration must not be empty" }
-            require(databaseKey.size == 32) { "SQLCipher key must be exactly 32 bytes" }
-            val handle = NativeBindings.createSecureRuntime(configJson, databaseKey)
+  require(configJson.isNotEmpty()) { "Runtime configuration must not be empty" }
+  require(databaseKey.size == 32) { "SQLCipher key must be exactly 32 bytes" }
+  require(objectStoreKey.size == 32) { "Object-store key must be exactly 32 bytes" }
+  val handle = NativeBindings.createSecureRuntime(configJson, databaseKey, objectStoreKey)
             check(handle > 0L) { "Secure native runtime creation failed" }
             return RustNativeGateway(handle, secureRuntime = true)
         }
@@ -148,11 +148,13 @@ internal object NativeBindings {
     }
 
     external fun generateDatabaseKey(): ByteArray
+    external fun generateObjectStoreKey(): ByteArray
     external fun createRuntime(configJson: ByteArray): Long
 
     external fun createSecureRuntime(
         configJson: ByteArray,
         databaseKey: ByteArray,
+        objectStoreKey: ByteArray,
     ): Long
 
     external fun configureRemoteTools(

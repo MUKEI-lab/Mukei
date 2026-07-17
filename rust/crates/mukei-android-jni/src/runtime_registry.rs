@@ -3,8 +3,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use jni::sys::jlong;
+use jni::objects::{JByteArray, JObject};
+use jni::sys::{jbyteArray, jlong};
+use jni::JNIEnv;
 use mukei_core::application_runtime::MukeiRuntime;
+use zeroize::{Zeroize, Zeroizing};
 
 const MAX_GENERATION: u32 = 0x7fff_ffff;
 
@@ -65,7 +68,11 @@ impl RuntimeRegistry {
             .generations
             .entry(slot)
             .and_modify(|value| {
-                *value = if *value >= MAX_GENERATION { 1 } else { *value + 1 };
+                *value = if *value >= MAX_GENERATION {
+                    1
+                } else {
+                    *value + 1
+                };
             })
             .or_insert(1);
         let handle = RuntimeHandle::new(slot, *generation)?;

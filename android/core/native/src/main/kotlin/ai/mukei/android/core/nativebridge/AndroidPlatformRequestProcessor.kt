@@ -347,7 +347,7 @@ class AndroidPlatformRequestProcessor(
 
     companion object {
         private const val COPY_BUFFER_BYTES = 64 * 1024
-        private const val MAX_STAGED_DOCUMENT_BYTES = 256L * 1024L * 1024L
+        private const val MAX_STAGED_DOCUMENT_BYTES = 32L * 1024L * 1024L
         private const val MAX_ERROR_MESSAGE_CHARS = 160
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val KEY_TRANSFORMATION = "AES/GCM/NoPadding"

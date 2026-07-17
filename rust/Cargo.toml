@@ -61,6 +61,7 @@ sha2 = "0.10"
 blake3 = "=1.5.5"
 zeroize = { version = "1.7", features = ["derive"] }
 subtle = "2.5"
+aes-gcm = "0.10.3"
 
 # Diagnostics
 tracing = "0.1"

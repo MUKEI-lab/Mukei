@@ -6,13 +6,21 @@
 //! fail-closed verification.
 
 use crate::storage::universal::StorageObjectId;
+use aes_gcm::{
+    aead::{Aead, Payload},
+    Aes256Gcm, KeyInit, Nonce,
+};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use zeroize::{Zeroize, Zeroizing};
 
 const OBJECT_FORMAT_MAGIC: &[u8; 8] = b"MUKEIOB1";
 const SHA256_LEN: usize = 32;
+const AES_GCM_NONCE_LEN: usize = 12;
+const AES_GCM_TAG_LEN: usize = 16;
+const AES_GCM_CIPHER_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredObject {
@@ -47,6 +55,72 @@ pub trait ObjectCipher: Send + Sync {
     fn version(&self) -> u32;
     fn seal(&self, plaintext: &[u8], associated_data: &[u8]) -> Result<Vec<u8>, String>;
     fn open(&self, ciphertext: &[u8], associated_data: &[u8]) -> Result<Vec<u8>, String>;
+}
+
+/// AES-256-GCM object cipher backed by one process-resident data-encryption key.
+///
+/// Android production boot unwraps this key through Android Keystore and passes
+/// the raw bytes across JNI exactly once. The key is zeroized when the runtime
+/// drops; every object receives a fresh random 96-bit nonce and authenticates
+/// the immutable object's digest/size/version metadata as associated data.
+pub struct Aes256GcmObjectCipher {
+    key: Zeroizing<[u8; 32]>,
+}
+
+impl Aes256GcmObjectCipher {
+    pub fn new(key: [u8; 32]) -> Self {
+        Self {
+            key: Zeroizing::new(key),
+        }
+    }
+
+    fn cipher(&self) -> Result<Aes256Gcm, String> {
+        Aes256Gcm::new_from_slice(&*self.key)
+            .map_err(|_| "invalid AES-256-GCM key length".to_string())
+    }
+}
+
+impl ObjectCipher for Aes256GcmObjectCipher {
+    fn version(&self) -> u32 {
+        AES_GCM_CIPHER_VERSION
+    }
+
+    fn seal(&self, plaintext: &[u8], associated_data: &[u8]) -> Result<Vec<u8>, String> {
+        let mut nonce_bytes = [0_u8; AES_GCM_NONCE_LEN];
+        getrandom::getrandom(&mut nonce_bytes)
+            .map_err(|_| "secure random nonce generation failed".to_string())?;
+        let ciphertext = self
+            .cipher()?
+            .encrypt(
+                Nonce::from_slice(&nonce_bytes),
+                Payload {
+                    msg: plaintext,
+                    aad: associated_data,
+                },
+            )
+            .map_err(|_| "AES-256-GCM encryption failed".to_string())?;
+        let mut sealed = Vec::with_capacity(AES_GCM_NONCE_LEN + ciphertext.len());
+        sealed.extend_from_slice(&nonce_bytes);
+        sealed.extend_from_slice(&ciphertext);
+        nonce_bytes.zeroize();
+        Ok(sealed)
+    }
+
+    fn open(&self, ciphertext: &[u8], associated_data: &[u8]) -> Result<Vec<u8>, String> {
+        if ciphertext.len() < AES_GCM_NONCE_LEN + AES_GCM_TAG_LEN {
+            return Err("AES-256-GCM envelope is truncated".to_string());
+        }
+        let (nonce, encrypted) = ciphertext.split_at(AES_GCM_NONCE_LEN);
+        self.cipher()?
+            .decrypt(
+                Nonce::from_slice(nonce),
+                Payload {
+                    msg: encrypted,
+                    aad: associated_data,
+                },
+            )
+            .map_err(|_| "AES-256-GCM authentication failed".to_string())
+    }
 }
 
 pub struct ImmutableObjectStore<C> {
@@ -289,6 +363,31 @@ mod tests {
         fn open(&self, ciphertext: &[u8], associated_data: &[u8]) -> Result<Vec<u8>, String> {
             self.seal(ciphertext, associated_data)
         }
+    }
+
+    #[test]
+    fn aes_gcm_cipher_authenticates_ciphertext_and_associated_data() {
+        let cipher = Aes256GcmObjectCipher::new([0x5a; 32]);
+        let plaintext = b"workspace secret";
+        let aad = b"object-metadata";
+        let sealed = cipher.seal(plaintext, aad).unwrap();
+
+        assert_ne!(sealed.as_slice(), plaintext);
+        assert_eq!(cipher.open(&sealed, aad).unwrap(), plaintext);
+
+        let mut tampered = sealed.clone();
+        *tampered.last_mut().unwrap() ^= 0x01;
+        assert!(cipher.open(&tampered, aad).is_err());
+        assert!(cipher.open(&sealed, b"different-metadata").is_err());
+    }
+
+    #[test]
+    fn aes_gcm_cipher_uses_fresh_nonce_per_publication() {
+        let cipher = Aes256GcmObjectCipher::new([0x33; 32]);
+        let first = cipher.seal(b"same", b"same-aad").unwrap();
+        let second = cipher.seal(b"same", b"same-aad").unwrap();
+        assert_ne!(&first[..AES_GCM_NONCE_LEN], &second[..AES_GCM_NONCE_LEN]);
+        assert_ne!(first, second);
     }
 
     #[test]

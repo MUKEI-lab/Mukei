@@ -135,7 +135,7 @@ fn snapshot_response(runtime: &MukeiRuntime, domain: SnapshotDomainV2) -> Vec<u8
 
 #[no_mangle]
 pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_createRuntime(
-    mut env: JNIEnv<'_>,
+    env: JNIEnv<'_>,
     _this: JObject<'_>,
     config_json: JByteArray<'_>,
 ) -> jlong {

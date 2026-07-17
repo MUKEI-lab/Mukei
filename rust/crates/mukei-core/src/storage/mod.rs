@@ -48,7 +48,9 @@ pub use file_policy::{
     admit_file_name, AllowedFileName, FileAdmissionError, FileAdmissionRule, ALLOWED_EXACT_NAMES,
     ALLOWED_EXTENSIONS, FILE_POLICY_VERSION, MAX_FILENAME_BYTES,
 };
-pub use object_store::{ImmutableObjectStore, ObjectCipher, ObjectStoreError, StoredObject};
+pub use object_store::{
+    Aes256GcmObjectCipher, ImmutableObjectStore, ObjectCipher, ObjectStoreError, StoredObject,
+};
 pub use universal::{
     ChatId, DuplicatePolicy, FileVersionId, ImportTarget, ImportTransactionId, PlannedDirectory,
     StorageDomainError, StorageNodeId, StorageNodeKind, StorageNodeState, StorageObjectId,

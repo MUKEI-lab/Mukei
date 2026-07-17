@@ -17,7 +17,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import org.json.JSONObject
 
-/** Secure Android composition root for SQLCipher and wrapped provider secrets. */
+/** Secure Android composition root for SQLCipher, encrypted objects and wrapped secrets. */
 object SecureRuntimeFactory {
     enum class RemoteProvider(val fileName: String) {
         Brave("brave_api_key.enc"),
@@ -35,16 +35,28 @@ object SecureRuntimeFactory {
         val configuredRoot = parseConfiguredRoot(configJson)
         ensureInsideFilesDir(configuredRoot, filesRoot, allowRoot = true)
 
-        val keyFile = secureFile(filesRoot, DATABASE_KEY_FILE)
-        val rawKey = if (keyFile.exists()) {
-            unwrapDatabaseKey(keyFile)
+        val databaseKeyFile = secureFile(filesRoot, DATABASE_KEY_FILE)
+        val databaseKey = if (databaseKeyFile.exists()) {
+  unwrapDatabaseKey(databaseKeyFile)
         } else {
-            createAndPersistDatabaseKey(keyFile)
+  createAndPersistDatabaseKey(databaseKeyFile)
+        }
+        val objectKeyFile = secureFile(filesRoot, OBJECT_STORE_KEY_FILE)
+        val objectStoreKey = try {
+  if (objectKeyFile.exists()) {
+      unwrapObjectStoreKey(objectKeyFile)
+  } else {
+      createAndPersistObjectStoreKey(objectKeyFile)
+  }
+        } catch (failure: Throwable) {
+  databaseKey.fill(0)
+  throw failure
         }
         val gateway = try {
-            RustNativeGateway.createSecure(configJson, rawKey)
+  RustNativeGateway.createSecure(configJson, databaseKey, objectStoreKey)
         } finally {
-            rawKey.fill(0)
+  databaseKey.fill(0)
+  objectStoreKey.fill(0)
         }
         return try {
             configureRemoteToolsIfPresent(gateway, filesRoot)
@@ -138,6 +150,41 @@ object SecureRuntimeFactory {
         if (raw.size != DATABASE_KEY_BYTES) {
             raw.fill(0)
             throw SecurityBootstrapException("database_key_length_invalid")
+        }
+        return raw
+    }
+
+
+    private fun createAndPersistObjectStoreKey(keyFile: File): ByteArray {
+        val rawKey = try {
+  NativeBindings.generateObjectStoreKey()
+        } catch (failure: Throwable) {
+  throw SecurityBootstrapException("object_store_key_generation_failed", failure)
+        }
+        if (rawKey.size != OBJECT_STORE_KEY_BYTES) {
+  rawKey.fill(0)
+  throw SecurityBootstrapException("object_store_key_generation_failed")
+        }
+        return try {
+  val wrapped = wrap(rawKey)
+  try {
+      writeAtomically(keyFile, wrapped)
+  } finally {
+      wrapped.fill(0)
+  }
+  rawKey
+        } catch (failure: Exception) {
+  rawKey.fill(0)
+  if (failure is SecurityBootstrapException) throw failure
+  throw SecurityBootstrapException("object_store_key_creation_failed", failure)
+        }
+    }
+
+    private fun unwrapObjectStoreKey(keyFile: File): ByteArray {
+        val raw = unwrapSecretFile(keyFile)
+        if (raw.size != OBJECT_STORE_KEY_BYTES) {
+  raw.fill(0)
+  throw SecurityBootstrapException("object_store_key_length_invalid")
         }
         return raw
     }
@@ -291,7 +338,9 @@ object SecureRuntimeFactory {
     private const val WRAP_ALIAS = "mukei.database.wrap.v1"
     private const val SECRETS_DIRECTORY = "mukei/secrets"
     private const val DATABASE_KEY_FILE = "$SECRETS_DIRECTORY/db_key.enc"
+    private const val OBJECT_STORE_KEY_FILE = "$SECRETS_DIRECTORY/object_store_key.enc"
     private const val DATABASE_KEY_BYTES = 32
+    private const val OBJECT_STORE_KEY_BYTES = 32
     private const val MAX_PROVIDER_KEY_BYTES = 16 * 1024
     private const val KEY_TRANSFORMATION = "AES/GCM/NoPadding"
     private const val GCM_TAG_BITS = 128
