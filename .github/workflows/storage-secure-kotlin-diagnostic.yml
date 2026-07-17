@@ -35,7 +35,7 @@ jobs:
       - name: Apply verifier patch block
         shell: python
         run: |
-          from pathlib import Path
+          from pathlib import import Path
           source = Path('.github/workflows/storage-android-secure-composition-v2.yml').read_text(encoding='utf-8')
           start_marker = "      - name: Extract and apply reviewed patch\n        shell: python\n        run: |\n"
           end_marker = "\n      - name: Format modified Rust files"
@@ -54,6 +54,9 @@ jobs:
           nl -ba secure-kotlin-diagnostic/SecureRuntimeFactory.kt \
             | sed -n '24,56p' \
             | tee secure-kotlin-diagnostic/SecureRuntimeFactory-lines-24-56.txt
+          sed -n '36p' secure-kotlin-diagnostic/SecureRuntimeFactory.kt \
+            | od -An -tx1c \
+            | tee secure-kotlin-diagnostic/SecureRuntimeFactory-line-36-bytes.txt
           gradle -p android :core:native:compileDebugKotlin :app:compileDebugKotlin --stacktrace \
             2>&1 | tee secure-kotlin-diagnostic/kotlin-compile.log
       - uses: actions/upload-artifact@v4
