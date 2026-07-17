@@ -67,7 +67,7 @@ impl ImportCommitRepository {
     ) -> Result<ImportCommitReceipt> {
         validate_request(&request)?;
 
-        if let Some(receipt) = load_committed_receipt(pool, request.transaction_id).await? {
+        if let Some(receipt) = load_authorized_committed_receipt(pool, &request).await? {
             return Ok(receipt);
         }
 
