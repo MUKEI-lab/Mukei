@@ -14,6 +14,8 @@ pub mod conversation;
 #[cfg(feature = "rusqlite")]
 pub mod download_jobs;
 #[cfg(feature = "rusqlite")]
+pub mod import_commit_repository;
+#[cfg(feature = "rusqlite")]
 pub mod import_journal;
 #[cfg(feature = "rusqlite")]
 pub mod migrations;
@@ -62,6 +64,10 @@ pub use conversation::{
 #[cfg(feature = "rusqlite")]
 pub use download_jobs::{
     DownloadJobRecord, DownloadJobRepository, DownloadJobStatus, DownloadReservation,
+};
+#[cfg(feature = "rusqlite")]
+pub use import_commit_repository::{
+    ImportAuthorization, ImportCommitReceipt, ImportCommitRepository, ImportCommitRequest,
 };
 #[cfg(feature = "rusqlite")]
 pub use import_journal::{
