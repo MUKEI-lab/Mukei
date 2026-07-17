@@ -58,6 +58,8 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import re
+
           source = Path('.github/workflows/storage-android-secure-composition.yml').read_text(encoding='utf-8')
           start_marker = "        run: |\n          from pathlib import Path\n"
           end_marker = "\n      - name: Format modified Rust files"
@@ -90,6 +92,22 @@ jobs:
               raise SystemExit('extracted replace_once helper changed unexpectedly')
           patch = patch.replace(exact_helper, tolerant_helper, 1)
           exec(compile(patch, '/tmp/apply_secure_storage.py', 'exec'), {'__name__': '__main__'})
+
+          factory_path = Path('android/core/native/src/main/kotlin/ai/mukei/android/core/nativebridge/SecureRuntimeFactory.kt')
+          factory = factory_path.read_text(encoding='utf-8')
+          fused_declaration = (
+              '        ensureInsideFilesDir(configuredRoot, filesRoot, allowRoot = true)'
+              '        val databaseKeyFile = secureFile(filesRoot, DATABASE_KEY_FILE)'
+          )
+          separated_declaration = (
+              '        ensureInsideFilesDir(configuredRoot, filesRoot, allowRoot = true)\n\n'
+              '        val databaseKeyFile = secureFile(filesRoot, DATABASE_KEY_FILE)'
+          )
+          if fused_declaration in factory:
+              factory = factory.replace(fused_declaration, separated_declaration, 1)
+          if re.search(r'\)\s{8,}(?:val|var|fun|private|return)\b', factory):
+              raise SystemExit('generated Kotlin contains a fused declaration')
+          factory_path.write_text(factory, encoding='utf-8')
 
           registry_path = Path('rust/crates/mukei-android-jni/src/runtime_registry.rs')
           registry = registry_path.read_text(encoding='utf-8')
