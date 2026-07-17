@@ -8,3 +8,4 @@
 include!("import_commit_repository/types.rs");
 include!("import_commit_repository/commit.rs");
 include!("import_commit_repository/naming.rs");
+include!("import_commit_repository/recovery.rs");
