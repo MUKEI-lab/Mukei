@@ -3,7 +3,7 @@
 //! Only journal entries in terminal states are eligible. Non-terminal imports
 //! remain untouched so recovery can resume without silently losing source data.
 
-use crate::error::Result;
+use crate::error::{MukeiError, Result};
 use crate::storage::pool::{DatabasePool, DbError, PooledConnectionExt};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -43,15 +43,13 @@ impl StagedPlaintextCleanup {
         let staging_root = staging_root.into();
         tokio::task::spawn_blocking(move || sweep_paths(&staging_root, relative_paths))
             .await
-            .map_err(|error| crate::error::MukeiError::Invariant(format!(
-                "staged cleanup task failed: {error}"
-            )))
+            .map_err(|error| MukeiError::BlockingJoinFailed(error.to_string()))?
     }
 }
 
 fn sweep_paths(root: &Path, relative_paths: Vec<String>) -> Result<StagedCleanupReport> {
-    fs::create_dir_all(root)?;
-    let canonical_root = fs::canonicalize(root)?;
+    fs::create_dir_all(root).map_err(cleanup_io_error)?;
+    let canonical_root = fs::canonicalize(root).map_err(cleanup_io_error)?;
     let mut report = StagedCleanupReport::default();
 
     for relative in relative_paths {
@@ -68,7 +66,7 @@ fn sweep_paths(root: &Path, relative_paths: Vec<String>) -> Result<StagedCleanup
                 report.missing += 1;
                 continue;
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(cleanup_io_error(error)),
         };
 
         if metadata.file_type().is_symlink() {
@@ -80,32 +78,36 @@ fn sweep_paths(root: &Path, relative_paths: Vec<String>) -> Result<StagedCleanup
             continue;
         }
 
-        let canonical_candidate = fs::canonicalize(&candidate)?;
+        let canonical_candidate = fs::canonicalize(&candidate).map_err(cleanup_io_error)?;
         if !canonical_candidate.starts_with(&canonical_root) {
             report.unsafe_paths += 1;
             continue;
         }
 
-        fs::remove_file(canonical_candidate)?;
+        fs::remove_file(canonical_candidate).map_err(cleanup_io_error)?;
         report.removed += 1;
     }
 
     Ok(report)
 }
 
+fn cleanup_io_error(error: std::io::Error) -> MukeiError {
+    MukeiError::Invariant(format!("staged plaintext cleanup I/O failed: {}", error.kind()))
+}
+
 fn is_safe_relative_path(path: &Path) -> bool {
     !path.as_os_str().is_empty()
         && !path.is_absolute()
-        && path.components().all(|component| {
-            matches!(component, Component::Normal(_) | Component::CurDir)
-        })
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::storage::migrations::Migrator;
-    use crate::storage::universal::{ChatId, DuplicatePolicy};
+    use crate::storage::universal::ChatId;
     use crate::storage::universal_repository::UniversalStorageRepository;
     use crate::storage::{ImportJournalRepository, ImportState};
 
@@ -159,7 +161,6 @@ mod tests {
         assert_eq!(report.removed, 1);
         assert!(!staging.join("done.txt").exists());
         assert!(staging.join("active.txt").exists());
-        let _ = DuplicatePolicy::RenameNewEntry;
     }
 
     #[test]
