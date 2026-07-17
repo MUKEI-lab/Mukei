@@ -37,7 +37,7 @@ jobs:
         with:
           toolchain: 1.82.0
           components: clippy,rustfmt
-      - name: Apply exact critical and clippy fixes
+      - name: Apply critical and clippy fixes
         id: patch
         shell: python
         run: |
@@ -55,19 +55,26 @@ jobs:
                   path.write_text(after, encoding='utf-8')
                   changed_files.append(str(path))
 
+          def lines(*values: str) -> str:
+              return '\n'.join(values)
+
           try:
               object_path = Path('rust/crates/mukei-core/src/storage/object_store.rs')
               before = object_path.read_text(encoding='utf-8')
               object_store = before
-              old = '''        if final_path.exists() {
-                  self.verify_existing(&final_path, &digest, plaintext_size)?;
-                  return self.stored_object(digest, plaintext_size, relative_path, true);
-              }'''
-              new = '''        if final_path.exists() {
-                  self.verify_existing(&final_path, &digest, plaintext_size)
-                      .map_err(|_| ObjectStoreError::CorruptDeduplicatedObject)?;
-                  return self.stored_object(digest, plaintext_size, relative_path, true);
-              }'''
+              old = lines(
+                  '        if final_path.exists() {',
+                  '            self.verify_existing(&final_path, &digest, plaintext_size)?;',
+                  '            return self.stored_object(digest, plaintext_size, relative_path, true);',
+                  '        }',
+              )
+              new = lines(
+                  '        if final_path.exists() {',
+                  '            self.verify_existing(&final_path, &digest, plaintext_size)',
+                  '                .map_err(|_| ObjectStoreError::CorruptDeduplicatedObject)?;',
+                  '            return self.stored_object(digest, plaintext_size, relative_path, true);',
+                  '        }',
+              )
               if old in object_store:
                   object_store = object_store.replace(old, new, 1)
               elif new not in object_store:
@@ -81,22 +88,26 @@ jobs:
                   'sync_channel, Receiver, SyncSender, TrySendError,',
                   1,
               )
-              old = '''            let first = if timeout.is_zero() {
-                  match receiver.try_recv() {
-                      Ok(event) => Some(event),
-                      Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,
-                  }
-              } else {
-                  match receiver.recv_timeout(timeout) {
-                      Ok(event) => Some(event),
-                      Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => None,
-                  }
-              };'''
-              new = '''            let first = if timeout.is_zero() {
-                  receiver.try_recv().ok()
-              } else {
-                  receiver.recv_timeout(timeout).ok()
-              };'''
+              old = lines(
+                  '            let first = if timeout.is_zero() {',
+                  '                match receiver.try_recv() {',
+                  '                    Ok(event) => Some(event),',
+                  '                    Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,',
+                  '                }',
+                  '            } else {',
+                  '                match receiver.recv_timeout(timeout) {',
+                  '                    Ok(event) => Some(event),',
+                  '                    Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => None,',
+                  '                }',
+                  '            };',
+              )
+              new = lines(
+                  '            let first = if timeout.is_zero() {',
+                  '                receiver.try_recv().ok()',
+                  '            } else {',
+                  '                receiver.recv_timeout(timeout).ok()',
+                  '            };',
+              )
               if old in types:
                   types = types.replace(old, new, 1)
               elif new not in types:
@@ -106,20 +117,24 @@ jobs:
               download_path = Path('rust/crates/mukei-core/src/application_runtime/models_download.rs')
               before = download_path.read_text(encoding='utf-8')
               download = before
-              old = '''        #[cfg(not(feature = "network"))]
-              {
-                  return CommandAcknowledgementV2::rejected(
-                      Some(&command.envelope),
-                      RejectionReason::CapabilityUnavailable,
-                  );
-              }'''
-              new = '''        #[cfg(not(feature = "network"))]
-              {
-                  CommandAcknowledgementV2::rejected(
-                      Some(&command.envelope),
-                      RejectionReason::CapabilityUnavailable,
-                  )
-              }'''
+              old = lines(
+                  '        #[cfg(not(feature = "network"))]',
+                  '        {',
+                  '            return CommandAcknowledgementV2::rejected(',
+                  '                Some(&command.envelope),',
+                  '                RejectionReason::CapabilityUnavailable,',
+                  '            );',
+                  '        }',
+              )
+              new = lines(
+                  '        #[cfg(not(feature = "network"))]',
+                  '        {',
+                  '            CommandAcknowledgementV2::rejected(',
+                  '                Some(&command.envelope),',
+                  '                RejectionReason::CapabilityUnavailable,',
+                  '            )',
+                  '        }',
+              )
               if old in download:
                   download = download.replace(old, new, 1)
               elif new not in download:
@@ -139,8 +154,7 @@ jobs:
 
               universal_path = Path('rust/crates/mukei-core/src/storage/universal.rs')
               before = universal_path.read_text(encoding='utf-8')
-              universal = before
-              universal = universal.replace(
+              universal = before.replace(
                   '#[derive(Copy, Clone, Debug, PartialEq, Eq)]\npub enum DuplicatePolicy {',
                   '#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]\npub enum DuplicatePolicy {',
                   1,
@@ -164,16 +178,18 @@ jobs:
               trash_path = Path('rust/crates/mukei-core/src/storage/trash_repository.rs')
               before = trash_path.read_text(encoding='utf-8')
               trash = before
-              alias = '''type TrashTargetRow = (
-                  String,
-                  String,
-                  String,
-                  Option<String>,
-                  Option<String>,
-                  String,
-              );
-
-              '''
+              alias = lines(
+                  'type TrashTargetRow = (',
+                  '    String,',
+                  '    String,',
+                  '    String,',
+                  '    Option<String>,',
+                  '    Option<String>,',
+                  '    String,',
+                  ');',
+                  '',
+                  '',
+              )
               if 'type TrashTargetRow =' not in trash:
                   anchor = 'use uuid::Uuid;\n\n'
                   if anchor not in trash:
@@ -184,6 +200,8 @@ jobs:
                   'let row: Option<TrashTargetRow> =',
                   1,
               )
+              if 'let row: Option<(String, String, String, Option<String>, Option<String>, String)> =' in trash:
+                  raise RuntimeError('trash target row type was not resolved')
               save(trash_path, before, trash)
 
               wrapper_path = Path('rust/crates/mukei-core/src/storage/import_commit_repository.rs')
