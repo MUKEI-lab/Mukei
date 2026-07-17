@@ -1,0 +1,73 @@
+name: kotlin-port-conflict-diagnostic
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - .github/workflows/kotlin-port-conflict-diagnostic.yml
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+      - name: Publish pending
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'pending', context: 'kotlin-port-conflict-diagnostic', description: 'Locating first cherry-pick conflict', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
+      - name: Locate first conflict
+        shell: bash
+        run: |
+          set -u
+          git config user.name "mukei-port-diagnostic"
+          git config user.email "mukei-port-diagnostic@users.noreply.github.com"
+          git fetch --no-tags origin Kotlin:refs/remotes/origin/Kotlin
+          mkdir -p kotlin-port-conflict
+          picks=(
+            587dc2e2b277ee43328b998c91f984fdb9e0f62f
+            c0ef6cd10cc84e1f77abc6c2e3b2da5a192495ba
+            f969f2aeca821994d7c50c19e917f431662d701c
+            77c6f7fb3558329c096fc7d90f806a927004b3f4
+            9c3c57a8b8faf4e26dd862fba7d20109da96a321
+            94d32d4db8a2aa250b5e4afa618825aba5cb938f
+            29f2b764768707b509ba04aad123baf721d93983
+            2196c690d9ecfdee2a91f33741f280208d1f3762
+            5674765ce56aea807f9a1048607935e41d31070a
+            91f4c18bd4f0c870300a072d77c36680e5003e71
+            ed532aefb80825aeb3b607f536f5ed963e2bcb78
+            26ca8b2255e261167c87152dfdf9c50791d01cfb
+            e9233b4b52a8f801769b72f4acfa60c465a32345
+            65c68d6951ab4fd06195d783eca444aa41233d1a
+          )
+          for sha in "${picks[@]}"; do
+            echo "TRY $sha" | tee -a kotlin-port-conflict/result.txt
+            if git cherry-pick -x "$sha" >> kotlin-port-conflict/result.txt 2>&1; then
+              echo "PASS $sha" | tee -a kotlin-port-conflict/result.txt
+              continue
+            fi
+            echo "FAIL $sha" | tee -a kotlin-port-conflict/result.txt
+            git status --short >> kotlin-port-conflict/result.txt
+            git diff --name-only --diff-filter=U >> kotlin-port-conflict/result.txt
+            git diff --cc >> kotlin-port-conflict/conflict.diff
+            exit 0
+          done
+          echo "NO_CONFLICT" >> kotlin-port-conflict/result.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-port-conflict-${{ github.sha }}
+          path: kotlin-port-conflict
+          retention-days: 7
+      - name: Publish success
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'success', context: 'kotlin-port-conflict-diagnostic', description: 'Cherry-pick conflict captured', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
