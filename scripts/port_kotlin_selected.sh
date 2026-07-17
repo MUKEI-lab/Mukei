@@ -321,6 +321,29 @@ flush_path.write_text('''impl FeatureState {
 ''', encoding='utf-8')
 PY
 
+# Removing the obsolete Barrier variant after installing Flush.
+python <<'PY'
+from pathlib import Path
+
+state_path = Path('rust/crates/mukei-core/src/application_runtime/foundation_state.rs')
+state = state_path.read_text(encoding='utf-8')
+state = state.replace(
+    '    Barrier(tokio::sync::oneshot::Sender<()>),
+',
+    '',
+    1,
+)
+state = state.replace(
+    '''                    PersistenceCommand::Barrier(acknowledgement) => {
+                        let _ = acknowledgement.send(());
+                    }
+''',
+    '',
+    1,
+)
+state_path.write_text(state, encoding='utf-8')
+PY
+
 rm -f .github/workflows/kotlin-selective-port-audit.yml \
       .github/workflows/kotlin-selective-port.yml \
       .github/workflows/kotlin-port-conflict-diagnostic.yml \
