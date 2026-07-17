@@ -1,3 +1,8 @@
+use jni::objects::JObject;
+use jni::sys::jbyteArray;
+use jni::JNIEnv;
+use zeroize::Zeroize;
+
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 fn generate_32_byte_key(env: &mut JNIEnv<'_>) -> jbyteArray {

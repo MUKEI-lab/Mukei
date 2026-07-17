@@ -1,3 +1,8 @@
+use jni::objects::{JByteArray, JObject};
+use jni::sys::{jbyteArray, jlong};
+use jni::JNIEnv;
+use zeroize::{Zeroize, Zeroizing};
+
 const MAX_PROVIDER_KEY_BYTES: usize = 16 * 1024;
 
 #[no_mangle]

@@ -3,11 +3,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use jni::objects::{JByteArray, JObject};
-use jni::sys::{jbyteArray, jlong};
-use jni::JNIEnv;
+use jni::sys::jlong;
 use mukei_core::application_runtime::MukeiRuntime;
-use zeroize::{Zeroize, Zeroizing};
+
+// Child JNI modules intentionally access these crate-root helpers through this
+// module. Keeping each transport in a real Rust module prevents textual
+// `include!` import collisions while preserving the exported JNI symbol names.
+use super::{
+    error_payload, guarded_bytes, invalid_handle_payload, runtime_entry, runtime_services,
+    serialize, to_java_bytes, RUNTIMES,
+};
 
 const MAX_GENERATION: u32 = 0x7fff_ffff;
 
@@ -112,8 +117,10 @@ impl RuntimeRegistry {
     }
 }
 
-include!("secure_runtime_jni.rs");
-include!("remote_tools_jni.rs");
+#[path = "remote_tools_jni.rs"]
+mod remote_tools_jni;
+#[path = "secure_runtime_jni.rs"]
+mod secure_runtime_jni;
 
 #[cfg(test)]
 mod tests {
