@@ -1,0 +1,74 @@
+name: release-cross-diagnostics
+
+on:
+  pull_request:
+    branches: [ Kotlin ]
+    paths:
+      - "rust/**"
+      - ".github/workflows/release-cross-diagnostics.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ANDROID_NDK_VERSION: "27.2.12479018"
+  CARGO_NDK_VERSION: "4.1.2"
+
+jobs:
+  cross-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, x86_64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.86.0
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - name: Install pinned Android native build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build perl make
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;${ANDROID_NDK_VERSION}"
+          cargo install cargo-ndk --version "${CARGO_NDK_VERSION}" --locked
+      - name: Build ABI native runtime
+        shell: bash
+        env:
+          ABI: ${{ matrix.abi }}
+        run: |
+          set -o pipefail
+          {
+            set -eux
+            ndk="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}"
+            output="$GITHUB_WORKSPACE/android/core/native/src/main/jniLibs"
+            cmake -S rust/llama-cpp-prebuilt \
+              -B "build/llama-$ABI" \
+              -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
+              -DANDROID_ABI="$ABI" \
+              -DANDROID_PLATFORM=android-26 \
+              -DANDROID_STL=c++_static \
+              -DMUKEI_LLAMA_FORCE_REBUILD=ON
+            cmake --build "build/llama-$ABI" --target mukei_llama_native
+            export MUKEI_LLAMA_NATIVE_LIB_DIR="$GITHUB_WORKSPACE/rust/llama-cpp-prebuilt/prebuilt/$ABI"
+            cd rust
+            cargo ndk -t "$ABI" -o ../android/core/native/src/main/jniLibs \
+              build -p mukei-android-jni --release \
+              --no-default-features \
+              --features runtime_production,runtime_hardening
+            test -s "../android/core/native/src/main/jniLibs/$ABI/libmukei_android.so"
+            test -s "$MUKEI_LLAMA_NATIVE_LIB_DIR/libmukei_llama_native.so"
+          } 2>&1 | tee "$RUNNER_TEMP/release-$ABI.log"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-cross-${{ matrix.abi }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-${{ matrix.abi }}.log
+          if-no-files-found: warn
+          retention-days: 7
