@@ -1,5 +1,6 @@
 name: storage-branch-validation
 
+# Connector-authored pushes intentionally validate bot-produced source commits.
 on:
   push:
     branches:
