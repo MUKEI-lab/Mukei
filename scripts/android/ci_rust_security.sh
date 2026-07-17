@@ -34,7 +34,13 @@ cmake --build build/llama-host --target mukei_llama_native_smoke
 ctest --test-dir build/llama-host --output-on-failure
 
 cd "$repo_root/rust"
-MUKEI_LLAMA_NATIVE_LIB_DIR="$repo_root/rust/llama-cpp-prebuilt/prebuilt/host" \
-  cargo check -p mukei-android-jni \
-    --no-default-features \
-    --features native_inference
+export MUKEI_LLAMA_NATIVE_LIB_DIR="$repo_root/rust/llama-cpp-prebuilt/prebuilt/host"
+
+# Validate both the isolated adapter and the exact production feature union
+# before paying the cost of a dual-ABI Android cross-build.
+cargo check -p mukei-android-jni \
+  --no-default-features \
+  --features native_inference
+cargo check -p mukei-android-jni \
+  --no-default-features \
+  --features runtime_production,runtime_hardening
