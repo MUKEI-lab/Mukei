@@ -52,7 +52,8 @@ jobs:
         run: cargo test -p mukei-core --lib
       - name: Test canonical prompt sandbox
         working-directory: rust
-        run: cargo test -p mukei-core tools::
+        run: >-
+          cargo test -p mukei-core tools::
       - name: Check SQLCipher core
         working-directory: rust
         run: >-
