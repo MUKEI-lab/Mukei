@@ -148,7 +148,6 @@ jobs:
           rustfmt --edition 2021 crates/mukei-android-jni/src/secure_runtime_jni.rs
           rustfmt --edition 2021 crates/mukei-android-jni/src/remote_tools_jni.rs
           rustfmt --edition 2021 crates/mukei-android-jni/src/runtime_registry.rs
-          rustfmt --edition 2021 crates/mukei-android-jni/src/lib.rs
       - name: Verify patch whitespace
         run: git diff --check
       - name: Core Cargo check
