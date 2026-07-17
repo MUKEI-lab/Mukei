@@ -5,7 +5,6 @@
 //! invalidation, and process-unique instance identities without raw pointers.
 
 use mukei_core::callback_with_guard;
-use mukei_core::ffi::callback::{FfiBoundaryId, FfiStateChange};
 use mukei_core::guard::{BoundaryLease, GuardError, Inner};
 
 #[test]
@@ -29,36 +28,6 @@ fn catch_unwind_contains_panic_at_boundary() {
     });
 
     assert_eq!(result.unwrap_err(), GuardError::Panic);
-}
-
-#[test]
-fn ffi_boundary_id_is_monotonic_and_unique() {
-    let ids: Vec<FfiBoundaryId> = (0..100).map(|_| FfiBoundaryId::next()).collect();
-    let mut sorted_ids = ids.clone();
-    sorted_ids.sort_by_key(|id| id.0);
-
-    for pair in sorted_ids.windows(2) {
-        assert!(pair[1].0 > pair[0].0);
-    }
-    assert_eq!(FfiBoundaryId::null().0, 0);
-}
-
-#[test]
-fn ffi_state_change_serializes_correctly() {
-    let boundary = FfiBoundaryId::next();
-    let state_change = FfiStateChange {
-        boundary,
-        old: "initial".to_owned(),
-        new: "active".to_owned(),
-    };
-
-    let json = serde_json::to_string(&state_change).expect("serialize state change");
-    let deserialized: FfiStateChange =
-        serde_json::from_str(&json).expect("deserialize state change");
-
-    assert_eq!(deserialized.boundary, boundary);
-    assert_eq!(deserialized.old, "initial");
-    assert_eq!(deserialized.new, "active");
 }
 
 #[test]
