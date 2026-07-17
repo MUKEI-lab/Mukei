@@ -19,10 +19,14 @@ permissions:
   contents: write
   statuses: write
 
+env:
+  CARGO_TERM_COLOR: never
+  RUST_BACKTRACE: 1
+
 jobs:
   register-and-verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,12 +36,12 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.82.0
-          components: rustfmt
       - name: Register V014 and V015 in embedded migrations
         id: patch
         shell: python
         run: |
           from pathlib import Path
+          import os
 
           path = Path('rust/crates/mukei-core/src/storage/migrations.rs')
           source = path.read_text(encoding='utf-8')
@@ -82,15 +86,32 @@ jobs:
 
           if changed:
               path.write_text(source, encoding='utf-8')
-          print(f'changed={str(changed).lower()}')
-          with open(Path(__import__('os').environ['GITHUB_OUTPUT']), 'a', encoding='utf-8') as output:
+          with open(Path(os.environ['GITHUB_OUTPUT']), 'a', encoding='utf-8') as output:
               output.write(f'changed={str(changed).lower()}\n')
-      - name: Format migration module
-        if: steps.patch.outputs.changed == 'true'
-        run: rustfmt --edition 2021 rust/crates/mukei-core/src/storage/migrations.rs
       - name: Verify embedded migration contract
-        working-directory: rust
-        run: cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite --test universal_storage_embedded_migrations -- --nocapture
+        id: verify
+        shell: bash
+        run: |
+          set +e
+          mkdir -p ci-migration-registration-logs
+          cd rust
+          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite \
+            --test universal_storage_embedded_migrations -- --nocapture \
+            > ../ci-migration-registration-logs/test.log 2>&1
+          test_exit=$?
+          echo "test_exit=$test_exit" >> "$GITHUB_OUTPUT"
+          echo "test=$test_exit" > ../ci-migration-registration-logs/summary.txt
+          exit 0
+      - name: Upload migration registration diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-migration-registration-${{ github.sha }}
+          path: ci-migration-registration-logs
+          if-no-files-found: error
+          retention-days: 7
+      - name: Enforce migration verification
+        run: test '${{ steps.verify.outputs.test_exit }}' = '0'
       - name: Commit verified registration
         if: steps.patch.outputs.changed == 'true'
         run: |
@@ -124,6 +145,6 @@ jobs:
               sha: context.sha,
               state: 'failure',
               context: 'storage-migration-registration',
-              description: 'Migration registration or Cargo verification failed',
+              description: `Migration Cargo test exit=${{ steps.verify.outputs.test_exit || '?' }}`.slice(0, 140),
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
