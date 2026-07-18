@@ -49,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import ai.mukei.android.designsystem.MukeiLayout
 import ai.mukei.android.designsystem.MukeiMark
 import ai.mukei.android.designsystem.MukeiSpacing
+import java.time.LocalTime
 
 enum class TopLevelDestination(
     val drawerLabel: String,
@@ -323,6 +324,7 @@ private fun HomeSurface(
     var draft by rememberSaveable { mutableStateOf("") }
     var selectedCapabilityId by rememberSaveable { mutableStateOf<String?>(null) }
     val selectedCapability = HomeCapabilities.firstOrNull { it.id == selectedCapabilityId }
+    val greeting = remember { homeGreeting(LocalTime.now().hour) }
 
     LaunchedEffect(resetGeneration) {
         if (resetGeneration > 0) {
@@ -346,14 +348,14 @@ private fun HomeSurface(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
+                text = greeting,
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(MukeiSpacing.ExtraSmall))
+            Text(
                 text = "What’s on your mind?",
                 style = MaterialTheme.typography.headlineLarge,
-            )
-            Spacer(Modifier.height(MukeiSpacing.Small))
-            Text(
-                text = "Start naturally. Ask, build, research, write, or describe what you want made.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(MukeiSpacing.Section))
 
@@ -393,7 +395,7 @@ private fun HomeSurface(
                     Text(selectedCapability?.placeholder ?: "Tell Mukei what you want to do…")
                 },
                 supportingText = {
-                    Text("Sending is intentionally disabled until the Conversation vertical slice is wired end-to-end.")
+                    Text("Conversation becomes available when its end-to-end runtime slice is ready.")
                 },
                 minLines = 3,
             )
@@ -426,12 +428,6 @@ private fun HomeSurface(
             ) {
                 Text("Send")
             }
-            Spacer(Modifier.height(MukeiSpacing.Section))
-            Text(
-                text = "Private intelligence · local-first foundation",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
@@ -482,4 +478,11 @@ private fun ReservedDestinationSurface(destination: TopLevelDestination) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+internal fun homeGreeting(hour: Int): String = when (hour) {
+    in 5..11 -> "Good morning."
+    in 12..16 -> "Good afternoon."
+    in 17..22 -> "Good evening."
+    else -> "Ready when you are."
 }
