@@ -113,6 +113,19 @@ impl MukeiRuntime {
                 .and_then(Value::as_str)
                 .map(str::to_owned);
             let size_bytes = platform_payload.get("size_bytes").and_then(Value::as_u64);
+            let ocr = platform_payload
+                .get("ocr")
+                .cloned()
+                .unwrap_or_else(|| json!({"status": "unavailable"}));
+            let ocr_status = ocr
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("unavailable")
+                .to_owned();
+            let ocr_characters = ocr
+                .get("characters")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
             let (Some(staged_path), Some(size_bytes)) = (staged_path, size_bytes) else {
                 fail_storage_import_operation(
                     &features,
@@ -152,6 +165,7 @@ impl MukeiRuntime {
                             "display_name": receipt.display_name,
                             "size_bytes": receipt.plaintext_size,
                             "deduplicated": receipt.deduplicated,
+                            "ocr": ocr,
                         }),
                     );
                     events.emit(
@@ -164,6 +178,8 @@ impl MukeiRuntime {
                             "display_name": receipt.display_name,
                             "size_bytes": receipt.plaintext_size,
                             "deduplicated": receipt.deduplicated,
+                            "ocr_status": ocr_status,
+                            "ocr_characters": ocr_characters,
                         }),
                         Some(&command_envelope),
                         Some(operation_id_for_task.clone()),
