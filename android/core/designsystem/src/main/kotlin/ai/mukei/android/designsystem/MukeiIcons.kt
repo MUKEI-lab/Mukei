@@ -1,6 +1,8 @@
 package ai.mukei.android.designsystem
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -16,8 +18,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.LocalContentColor
 
 /**
  * Small centralized icon language for the Android shell.
@@ -133,9 +133,9 @@ fun MukeiIcon(
                     lineTo(w * 0.50f, h * 0.40f)
                     lineTo(w * 0.84f, h * 0.40f)
                     lineTo(w * 0.84f, h * 0.76f)
-                    quadraticTo(w * 0.84f, h * 0.82f, w * 0.77f, h * 0.82f)
+                    quadraticBezierTo(w * 0.84f, h * 0.82f, w * 0.77f, h * 0.82f)
                     lineTo(w * 0.20f, h * 0.82f)
-                    quadraticTo(w * 0.14f, h * 0.82f, w * 0.14f, h * 0.76f)
+                    quadraticBezierTo(w * 0.14f, h * 0.82f, w * 0.14f, h * 0.76f)
                     close()
                 }
                 drawPath(path, tint, style = stroke)
