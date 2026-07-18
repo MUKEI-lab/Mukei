@@ -20,22 +20,44 @@ Each ADR should contain:
 5. Migration/compatibility impact
 6. Security/privacy impact
 7. Product/UX impact
-8. Status and date
+8. Status and date/review state where applicable
 
-## Initial decision queue
+## Decision queue
 
-| ADR | Decision | Priority |
-|---|---|---|
-| ADR-001 | Workspace cardinality and chat relationship | Critical before Workspace implementation |
-| ADR-002 | Universal Storage vs Workspace ownership/reference model | Critical before Storage port |
-| ADR-003 | Project ownership vs aggregation | Critical before Projects |
-| ADR-004 | Artifact identity and lifecycle | High before Artifact/export implementation |
-| ADR-005 | Authoritative state/recovery after process death | Critical before Conversation persistence |
-| ADR-006 | Android navigation architecture | High before Product Shell implementation |
-| ADR-007 | Protocol V2 contract evolution/versioning rules | High before adding workspace/storage commands |
+| ADR | Decision | Status | Priority |
+|---|---|---|---|
+| [ADR-001](ADR-001-workspace-cardinality-and-chat-relationship.md) | Workspace cardinality and chat relationship | Proposed | Critical before Workspace implementation |
+| [ADR-002](ADR-002-universal-storage-vs-workspace-ownership.md) | Universal Storage vs Workspace ownership/reference model | Proposed | Critical before Storage port |
+| [ADR-003](ADR-003-project-ownership-vs-aggregation.md) | Project ownership vs aggregation | Proposed | Critical before Projects |
+| [ADR-004](ADR-004-artifact-identity-and-lifecycle.md) | Artifact identity and lifecycle | Proposed | High before Artifact/export implementation |
+| [ADR-005](ADR-005-authoritative-state-and-process-recovery.md) | Authoritative state/recovery after process death | Proposed | Critical before Conversation persistence |
+| [ADR-006](ADR-006-android-navigation-architecture.md) | Android navigation architecture | Proposed | High before Product Shell implementation |
+| [ADR-007](ADR-007-protocol-v2-evolution-and-query-contract.md) | Protocol V2 evolution and bounded query/snapshot contract | Proposed | High before product-domain protocol expansion |
+
+## Recommended review order
+
+```text
+ADR-005 State authority
+  ↓
+ADR-007 Protocol/query evolution
+  ↓
+ADR-006 Navigation
+  ↓
+ADR-001 Workspace relationship
+  ↓
+ADR-002 Storage/workspace scope semantics
+  ↓
+ADR-004 Artifact identity
+  ↓
+ADR-003 Project aggregation
+```
+
+The order follows implementation dependencies rather than numerical order.
 
 ## Rule
 
 An ADR should be used when changing the decision later would require data migration, protocol migration, major UI restructuring, security review, or substantial code rewrite.
 
 Routine implementation details do not require ADRs.
+
+A `Proposed` ADR is not permission to silently hard-code the recommendation. It becomes normative only after explicit review/acceptance or when superseded by an accepted alternative.
