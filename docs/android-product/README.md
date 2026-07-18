@@ -22,15 +22,15 @@ The blueprint remains the visual and experiential reference. These documents def
 | `00_PRODUCT_VISION.md` | Product identity, principles, non-goals, trust contract | Drafted |
 | `01_INFORMATION_ARCHITECTURE.md` | Top-level surfaces and domain relationships visible to users | Drafted |
 | `02_UI_UX_FLOWS.md` | End-to-end user journeys, including failure/cancellation/recovery | Drafted |
-| `03_SCREEN_SPECIFICATIONS.md` | Per-screen behavioral contracts | Planned |
-| `04_DESIGN_SYSTEM.md` | Compose tokens, primitives, component rules, motion | Planned |
-| `05_INTERACTION_STATE_MODEL.md` | Explicit UI/domain state machines | Planned |
-| `06_UI_BACKEND_CONTRACT.md` | Compose action ↔ Protocol V2/Rust mapping and missing APIs | Planned |
-| `07_STORAGE_WORKSPACE_MODEL.md` | Universal Storage, workspace, project, artifact ownership/lifecycle | Planned |
+| `03_SCREEN_SPECIFICATIONS.md` | Per-screen behavioral contracts and acceptance signals | Drafted |
+| `04_DESIGN_SYSTEM.md` | Compose-oriented semantic tokens, primitives, component and motion rules | Drafted |
+| `05_INTERACTION_STATE_MODEL.md` | Explicit UI/domain/runtime state machines and recovery rules | Drafted |
+| `06_UI_BACKEND_CONTRACT.md` | Compose action ↔ Protocol V2/Rust mapping and missing APIs | Next |
+| `07_STORAGE_WORKSPACE_MODEL.md` | Universal Storage, workspace, project, artifact ownership/lifecycle | Next |
 | `08_ANDROID_ARCHITECTURE.md` | Kotlin modules, state ownership, repositories, navigation | Planned |
 | `09_IMPLEMENTATION_ROADMAP.md` | Vertical slices and milestone exit criteria | Seeded |
 | `10_TEST_ACCEPTANCE_PLAN.md` | Device-level acceptance and regression matrix | Planned |
-| `ADR/` | Architecture Decision Records for durable decisions | Planned |
+| `ADR/` | Architecture Decision Records for durable decisions | Seeded |
 
 ## Source hierarchy
 
@@ -77,6 +77,29 @@ Acceptance tests
 ```
 
 A feature is not complete merely because a screen renders or a backend API exists. It is complete when the end-to-end user flow meets its acceptance criteria on a real device/emulator.
+
+## Current specification dependency chain
+
+```text
+00 Product Vision
+  ↓
+01 Information Architecture
+  ↓
+02 UI/UX Flows
+  ↓
+03 Screen Specifications ─┐
+04 Design System          ├─→ 06 UI/Backend Contract
+05 Interaction State     ┘          ↓
+                         07 Storage/Workspace Model
+                                  ↓
+                         08 Android Architecture
+                                  ↓
+                         09 Implementation Roadmap
+                                  ↓
+                         10 Test Acceptance Plan
+```
+
+`06` and `07` are the next critical documents because they determine which parts of the current Protocol V2/runtime are already usable and which domain APIs must be added before the blueprint can be implemented truthfully.
 
 ## Initial decisions to resolve via ADR
 
