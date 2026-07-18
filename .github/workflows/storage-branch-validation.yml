@@ -35,7 +35,7 @@ jobs:
               sha: context.sha,
               state: 'pending',
               context: 'storage-branch-validation',
-              description: 'Storage check, tests, Clippy, and migrations running',
+              description: 'Storage, Android OCR, Clippy, and migrations running',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
 
@@ -127,12 +127,48 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  android-ocr:
+    name: Android OCR integration
+    needs: publish-pending
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.4.1"
+      - name: Compile, test, lint, and assemble OCR integration
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci-android-ocr
+          gradle -p android \
+            :core:protocol:testDebugUnitTest \
+            :core:native:testDebugUnitTest \
+            :app:lintDebug \
+            :app:assembleDebug \
+            :app:assembleOffline \
+            --stacktrace 2>&1 | tee ci-android-ocr/gradle.log
+      - name: Upload Android OCR diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-ocr-validation-${{ github.sha }}
+          path: ci-android-ocr
+          if-no-files-found: warn
+          retention-days: 7
+
   publish-status:
     name: publish storage validation status
     if: always()
     needs:
       - storage-core
       - embedded-migrations
+      - android-ocr
     runs-on: ubuntu-latest
     steps:
       - name: Publish commit status
@@ -141,15 +177,16 @@ jobs:
           script: |
             const storage = '${{ needs.storage-core.result }}';
             const migrations = '${{ needs.embedded-migrations.result }}';
-            const success = storage === 'success' && migrations === 'success';
-            const details = `storage=${storage}, migrations=${migrations}`;
+            const android = '${{ needs.android-ocr.result }}';
+            const success = storage === 'success' && migrations === 'success' && android === 'success';
+            const details = `storage=${storage}, migrations=${migrations}, android=${android}`;
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: context.sha,
               state: success ? 'success' : 'failure',
               context: 'storage-branch-validation',
-              description: success ? 'Storage check, tests, Clippy, and migrations passed' : details.slice(0, 140),
+              description: success ? 'Storage, Android OCR, Clippy, and migrations passed' : details.slice(0, 140),
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
             if (!success) core.setFailed(`Storage validation failed: ${details}`);
