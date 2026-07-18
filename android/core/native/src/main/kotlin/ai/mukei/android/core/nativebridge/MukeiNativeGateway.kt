@@ -156,7 +156,9 @@ internal object NativeBindings {
      * Key generation must not depend on JNI availability because this is part of
      * the secure runtime bootstrap that precedes native runtime creation.
      */
-    fun generateDatabaseKey(): ByteArray = ByteArray(DATABASE_KEY_BYTES).also(secureRandom::nextBytes)
+    fun generateDatabaseKey(): ByteArray = ByteArray(DATABASE_KEY_BYTES).also {
+        secureRandom.nextBytes(it)
+    }
 
     external fun createRuntime(configJson: ByteArray): Long
 
