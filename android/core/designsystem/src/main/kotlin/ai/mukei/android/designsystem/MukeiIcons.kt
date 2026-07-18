@@ -73,15 +73,17 @@ fun MukeiIcon(
             }
 
             MukeiIconKey.NEW_CHAT -> {
-                drawRoundRect(
-                    color = tint,
-                    topLeft = p(0.14f, 0.18f),
-                    size = Size(w * 0.64f, h * 0.60f),
-                    cornerRadius = CornerRadius(w * 0.13f, h * 0.13f),
-                    style = stroke,
-                )
-                drawLine(tint, p(0.70f, 0.16f), p(0.70f, 0.42f), strokeWidth, StrokeCap.Round)
-                drawLine(tint, p(0.57f, 0.29f), p(0.83f, 0.29f), strokeWidth, StrokeCap.Round)
+                // Compose-pencil: intentionally reads as "start writing" rather than
+                // external-link/open-in-new. Kept simple so it remains clear at 22dp.
+                drawLine(tint, p(0.27f, 0.73f), p(0.68f, 0.32f), strokeWidth, StrokeCap.Round)
+                drawLine(tint, p(0.35f, 0.81f), p(0.76f, 0.40f), strokeWidth, StrokeCap.Round)
+                drawLine(tint, p(0.27f, 0.73f), p(0.23f, 0.85f), strokeWidth, StrokeCap.Round)
+                drawLine(tint, p(0.35f, 0.81f), p(0.23f, 0.85f), strokeWidth, StrokeCap.Round)
+                drawLine(tint, p(0.68f, 0.32f), p(0.74f, 0.26f), strokeWidth, StrokeCap.Round)
+                drawLine(tint, p(0.76f, 0.40f), p(0.82f, 0.34f), strokeWidth, StrokeCap.Round)
+                drawLine(tint, p(0.74f, 0.26f), p(0.82f, 0.34f), strokeWidth, StrokeCap.Round)
+                drawLine(tint, p(0.18f, 0.82f), p(0.18f, 0.90f), strokeWidth, StrokeCap.Round)
+                drawLine(tint, p(0.18f, 0.90f), p(0.63f, 0.90f), strokeWidth, StrokeCap.Round)
             }
 
             MukeiIconKey.MORE -> {
