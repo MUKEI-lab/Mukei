@@ -25,12 +25,12 @@ The blueprint remains the visual and experiential reference. These documents def
 | `03_SCREEN_SPECIFICATIONS.md` | Per-screen behavioral contracts and acceptance signals | Drafted |
 | `04_DESIGN_SYSTEM.md` | Compose-oriented semantic tokens, primitives, component and motion rules | Drafted |
 | `05_INTERACTION_STATE_MODEL.md` | Explicit UI/domain/runtime state machines and recovery rules | Drafted |
-| `06_UI_BACKEND_CONTRACT.md` | Compose action ↔ Protocol V2/Rust mapping and missing APIs | Next |
-| `07_STORAGE_WORKSPACE_MODEL.md` | Universal Storage, workspace, project, artifact ownership/lifecycle | Next |
-| `08_ANDROID_ARCHITECTURE.md` | Kotlin modules, state ownership, repositories, navigation | Planned |
-| `09_IMPLEMENTATION_ROADMAP.md` | Vertical slices and milestone exit criteria | Seeded |
-| `10_TEST_ACCEPTANCE_PLAN.md` | Device-level acceptance and regression matrix | Planned |
-| `ADR/` | Architecture Decision Records for durable decisions | Seeded |
+| `06_UI_BACKEND_CONTRACT.md` | Compose action ↔ Protocol V2/Rust mapping and missing APIs | Drafted |
+| `07_STORAGE_WORKSPACE_MODEL.md` | Universal Storage, workspace, project, artifact ownership/lifecycle | Drafted |
+| `08_ANDROID_ARCHITECTURE.md` | Kotlin modules, state ownership, repositories, navigation | Drafted |
+| `09_IMPLEMENTATION_ROADMAP.md` | Dependency-gated vertical slices and milestone exit criteria | Drafted v0.2 |
+| `10_TEST_ACCEPTANCE_PLAN.md` | Device-level acceptance and regression matrix | Drafted |
+| `ADR/` | Architecture Decision Records for durable decisions | 7 Proposed |
 
 ## Source hierarchy
 
@@ -94,19 +94,21 @@ A feature is not complete merely because a screen renders or a backend API exist
                                   ↓
                          08 Android Architecture
                                   ↓
+                         ADR review
+                                  ↓
                          09 Implementation Roadmap
                                   ↓
                          10 Test Acceptance Plan
 ```
 
-`06` and `07` are the next critical documents because they determine which parts of the current Protocol V2/runtime are already usable and which domain APIs must be added before the blueprint can be implemented truthfully.
+The narrative specification set is now drafted end-to-end. The next gate is explicit review of the proposed ADRs, then implementation starts with the M1A typed runtime/protocol foundation and M1B product shell defined in `09_IMPLEMENTATION_ROADMAP.md`.
 
-## Initial decisions to resolve via ADR
+## Proposed ADR decisions to review
 
-1. Is there exactly one workspace per chat, or can a chat attach multiple workspaces?
-2. Can a workspace exist without a chat?
-3. Is a project an aggregation layer over chats/workspaces/files, or an owning container?
-4. What distinguishes an artifact from an ordinary generated file at the data-model level?
-5. Which state is authoritative after process death: Rust snapshot, Kotlin persistence, or a reconciled projection?
-6. What is the canonical navigation model: drawer + destinations only, or nested navigation graphs per feature?
-7. Which Protocol V2 commands/events are required before the first real conversation MVP can ship?
+1. Workspace cardinality and chat relationship.
+2. Universal Storage vs Workspace ownership/reference semantics.
+3. Project as aggregation/context rather than byte-owning scope.
+4. Artifact as semantic identity over durable storage versions.
+5. Layered authoritative state and process-death reconciliation.
+6. Single-Activity Compose navigation with typed detail routes.
+7. Protocol V2 additive evolution plus bounded query/snapshot contract.
