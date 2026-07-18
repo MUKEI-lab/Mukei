@@ -58,15 +58,17 @@ private fun MukeiApp(backendState: BackendRuntimeHost.State) {
                 LinearProgressIndicator()
             }
             Text(
-                text = when (backendState) {
-                    BackendRuntimeHost.State.Starting -> "Starting encrypted native runtime"
-                    is BackendRuntimeHost.State.Ready -> "Backend ready · ${backendState.securitySummary}"
-                    is BackendRuntimeHost.State.Failed -> "Backend unavailable · ${backendState.code}"
-                    BackendRuntimeHost.State.Stopped -> "Backend stopped"
-                },
+                text = readinessHeadline(backendState),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (backendState is BackendRuntimeHost.State.Ready) {
+                Text(
+                    text = backendState.readiness.diagnosticSummary(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
                 text = "Protocol ${ProtocolVersion.CURRENT.major}.${ProtocolVersion.CURRENT.minor}",
                 style = MaterialTheme.typography.bodySmall,
@@ -74,4 +76,17 @@ private fun MukeiApp(backendState: BackendRuntimeHost.State) {
             )
         }
     }
+}
+
+private fun readinessHeadline(state: BackendRuntimeHost.State): String = when (state) {
+    BackendRuntimeHost.State.Starting -> "Starting encrypted native runtime"
+    is BackendRuntimeHost.State.Ready -> when (state.readiness.inference.status) {
+        ReadinessStatus.READY -> "Backend ready · inference ready"
+        ReadinessStatus.ACTION_REQUIRED -> "Backend ready · model artifacts required"
+        ReadinessStatus.DEGRADED -> "Backend ready · inference degraded"
+        ReadinessStatus.UNAVAILABLE -> "Backend ready · inference unavailable"
+        ReadinessStatus.UNKNOWN -> "Backend ready · checking inference capability"
+    }
+    is BackendRuntimeHost.State.Failed -> "Backend unavailable · ${state.code}"
+    BackendRuntimeHost.State.Stopped -> "Backend stopped"
 }
