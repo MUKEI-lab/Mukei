@@ -9,6 +9,14 @@ import androidx.compose.runtime.setValue
 import ai.mukei.android.core.nativebridge.AndroidPlatformRequestProcessor
 import ai.mukei.android.core.nativebridge.RustNativeGateway
 import ai.mukei.android.core.nativebridge.SecureRuntimeFactory
+import ai.mukei.android.protocol.AcknowledgementStatus
+import ai.mukei.android.protocol.CommandEnvelopeV2
+import ai.mukei.android.protocol.EventEnvelopeV2
+import ai.mukei.android.protocol.EventSequenceTracker
+import ai.mukei.android.protocol.ProtocolJsonCodec
+import ai.mukei.android.protocol.ProtocolVersion
+import ai.mukei.android.protocol.RuntimeContractJsonCodec
+import ai.mukei.android.protocol.RuntimeContractSnapshot
 import java.io.Closeable
 import java.io.File
 import java.nio.charset.StandardCharsets
@@ -21,23 +29,32 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import org.json.JSONObject
 
-/** Process-scoped owner for the native runtime, event stream and Android broker. */
+/** Process-scoped owner for the native runtime, typed event stream and Android broker. */
 object BackendRuntimeHost {
     sealed interface State {
         data object Starting : State
-        data class Ready(val securitySummary: String) : State
+        data class Ready(
+            val readiness: AppReadiness,
+            val runtimeContract: RuntimeContractSnapshot,
+        ) : State
         data class Failed(val code: String) : State
         data object Stopped : State
     }
 
     data class RuntimeEventBatch(
-        val events: List<String>,
+        val runtimeSessionId: String,
+        val events: List<EventEnvelopeV2>,
         val hasMore: Boolean,
+        val sequenceGapCount: Int,
+        val runtimeSessionChanged: Boolean,
     )
 
     data class EventStatus(
+        val runtimeSessionId: String? = null,
         val deliveredEvents: Long = 0,
         val lastEventType: String? = null,
+        val detectedSequenceGaps: Long = 0,
+        val runtimeSessionChanges: Long = 0,
     )
 
     fun interface EventBatchListener {
@@ -60,6 +77,7 @@ object BackendRuntimeHost {
     }
     private val gateway = AtomicReference<RustNativeGateway?>(null)
     private val eventListeners = CopyOnWriteArraySet<EventBatchListener>()
+    private val eventSequenceTracker = EventSequenceTracker()
 
     var state: State by mutableStateOf<State>(State.Starting)
         private set
@@ -80,6 +98,7 @@ object BackendRuntimeHost {
         if (!started.compareAndSet(false, true)) return
         running.set(true)
         terminalFailure.set(null)
+        eventSequenceTracker.reset()
         val appContext = context.applicationContext
         bootstrapExecutor.execute {
             var ownedGateway: RustNativeGateway? = null
@@ -100,15 +119,12 @@ object BackendRuntimeHost {
 
                 val activeGateway = SecureRuntimeFactory.open(appContext, configJson)
                 ownedGateway = activeGateway
-                val acknowledgement = JSONObject(
-                    String(
-                        activeGateway.submitCommand(initializeEnvelope(configPath)),
-                        StandardCharsets.UTF_8,
-                    ),
+                val acknowledgement = ProtocolJsonCodec.decodeAcknowledgement(
+                    activeGateway.submitCommand(initializeEnvelope(configPath)),
                 )
-                if (acknowledgement.optString("status") != "accepted") {
+                if (acknowledgement.status != AcknowledgementStatus.ACCEPTED) {
                     throw IllegalStateException(
-                        acknowledgement.optString("rejection_reason", "initialize_rejected"),
+                        acknowledgement.rejectionReason ?: "initialize_rejected",
                     )
                 }
                 if (!running.get()) {
@@ -117,20 +133,19 @@ object BackendRuntimeHost {
                 }
 
                 gateway.set(activeGateway)
-                val security = JSONObject(
-                    String(activeGateway.securityStatus(), StandardCharsets.UTF_8),
+                val runtimeContract = RuntimeContractJsonCodec.decode(
+                    activeGateway.protocolCapabilities(),
                 )
-                val summary = listOf(
-                    security.optString("sqlcipher", "unknown"),
-                    security.optString("projections", "unknown"),
-                    security.optString("rag", "unknown"),
-                    if (security.optBoolean("panic_hook", false)) {
-                        "panic-contained"
-                    } else {
-                        "panic-hook-missing"
-                    },
-                ).joinToString(" · ")
-                publish(State.Ready(summary))
+                val readiness = AppReadiness.fromSecurityStatus(activeGateway.securityStatus())
+                if (!readiness.shellUsable) {
+                    throw IllegalStateException("secure_storage_not_ready")
+                }
+                publish(
+                    State.Ready(
+                        readiness = readiness,
+                        runtimeContract = runtimeContract,
+                    ),
+                )
 
                 workersLaunched = true
                 launchWorkers(appContext, activeGateway)
@@ -150,6 +165,7 @@ object BackendRuntimeHost {
         running.set(false)
         if (activeWorkers.get() == 0) {
             gateway.getAndSet(null)?.runCatching { close() }
+            eventSequenceTracker.reset()
             publish(State.Stopped)
         }
     }
@@ -209,6 +225,7 @@ object BackendRuntimeHost {
             if (activeWorkers.decrementAndGet() == 0) {
                 gateway.compareAndSet(activeGateway, null)
                 activeGateway.runCatching { close() }
+                eventSequenceTracker.reset()
                 val failure = terminalFailure.get()
                 publish(if (failure == null) State.Stopped else State.Failed(failure))
             }
@@ -223,40 +240,30 @@ object BackendRuntimeHost {
         maximumEvents: Int,
         timeoutMilliseconds: Long,
     ): RuntimeEventBatch {
-        val payload = JSONObject(
-            String(
-                activeGateway.drainEvents(maximumEvents, timeoutMilliseconds),
-                StandardCharsets.UTF_8,
-            ),
+        val decoded = ProtocolJsonCodec.decodeEventBatch(
+            activeGateway.drainEvents(maximumEvents, timeoutMilliseconds),
         )
-        payload.optJSONObject("error")?.let { error ->
-            throw IllegalStateException(error.optString("code", "event_drain_failed"))
-        }
-        val eventsJson = payload.optJSONArray("events")
-        val events = buildList {
-            if (eventsJson != null) {
-                for (index in 0 until eventsJson.length()) {
-                    add(eventsJson.getJSONObject(index).toString())
-                }
-            }
-        }
+        val sequenceValidation = eventSequenceTracker.accept(decoded)
         return RuntimeEventBatch(
-            events = events,
-            hasMore = payload.optBoolean("has_more", false),
+            runtimeSessionId = decoded.runtimeSessionId,
+            events = decoded.events,
+            hasMore = decoded.hasMore,
+            sequenceGapCount = sequenceValidation.gaps.size,
+            runtimeSessionChanged = sequenceValidation.runtimeSessionChanged,
         )
     }
 
     private fun dispatch(batch: RuntimeEventBatch) {
-        if (batch.events.isEmpty()) return
-        val lastType = runCatching {
-            JSONObject(batch.events.last())
-                .optString("event_type")
-                .takeIf { it.isNotBlank() }
-        }.getOrNull()
+        if (batch.events.isEmpty() && batch.sequenceGapCount == 0 && !batch.runtimeSessionChanged) return
+        val lastType = batch.events.lastOrNull()?.eventType
         mainHandler.post {
             eventStatus = eventStatus.copy(
+                runtimeSessionId = batch.runtimeSessionId,
                 deliveredEvents = eventStatus.deliveredEvents + batch.events.size,
                 lastEventType = lastType ?: eventStatus.lastEventType,
+                detectedSequenceGaps = eventStatus.detectedSequenceGaps + batch.sequenceGapCount,
+                runtimeSessionChanges = eventStatus.runtimeSessionChanges +
+                    if (batch.runtimeSessionChanged) 1 else 0,
             )
             eventListeners.forEach { listener ->
                 runCatching { listener.onEvents(batch) }
@@ -264,16 +271,19 @@ object BackendRuntimeHost {
         }
     }
 
-    private fun initializeEnvelope(configPath: File): ByteArray = JSONObject()
-        .put("protocol_version", JSONObject().put("major", 2).put("minor", 0))
-        .put("command_id", UUID.randomUUID().toString())
-        .put("request_id", UUID.randomUUID().toString())
-        .put("command_type", "app.initialize")
-        .put("submitted_at", Instant.now().toString())
-        .put("correlation_id", UUID.randomUUID().toString())
-        .put("payload", JSONObject().put("config_path", configPath.absolutePath))
-        .toString()
-        .toByteArray(StandardCharsets.UTF_8)
+    private fun initializeEnvelope(configPath: File): ByteArray = ProtocolJsonCodec.encodeCommand(
+        CommandEnvelopeV2(
+            protocolVersion = ProtocolVersion.CURRENT,
+            commandId = UUID.randomUUID().toString(),
+            requestId = UUID.randomUUID().toString(),
+            commandType = "app.initialize",
+            submittedAt = Instant.now(),
+            correlationId = UUID.randomUUID().toString(),
+            payloadJson = JSONObject()
+                .put("config_path", configPath.absolutePath)
+                .toString(),
+        ),
+    )
 
     private fun stableFailureCode(failure: Throwable): String {
         val value = failure.message.orEmpty().trim()
