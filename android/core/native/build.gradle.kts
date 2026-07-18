@@ -25,4 +25,5 @@ android {
 dependencies {
     implementation(project(":core:protocol"))
     implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
+    testImplementation("junit:junit:4.13.2")
 }
