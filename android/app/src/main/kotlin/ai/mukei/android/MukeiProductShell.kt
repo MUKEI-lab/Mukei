@@ -43,8 +43,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
+import ai.mukei.android.designsystem.MukeiLayout
 import ai.mukei.android.designsystem.MukeiMark
+import ai.mukei.android.designsystem.MukeiSpacing
 
 enum class TopLevelDestination(
     val drawerLabel: String,
@@ -79,18 +80,20 @@ private fun StartupSurface() {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(32.dp),
+                .padding(MukeiSpacing.Section),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
             MukeiMark(contentDescription = null)
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(MukeiSpacing.Large))
             Text(
                 text = "Opening Mukei…",
                 style = MaterialTheme.typography.headlineSmall,
             )
-            Spacer(Modifier.height(20.dp))
-            LinearProgressIndicator(modifier = Modifier.widthIn(max = 280.dp))
+            Spacer(Modifier.height(MukeiSpacing.Comfortable))
+            LinearProgressIndicator(
+                modifier = Modifier.widthIn(max = MukeiLayout.ReadinessProgressMaxWidth),
+            )
         }
     }
 }
@@ -105,20 +108,20 @@ private fun StartupFailureSurface(code: String) {
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(32.dp),
+                .padding(MukeiSpacing.Section),
             verticalArrangement = Arrangement.Center,
         ) {
             Text(
                 text = "Mukei couldn’t start securely.",
                 style = MaterialTheme.typography.headlineSmall,
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(MukeiSpacing.Small))
             Text(
                 text = "Your local data has not been opened for normal use. Close and reopen the app while this internal build has no safe in-process retry path.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(MukeiSpacing.Medium))
             Text(
                 text = "Diagnostic code: $code",
                 style = MaterialTheme.typography.bodySmall,
@@ -157,13 +160,16 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet(
-                modifier = Modifier.fillMaxWidth(0.86f),
+                modifier = Modifier.fillMaxWidth(MukeiLayout.DrawerWidthFraction),
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxHeight()
-                        .padding(horizontal = 12.dp, vertical = 20.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                        .padding(
+                            horizontal = MukeiSpacing.Small,
+                            vertical = MukeiSpacing.Comfortable,
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(MukeiSpacing.Micro),
                 ) {
                     DrawerDestinationItem(
                         destination = TopLevelDestination.HOME,
@@ -173,7 +179,7 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                             closeDrawerRequest += 1
                         },
                     )
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = MukeiSpacing.ExtraSmall))
                     listOf(
                         TopLevelDestination.STORAGE,
                         TopLevelDestination.PROJECTS,
@@ -188,7 +194,7 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                             },
                         )
                     }
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(MukeiSpacing.Small))
                     DrawerDestinationItem(
                         destination = TopLevelDestination.CHATS,
                         selected = selected,
@@ -198,7 +204,7 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                         },
                     )
                     Spacer(Modifier.weight(1f))
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = MukeiSpacing.ExtraSmall))
                     DrawerDestinationItem(
                         destination = TopLevelDestination.SETTINGS,
                         selected = selected,
@@ -306,28 +312,28 @@ private fun HomeSurface(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 24.dp),
+            .padding(horizontal = MukeiLayout.LargePhoneTextPadding),
     ) {
         Column(
             modifier = Modifier
                 .align(Alignment.Center)
                 .fillMaxWidth()
-                .widthIn(max = 720.dp)
+                .widthIn(max = MukeiLayout.ReadableContentMaxWidth)
                 .verticalScroll(rememberScrollState())
-                .padding(vertical = 28.dp),
+                .padding(vertical = MukeiSpacing.Large),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
                 text = "What’s on your mind?",
                 style = MaterialTheme.typography.headlineLarge,
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(MukeiSpacing.Small))
             Text(
                 text = "Start naturally. Ask, build, research, write, or describe what you want made.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(MukeiSpacing.Section))
 
             if (readiness.inference.status == ReadinessStatus.ACTION_REQUIRED) {
                 Surface(
@@ -336,8 +342,8 @@ private fun HomeSurface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                 ) {
                     Column(
-                        modifier = Modifier.padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(MukeiSpacing.Comfortable),
+                        verticalArrangement = Arrangement.spacedBy(MukeiSpacing.ExtraSmall),
                     ) {
                         Text(
                             text = "Model artifacts required",
@@ -354,7 +360,7 @@ private fun HomeSurface(
                         }
                     }
                 }
-                Spacer(Modifier.height(18.dp))
+                Spacer(Modifier.height(MukeiSpacing.Comfortable))
             }
 
             OutlinedTextField(
@@ -367,7 +373,7 @@ private fun HomeSurface(
                 },
                 minLines = 3,
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(MukeiSpacing.Small))
             Button(
                 onClick = {},
                 enabled = false,
@@ -375,7 +381,7 @@ private fun HomeSurface(
             ) {
                 Text("Send")
             }
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(MukeiSpacing.Section))
             Text(
                 text = "Private intelligence · local-first foundation",
                 style = MaterialTheme.typography.bodySmall,
@@ -391,8 +397,8 @@ private fun ModelsSurface(readiness: AppReadiness) {
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(MukeiLayout.LargePhoneTextPadding),
+        verticalArrangement = Arrangement.spacedBy(MukeiSpacing.Small),
     ) {
         Text(
             text = "Models",
@@ -418,8 +424,8 @@ private fun ReservedDestinationSurface(destination: TopLevelDestination) {
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(MukeiLayout.LargePhoneTextPadding),
+        verticalArrangement = Arrangement.spacedBy(MukeiSpacing.Small),
     ) {
         Text(
             text = destination.screenTitle,
