@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -57,6 +56,7 @@ import ai.mukei.android.designsystem.MukeiLayout
 import ai.mukei.android.designsystem.MukeiMark
 import ai.mukei.android.designsystem.MukeiRadius
 import ai.mukei.android.designsystem.MukeiSpacing
+import ai.mukei.android.designsystem.MukeiStroke
 import java.time.LocalTime
 
 enum class TopLevelDestination(
@@ -488,7 +488,7 @@ private fun MukeiComposer(
         shape = RoundedCornerShape(MukeiRadius.Composer),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(
-            width = MukeiSpacing.Micro / 4,
+            width = MukeiStroke.Thin,
             color = MaterialTheme.colorScheme.outline,
         ),
     ) {
@@ -590,7 +590,7 @@ private fun MukeiCapabilityChip(
         shape = MaterialTheme.shapes.small,
         color = container,
         border = BorderStroke(
-            width = MukeiSpacing.Micro / 4,
+            width = MukeiStroke.Thin,
             color = border,
         ),
     ) {
@@ -682,7 +682,7 @@ private fun ModelsSurface(readiness: AppReadiness) {
                 shape = MaterialTheme.shapes.large,
                 color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(
-                    width = MukeiSpacing.Micro / 4,
+                    width = MukeiStroke.Thin,
                     color = MaterialTheme.colorScheme.outline,
                 ),
             ) {
