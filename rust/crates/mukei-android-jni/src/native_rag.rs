@@ -138,36 +138,14 @@ impl AndroidRagService {
             .map_err(|error| MukeiError::BlockingJoinFailed(error.to_string()))??;
         Ok(())
     }
-}
 
-#[async_trait]
-impl RuntimeRagService for AndroidRagService {
-    async fn ingest_document(
-        &self,
-        document_id: &str,
-        staged_path: &Path,
-        mime_type: &str,
-    ) -> Result<RagIngestResult> {
-        if !matches!(
-            mime_type,
-            "text/plain" | "text/markdown" | "application/json" | "text/csv"
-        ) {
-            return Err(MukeiError::BinaryFile);
-        }
-        let _guard = self.write_lock.lock().await;
-        let canonical = self.validate_document_path(staged_path)?;
-        let metadata = std::fs::metadata(&canonical)
-            .map_err(|error| MukeiError::FileReadFailed(error.to_string()))?;
-        if metadata.len() > MAX_DOCUMENT_BYTES {
+    async fn index_text_locked(&self, document_id: &str, content: &str) -> Result<RagIngestResult> {
+        if content.len() as u64 > MAX_DOCUMENT_BYTES {
             return Err(MukeiError::FileReadFailed(
                 "document exceeds indexing limit".into(),
             ));
         }
-        let content = tokio::task::spawn_blocking(move || std::fs::read_to_string(canonical))
-            .await
-            .map_err(|error| MukeiError::BlockingJoinFailed(error.to_string()))?
-            .map_err(|error| MukeiError::FileReadFailed(error.to_string()))?;
-        let chunks = Chunker::default().split(&content);
+        let chunks = Chunker::default().split(content);
         if chunks.is_empty() {
             return Err(MukeiError::FileReadFailed(
                 "document contains no indexable text".into(),
@@ -255,6 +233,41 @@ impl RuntimeRagService for AndroidRagService {
         Ok(RagIngestResult {
             chunk_count: staged.len(),
         })
+    }
+}
+
+#[async_trait]
+impl RuntimeRagService for AndroidRagService {
+    async fn ingest_document(
+        &self,
+        document_id: &str,
+        staged_path: &Path,
+        mime_type: &str,
+    ) -> Result<RagIngestResult> {
+        if !matches!(
+            mime_type,
+            "text/plain" | "text/markdown" | "application/json" | "text/csv"
+        ) {
+            return Err(MukeiError::BinaryFile);
+        }
+        let canonical = self.validate_document_path(staged_path)?;
+        let metadata = std::fs::metadata(&canonical)
+            .map_err(|error| MukeiError::FileReadFailed(error.to_string()))?;
+        if metadata.len() > MAX_DOCUMENT_BYTES {
+            return Err(MukeiError::FileReadFailed(
+                "document exceeds indexing limit".into(),
+            ));
+        }
+        let content = tokio::task::spawn_blocking(move || std::fs::read_to_string(canonical))
+            .await
+            .map_err(|error| MukeiError::BlockingJoinFailed(error.to_string()))?
+            .map_err(|error| MukeiError::FileReadFailed(error.to_string()))?;
+        self.ingest_text(document_id, &content).await
+    }
+
+    async fn ingest_text(&self, document_id: &str, text: &str) -> Result<RagIngestResult> {
+        let _guard = self.write_lock.lock().await;
+        self.index_text_locked(document_id, text).await
     }
 
     async fn retrieve(&self, query: &str, top_k: usize) -> Result<Vec<String>> {
