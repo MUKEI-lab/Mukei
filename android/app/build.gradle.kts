@@ -1,3 +1,5 @@
+import java.util.zip.ZipFile
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -74,4 +76,37 @@ dependencies {
     implementation(libs.androidx.compose.material3)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+}
+
+// Release APKs must remain self-contained for every supported ABI. This catches
+// regressions where the JNI runtime links successfully during CI but Android cannot
+// load it on-device because a required packaged shared library was omitted.
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    doLast {
+        val releaseDir = layout.buildDirectory.dir("outputs/apk/release").get().asFile
+        val apks = releaseDir
+            .listFiles { file -> file.isFile && file.extension == "apk" }
+            ?.sortedBy { it.name }
+            .orEmpty()
+        check(apks.size == 2) {
+            "Expected exactly two ABI-split release APKs, found ${apks.size}: ${apks.map { it.name }}"
+        }
+
+        listOf("arm64-v8a", "x86_64").forEach { abi ->
+            val apk = apks.singleOrNull { it.name.contains(abi) }
+                ?: error("Missing release APK for ABI $abi")
+            val requiredEntries = listOf(
+                "lib/$abi/libmukei_android.so",
+                "lib/$abi/libmukei_llama_native.so",
+                "lib/$abi/libc++_shared.so",
+            )
+            ZipFile(apk).use { zip ->
+                requiredEntries.forEach { entry ->
+                    check(zip.getEntry(entry) != null) {
+                        "${apk.name} is missing required native runtime entry $entry"
+                    }
+                }
+            }
+        }
+    }
 }
