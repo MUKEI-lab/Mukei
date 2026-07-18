@@ -31,6 +31,15 @@ pub trait RuntimeRagService: Send + Sync {
         mime_type: &str,
     ) -> std::result::Result<RagIngestResult, crate::error::MukeiError>;
 
+    /// Index trusted in-memory text derived from a staged document, such as
+    /// bounded on-device OCR output. Implementations must not persist a plaintext
+    /// sidecar outside their authoritative encrypted/index storage.
+    async fn ingest_text(
+        &self,
+        document_id: &str,
+        text: &str,
+    ) -> std::result::Result<RagIngestResult, crate::error::MukeiError>;
+
     async fn retrieve(
         &self,
         query: &str,
