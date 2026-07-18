@@ -144,6 +144,7 @@ class RustNativeGateway private constructor(
 }
 
 internal object NativeBindings {
+    // Bootstrap entropy must be available before any JNI runtime call succeeds.
     private val secureRandom = SecureRandom()
 
     init {
