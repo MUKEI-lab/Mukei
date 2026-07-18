@@ -125,6 +125,7 @@ class RustNativeGateway private constructor(
 
         fun create(configJson: ByteArray): RustNativeGateway {
             require(configJson.isNotEmpty()) { "Runtime configuration must not be empty" }
+            NativeBindings.ensureLibraryLoaded()
             val handle = NativeBindings.createRuntime(configJson)
             check(handle > 0L) { "Native runtime creation failed" }
             return RustNativeGateway(handle, secureRuntime = false)
@@ -136,6 +137,7 @@ class RustNativeGateway private constructor(
         ): RustNativeGateway {
             require(configJson.isNotEmpty()) { "Runtime configuration must not be empty" }
             require(databaseKey.size == 32) { "SQLCipher key must be exactly 32 bytes" }
+            NativeBindings.ensureLibraryLoaded()
             val handle = NativeBindings.createSecureRuntime(configJson, databaseKey)
             check(handle > 0L) { "Secure native runtime creation failed" }
             return RustNativeGateway(handle, secureRuntime = true)
@@ -144,21 +146,21 @@ class RustNativeGateway private constructor(
 }
 
 internal object NativeBindings {
-    // Bootstrap entropy must be available before any JNI runtime call succeeds.
     private val secureRandom = SecureRandom()
-
-    init {
+    private val nativeLibraryLoaded: Unit by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         System.loadLibrary("mukei_android")
     }
 
     /**
-     * Generate SQLCipher key material on the Android/JCA side.
-     *
-     * Key generation must not depend on JNI availability because this is part of
-     * the secure runtime bootstrap that precedes native runtime creation.
+     * Generate SQLCipher key material without requiring the native runtime to load.
+     * The key is wrapped by Android Keystore immediately after generation.
      */
     fun generateDatabaseKey(): ByteArray = ByteArray(DATABASE_KEY_BYTES).also {
         secureRandom.nextBytes(it)
+    }
+
+    fun ensureLibraryLoaded() {
+        nativeLibraryLoaded
     }
 
     external fun createRuntime(configJson: ByteArray): Long
