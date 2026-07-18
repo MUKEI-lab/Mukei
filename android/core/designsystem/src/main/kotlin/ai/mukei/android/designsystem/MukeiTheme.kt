@@ -1,7 +1,9 @@
 package ai.mukei.android.designsystem
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -67,6 +69,14 @@ private val DarkColors = darkColorScheme(
     onError = Color(0xFF4B1712),
 )
 
+private val MukeiShapes = Shapes(
+    extraSmall = RoundedCornerShape(MukeiRadius.Small),
+    small = RoundedCornerShape(MukeiRadius.Chip),
+    medium = RoundedCornerShape(MukeiRadius.Card),
+    large = RoundedCornerShape(MukeiRadius.LargeCard),
+    extraLarge = RoundedCornerShape(MukeiRadius.Sheet),
+)
+
 @Composable
 fun MukeiTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -74,6 +84,7 @@ fun MukeiTheme(
 ) {
     MaterialTheme(
         colorScheme = if (darkTheme) DarkColors else LightColors,
+        shapes = MukeiShapes,
         content = content,
     )
 }
