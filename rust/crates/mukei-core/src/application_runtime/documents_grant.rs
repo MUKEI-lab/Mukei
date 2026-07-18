@@ -61,6 +61,19 @@ impl MukeiRuntime {
                         .and_then(Value::as_str)
                         .map(str::to_owned);
                     let size_bytes = payload.get("size_bytes").and_then(Value::as_u64);
+                    let ocr = payload
+                        .get("ocr")
+                        .cloned()
+                        .unwrap_or_else(|| json!({"status": "unavailable"}));
+                    let ocr_status = ocr
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unavailable")
+                        .to_owned();
+                    let ocr_characters = ocr
+                        .get("characters")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0);
                     let Some(staged_path_value) = staged_path.clone() else {
                         features.update_document(&document_id, |document| {
                             document.status = DocumentStatus::Failed;
@@ -90,12 +103,18 @@ impl MukeiRuntime {
                             "document_id": document_id,
                             "staged_path": staged_path,
                             "size_bytes": size_bytes,
+                            "ocr": ocr,
                         }),
                     );
                     events.emit(
                         "application:documents",
                         "document.granted",
-                        json!({"document_id": document_id, "size_bytes": size_bytes}),
+                        json!({
+                            "document_id": document_id,
+                            "size_bytes": size_bytes,
+                            "ocr_status": ocr_status,
+                            "ocr_characters": ocr_characters,
+                        }),
                         Some(&command_envelope),
                         Some(operation_id_for_task.clone()),
                     );
