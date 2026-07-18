@@ -30,7 +30,7 @@ jobs:
           test "$(git branch --show-current)" = "temp/universal-storage-workspace-v0.1"
           test "$(git rev-parse --abbrev-ref HEAD)" != "Kotlin"
 
-      - name: Bound malformed object allocation
+      - name: Bound malformed object allocation and publication side effects
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -51,6 +51,38 @@ jobs:
               if read_anchor not in text:
                   raise SystemExit("object-store reader anchor not found")
               text = text.replace(read_anchor, read_replacement, 1)
+
+          before_publication = '''        let parent = final_path
+              .parent()
+              .ok_or(ObjectStoreError::MalformedObject)?;
+          fs::create_dir_all(parent)?;
+          sync_directory(parent)?;
+
+          let version = self.cipher.version();
+          '''
+          after_publication = '''        let parent = final_path
+              .parent()
+              .ok_or(ObjectStoreError::MalformedObject)?;
+
+          let version = self.cipher.version();
+          '''
+          if before_publication in text:
+              text = text.replace(before_publication, after_publication, 1)
+
+          size_guard = '''        if ciphertext_size > MAX_ENCODED_OBJECT_BYTES {
+              return Err(ObjectStoreError::ObjectTooLarge);
+          }
+          let encoded = encode_object(
+          '''
+          size_guard_with_publication = '''        if ciphertext_size > MAX_ENCODED_OBJECT_BYTES {
+              return Err(ObjectStoreError::ObjectTooLarge);
+          }
+          fs::create_dir_all(parent)?;
+          sync_directory(parent)?;
+          let encoded = encode_object(
+          '''
+          if size_guard in text and "fs::create_dir_all(parent)?;\n        sync_directory(parent)?;\n        let encoded" not in text:
+              text = text.replace(size_guard, size_guard_with_publication, 1)
 
           test_anchor = "    #[test]\n    fn corrupted_ciphertext_fails_closed() {\n"
           test = '''    #[test]
@@ -110,5 +142,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add rust/crates/mukei-core/src/storage/object_store.rs
-          git commit -m "fix(storage): bound encrypted object reader allocation"
+          git commit -m "fix(storage): reject oversized objects before publication"
           git push origin HEAD:temp/universal-storage-workspace-v0.1
