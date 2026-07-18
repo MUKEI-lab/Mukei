@@ -10,7 +10,7 @@ import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
@@ -151,7 +151,9 @@ internal object AndroidOcr {
     }
 
     private inline fun <T> withRecognizer(block: (TextRecognizer) -> T): T {
-        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        val recognizer = TextRecognition.getClient(
+            DevanagariTextRecognizerOptions.Builder().build(),
+        )
         return try {
             block(recognizer)
         } finally {
@@ -185,7 +187,7 @@ internal object AndroidOcr {
         .put("status", status)
         .put("engine", OCR_ENGINE)
 
-    private const val OCR_ENGINE = "mlkit_text_recognition_v2_latin"
+    private const val OCR_ENGINE = "mlkit_text_recognition_v2_latin_devanagari"
     private const val PDF_MIME_TYPE = "application/pdf"
     private const val OCR_TASK_TIMEOUT_SECONDS = 8L
     private const val MAX_PDF_PAGES = 8
