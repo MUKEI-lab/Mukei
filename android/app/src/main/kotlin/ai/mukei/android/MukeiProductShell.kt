@@ -412,19 +412,18 @@ private fun HomeSurface(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             .padding(
                 horizontal = MukeiLayout.LargePhoneTextPadding,
                 vertical = MukeiSpacing.Large,
             ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(MukeiSpacing.LargeSection))
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .widthIn(max = MukeiLayout.ReadableContentMaxWidth),
         ) {
+            Spacer(Modifier.height(MukeiSpacing.LargeSection))
             Text(
                 text = greeting,
                 style = MaterialTheme.typography.titleMedium,
@@ -436,16 +435,20 @@ private fun HomeSurface(
                 style = MaterialTheme.typography.headlineLarge,
                 color = MaterialTheme.colorScheme.onBackground,
             )
-            Spacer(Modifier.height(MukeiSpacing.Large))
+        }
 
-            MukeiComposer(
-                draft = draft,
-                onDraftChange = { draft = it },
-                placeholder = selectedCapability?.placeholder ?: "Tell Mukei what you want to do…",
-                inferenceStatus = readiness.inference.status,
-            )
+        Spacer(Modifier.weight(1f))
 
-            Spacer(Modifier.height(MukeiSpacing.Medium))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = MukeiLayout.ReadableContentMaxWidth),
+        ) {
+            if (readiness.inference.status == ReadinessStatus.ACTION_REQUIRED) {
+                ModelSetupNotice(openModels = openModels)
+                Spacer(Modifier.height(MukeiSpacing.Medium))
+            }
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -467,12 +470,17 @@ private fun HomeSurface(
                 }
             }
 
-            if (readiness.inference.status == ReadinessStatus.ACTION_REQUIRED) {
-                Spacer(Modifier.height(MukeiSpacing.Comfortable))
-                ModelSetupNotice(openModels = openModels)
-            }
+            Spacer(Modifier.height(MukeiSpacing.Medium))
+
+            MukeiComposer(
+                draft = draft,
+                onDraftChange = { draft = it },
+                placeholder = selectedCapability?.placeholder ?: "Tell Mukei what you want to do…",
+                inferenceStatus = readiness.inference.status,
+            )
+
+            Spacer(Modifier.height(MukeiSpacing.ExtraSmall))
         }
-        Spacer(Modifier.height(MukeiSpacing.OpeningBreath))
     }
 }
 
