@@ -15,6 +15,8 @@ import ai.mukei.android.protocol.EventEnvelopeV2
 import ai.mukei.android.protocol.EventSequenceTracker
 import ai.mukei.android.protocol.ProtocolJsonCodec
 import ai.mukei.android.protocol.ProtocolVersion
+import ai.mukei.android.protocol.RuntimeContractJsonCodec
+import ai.mukei.android.protocol.RuntimeContractSnapshot
 import java.io.Closeable
 import java.io.File
 import java.nio.charset.StandardCharsets
@@ -31,7 +33,10 @@ import org.json.JSONObject
 object BackendRuntimeHost {
     sealed interface State {
         data object Starting : State
-        data class Ready(val readiness: AppReadiness) : State
+        data class Ready(
+            val readiness: AppReadiness,
+            val runtimeContract: RuntimeContractSnapshot,
+        ) : State
         data class Failed(val code: String) : State
         data object Stopped : State
     }
@@ -128,11 +133,19 @@ object BackendRuntimeHost {
                 }
 
                 gateway.set(activeGateway)
+                val runtimeContract = RuntimeContractJsonCodec.decode(
+                    activeGateway.protocolCapabilities(),
+                )
                 val readiness = AppReadiness.fromSecurityStatus(activeGateway.securityStatus())
                 if (!readiness.shellUsable) {
                     throw IllegalStateException("secure_storage_not_ready")
                 }
-                publish(State.Ready(readiness))
+                publish(
+                    State.Ready(
+                        readiness = readiness,
+                        runtimeContract = runtimeContract,
+                    ),
+                )
 
                 workersLaunched = true
                 launchWorkers(appContext, activeGateway)
