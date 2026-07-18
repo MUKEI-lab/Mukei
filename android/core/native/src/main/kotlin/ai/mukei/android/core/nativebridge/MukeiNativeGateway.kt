@@ -1,6 +1,7 @@
 package ai.mukei.android.core.nativebridge
 
 import java.io.Closeable
+import java.security.SecureRandom
 import java.util.concurrent.atomic.AtomicBoolean
 
 interface MukeiNativeGateway : Closeable {
@@ -143,11 +144,20 @@ class RustNativeGateway private constructor(
 }
 
 internal object NativeBindings {
+    private val secureRandom = SecureRandom()
+
     init {
         System.loadLibrary("mukei_android")
     }
 
-    external fun generateDatabaseKey(): ByteArray
+    /**
+     * Generate SQLCipher key material on the Android/JCA side.
+     *
+     * Key generation must not depend on JNI availability because this is part of
+     * the secure runtime bootstrap that precedes native runtime creation.
+     */
+    fun generateDatabaseKey(): ByteArray = ByteArray(DATABASE_KEY_BYTES).also(secureRandom::nextBytes)
+
     external fun createRuntime(configJson: ByteArray): Long
 
     external fun createSecureRuntime(
@@ -193,4 +203,6 @@ internal object NativeBindings {
         handle: Long,
         domain: String,
     ): ByteArray
+
+    private const val DATABASE_KEY_BYTES = 32
 }
