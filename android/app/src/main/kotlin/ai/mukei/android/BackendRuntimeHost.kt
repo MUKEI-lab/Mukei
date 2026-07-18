@@ -163,7 +163,6 @@ object BackendRuntimeHost {
                     running.set(false)
                     terminalFailure.compareAndSet(null, stableFailureCode(failure))
                 } finally {
-                    bootstrapActive.set(false)
                     if (!workersLaunched) {
                         ownedGateway?.let { activeGateway ->
                             gateway.compareAndSet(activeGateway, null)
@@ -172,15 +171,20 @@ object BackendRuntimeHost {
                         eventSequenceTracker.reset()
                         started.set(false)
                         val failure = terminalFailure.get()
+                        // Keep bootstrapActive true until native cleanup and the restart gate
+                        // are complete so shutdown/start cannot overlap this teardown window.
+                        bootstrapActive.set(false)
                         publish(if (failure == null) State.Stopped else State.Failed(failure))
+                    } else {
+                        bootstrapActive.set(false)
                     }
                 }
             }
         } catch (failure: Throwable) {
-            bootstrapActive.set(false)
             running.set(false)
             terminalFailure.compareAndSet(null, stableFailureCode(failure))
             started.set(false)
+            bootstrapActive.set(false)
             publish(State.Failed(terminalFailure.get() ?: "backend_runtime_failed"))
         }
     }
