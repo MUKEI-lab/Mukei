@@ -1,9 +1,11 @@
 package ai.mukei.android
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -58,6 +61,20 @@ enum class TopLevelDestination(
     CHATS("Chats", "Chats"),
     SETTINGS("Settings", "Settings"),
 }
+
+private data class HomeCapability(
+    val id: String,
+    val label: String,
+    val placeholder: String,
+)
+
+private val HomeCapabilities = listOf(
+    HomeCapability("research", "Deep Research", "What should Mukei research?"),
+    HomeCapability("build", "Build App", "Describe the app you want made…"),
+    HomeCapability("files", "Read Files", "What should Mukei do with your files?"),
+    HomeCapability("write", "Write", "What should we write?"),
+    HomeCapability("code", "Code", "Describe what you want to build or fix…"),
+)
 
 @Composable
 fun MukeiProductShell(
@@ -304,9 +321,14 @@ private fun HomeSurface(
     openModels: () -> Unit,
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
+    var selectedCapabilityId by rememberSaveable { mutableStateOf<String?>(null) }
+    val selectedCapability = HomeCapabilities.firstOrNull { it.id == selectedCapabilityId }
 
     LaunchedEffect(resetGeneration) {
-        if (resetGeneration > 0) draft = ""
+        if (resetGeneration > 0) {
+            draft = ""
+            selectedCapabilityId = null
+        }
     }
 
     Box(
@@ -367,12 +389,35 @@ private fun HomeSurface(
                 value = draft,
                 onValueChange = { draft = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Tell Mukei what you want to do…") },
+                placeholder = {
+                    Text(selectedCapability?.placeholder ?: "Tell Mukei what you want to do…")
+                },
                 supportingText = {
                     Text("Sending is intentionally disabled until the Conversation vertical slice is wired end-to-end.")
                 },
                 minLines = 3,
             )
+            Spacer(Modifier.height(MukeiSpacing.Small))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(MukeiSpacing.ExtraSmall),
+            ) {
+                HomeCapabilities.forEach { capability ->
+                    FilterChip(
+                        selected = selectedCapabilityId == capability.id,
+                        onClick = {
+                            selectedCapabilityId = if (selectedCapabilityId == capability.id) {
+                                null
+                            } else {
+                                capability.id
+                            }
+                        },
+                        label = { Text(capability.label) },
+                    )
+                }
+            }
             Spacer(Modifier.height(MukeiSpacing.Small))
             Button(
                 onClick = {},
