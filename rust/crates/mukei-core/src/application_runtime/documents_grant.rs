@@ -48,6 +48,11 @@ impl MukeiRuntime {
         let platform = Arc::clone(&self.platform);
         let features = Arc::clone(&self.features);
         let events = Arc::clone(&self.events);
+        let rag_service = self
+            .rag_service
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         let command_envelope = command.envelope.clone();
         let operation_id_for_task = operation_id.clone();
         self.async_runtime.handle().spawn(async move {
@@ -74,6 +79,11 @@ impl MukeiRuntime {
                         .get("characters")
                         .and_then(Value::as_u64)
                         .unwrap_or(0);
+                    let ocr_text = ocr
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .filter(|text| !text.trim().is_empty())
+                        .map(str::to_owned);
                     let Some(staged_path_value) = staged_path.clone() else {
                         features.update_document(&document_id, |document| {
                             document.status = DocumentStatus::Failed;
@@ -88,12 +98,49 @@ impl MukeiRuntime {
                         );
                         return;
                     };
+
                     features.update_document(&document_id, |document| {
                         document.staged_path = Some(staged_path_value);
                         document.size_bytes = size_bytes;
                         document.status = DocumentStatus::Staged;
                         document.error_code = None;
                     });
+
+                    let mut ocr_index_status = if ocr_text.is_some() {
+                        "unavailable"
+                    } else {
+                        "not_applicable"
+                    };
+                    let mut ocr_chunk_count = 0usize;
+                    let mut ocr_index_error_code: Option<String> = None;
+                    if let (Some(service), Some(text)) = (rag_service.as_ref(), ocr_text.as_deref()) {
+                        match service.ingest_text(&document_id, text).await {
+                            Ok(result) => {
+                                ocr_index_status = "indexed";
+                                ocr_chunk_count = result.chunk_count;
+                                features.update_document(&document_id, |document| {
+                                    document.status = DocumentStatus::Indexed;
+                                    document.error_code = None;
+                                });
+                                events.emit(
+                                    "application:documents",
+                                    "document.indexed",
+                                    json!({
+                                        "document_id": document_id,
+                                        "chunk_count": result.chunk_count,
+                                        "source": "ocr",
+                                    }),
+                                    Some(&command_envelope),
+                                    Some(operation_id_for_task.clone()),
+                                );
+                            }
+                            Err(error) => {
+                                ocr_index_status = "failed";
+                                ocr_index_error_code = Some(error.error_code().to_owned());
+                            }
+                        }
+                    }
+
                     features.update_operation(
                         &operation_id_for_task,
                         OperationStatus::Completed,
@@ -104,6 +151,9 @@ impl MukeiRuntime {
                             "staged_path": staged_path,
                             "size_bytes": size_bytes,
                             "ocr": ocr,
+                            "ocr_index_status": ocr_index_status,
+                            "ocr_chunk_count": ocr_chunk_count,
+                            "ocr_index_error_code": ocr_index_error_code,
                         }),
                     );
                     events.emit(
@@ -114,6 +164,9 @@ impl MukeiRuntime {
                             "size_bytes": size_bytes,
                             "ocr_status": ocr_status,
                             "ocr_characters": ocr_characters,
+                            "ocr_index_status": ocr_index_status,
+                            "ocr_chunk_count": ocr_chunk_count,
+                            "ocr_index_error_code": ocr_index_error_code,
                         }),
                         Some(&command_envelope),
                         Some(operation_id_for_task.clone()),
