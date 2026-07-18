@@ -22,6 +22,17 @@ Each ADR should contain:
 7. Product/UX impact
 8. Status and date/review state where applicable
 
+## Decision review gate
+
+Read [DECISION_REVIEW_v0.1.md](DECISION_REVIEW_v0.1.md) before accepting or modifying individual ADRs.
+
+The review matrix:
+
+- consolidates dependencies and recommended dispositions;
+- distinguishes safe non-blocked implementation work from schema/protocol choices that must wait;
+- recommends modifying ADR-001 so the durable model does not hard-lock exactly one workspace per chat;
+- does **not** change any ADR from `Proposed` by itself.
+
 ## Decision queue
 
 | ADR | Decision | Status | Priority |
