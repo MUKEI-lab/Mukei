@@ -102,6 +102,7 @@ class AndroidPlatformRequestProcessor(
     private fun stageDocument(request: JSONObject): JSONObject {
         val target = request.getString("target")
         val uri = Uri.parse(target)
+        val mimeType = request.optString("mime_type")
         if (uri.scheme != "content") {
             throw PlatformFailure("invalid_document_uri", "Only content URIs are accepted")
         }
@@ -155,12 +156,14 @@ class AndroidPlatformRequestProcessor(
             throw PlatformFailure("document_stage_failed", failure.javaClass.simpleName)
         }
 
+        val ocr = AndroidOcr.extract(appContext, uri, destination, mimeType)
         return JSONObject()
             .put("staged_path", destination.absolutePath)
             .put("size_bytes", total)
             .put("sha256", digest.digest().toHex())
             .put("label", request.optString("label"))
-            .put("mime_type", request.optString("mime_type"))
+            .put("mime_type", mimeType)
+            .put("ocr", ocr)
     }
 
     private fun deleteDocument(request: JSONObject): JSONObject {
