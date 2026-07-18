@@ -119,7 +119,7 @@ internal object AndroidOcr {
         }
     }
 
-    private fun boundedRenderSize(sourceWidth: Int, sourceHeight: Int): Pair<Int, Int> {
+    internal fun boundedRenderSize(sourceWidth: Int, sourceHeight: Int): Pair<Int, Int> {
         require(sourceWidth > 0 && sourceHeight > 0)
         val dimensionScale = minOf(
             MAX_RENDER_DIMENSION.toDouble() / sourceWidth.toDouble(),
@@ -135,7 +135,7 @@ internal object AndroidOcr {
     }
 
     /** Returns true when the character limit was reached. */
-    private fun appendBounded(output: StringBuilder, rawText: String, pageNumber: Int): Boolean {
+    internal fun appendBounded(output: StringBuilder, rawText: String, pageNumber: Int): Boolean {
         val text = rawText.trim()
         if (text.isEmpty()) return false
         val prefix = if (output.isEmpty()) "" else "\n\n[Page $pageNumber]\n"
