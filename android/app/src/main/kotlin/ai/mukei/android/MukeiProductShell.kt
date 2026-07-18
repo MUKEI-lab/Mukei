@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -16,6 +17,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
@@ -38,19 +40,22 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ai.mukei.android.designsystem.MukeiMark
 
 enum class TopLevelDestination(
-    val label: String,
+    val drawerLabel: String,
+    val screenTitle: String,
 ) {
-    HOME("Home"),
-    CHATS("Chats"),
-    STORAGE("Storage"),
-    PROJECTS("Projects"),
-    MODELS("Models"),
-    SETTINGS("Settings"),
+    HOME("Mukei", ""),
+    STORAGE("Storage", "Storage"),
+    PROJECTS("Projects", "Projects"),
+    MODELS("Models", "Models"),
+    CHATS("Chats", "Chats"),
+    SETTINGS("Settings", "Settings"),
 }
 
 @Composable
@@ -131,6 +136,7 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var openDrawerRequest by remember { mutableIntStateOf(0) }
     var closeDrawerRequest by remember { mutableIntStateOf(0) }
+    var newChatGeneration by rememberSaveable { mutableIntStateOf(0) }
 
     LaunchedEffect(openDrawerRequest) {
         if (openDrawerRequest > 0) drawerState.open()
@@ -150,28 +156,57 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            ModalDrawerSheet {
+            ModalDrawerSheet(
+                modifier = Modifier.fillMaxWidth(0.86f),
+            ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 20.dp),
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .padding(horizontal = 12.dp, vertical = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Text(
-                        text = "Mukei",
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Medium,
+                    DrawerDestinationItem(
+                        destination = TopLevelDestination.HOME,
+                        selected = selected,
+                        onSelect = {
+                            selectedName = TopLevelDestination.HOME.name
+                            closeDrawerRequest += 1
+                        },
                     )
-                    HorizontalDivider(modifier = Modifier.padding(bottom = 8.dp))
-                    TopLevelDestination.entries.forEach { destination ->
-                        NavigationDrawerItem(
-                            label = { Text(destination.label) },
-                            selected = selected == destination,
-                            onClick = {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    listOf(
+                        TopLevelDestination.STORAGE,
+                        TopLevelDestination.PROJECTS,
+                        TopLevelDestination.MODELS,
+                    ).forEach { destination ->
+                        DrawerDestinationItem(
+                            destination = destination,
+                            selected = selected,
+                            onSelect = {
                                 selectedName = destination.name
                                 closeDrawerRequest += 1
                             },
                         )
                     }
+                    Spacer(Modifier.height(12.dp))
+                    DrawerDestinationItem(
+                        destination = TopLevelDestination.CHATS,
+                        selected = selected,
+                        onSelect = {
+                            selectedName = TopLevelDestination.CHATS.name
+                            closeDrawerRequest += 1
+                        },
+                    )
+                    Spacer(Modifier.weight(1f))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    DrawerDestinationItem(
+                        destination = TopLevelDestination.SETTINGS,
+                        selected = selected,
+                        onSelect = {
+                            selectedName = TopLevelDestination.SETTINGS.name
+                            closeDrawerRequest += 1
+                        },
+                    )
                 }
             }
         },
@@ -179,10 +214,41 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text(selected.label) },
+                    title = {
+                        if (selected.screenTitle.isNotEmpty()) {
+                            Text(selected.screenTitle)
+                        }
+                    },
                     navigationIcon = {
-                        TextButton(onClick = { openDrawerRequest += 1 }) {
-                            Text("Menu")
+                        IconButton(
+                            onClick = { openDrawerRequest += 1 },
+                            modifier = Modifier.semantics {
+                                contentDescription = "Open navigation"
+                            },
+                        ) {
+                            Text("☰", style = MaterialTheme.typography.titleLarge)
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = {
+                                selectedName = TopLevelDestination.HOME.name
+                                newChatGeneration += 1
+                            },
+                            modifier = Modifier.semantics {
+                                contentDescription = "New chat"
+                            },
+                        ) {
+                            Text("＋", style = MaterialTheme.typography.titleLarge)
+                        }
+                        IconButton(
+                            onClick = {},
+                            enabled = false,
+                            modifier = Modifier.semantics {
+                                contentDescription = "Options unavailable in this build"
+                            },
+                        ) {
+                            Text("⋮", style = MaterialTheme.typography.titleLarge)
                         }
                     },
                 )
@@ -196,6 +262,7 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                 when (selected) {
                     TopLevelDestination.HOME -> HomeSurface(
                         readiness = state.readiness,
+                        resetGeneration = newChatGeneration,
                         openModels = { selectedName = TopLevelDestination.MODELS.name },
                     )
                     TopLevelDestination.MODELS -> ModelsSurface(state.readiness)
@@ -207,11 +274,34 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
 }
 
 @Composable
+private fun DrawerDestinationItem(
+    destination: TopLevelDestination,
+    selected: TopLevelDestination,
+    onSelect: () -> Unit,
+) {
+    NavigationDrawerItem(
+        label = {
+            Text(
+                text = destination.drawerLabel,
+                fontWeight = if (selected == destination) FontWeight.Medium else FontWeight.Normal,
+            )
+        },
+        selected = selected == destination,
+        onClick = onSelect,
+    )
+}
+
+@Composable
 private fun HomeSurface(
     readiness: AppReadiness,
+    resetGeneration: Int,
     openModels: () -> Unit,
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
+
+    LaunchedEffect(resetGeneration) {
+        if (resetGeneration > 0) draft = ""
+    }
 
     Box(
         modifier = Modifier
@@ -233,7 +323,7 @@ private fun HomeSurface(
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                text = "Start naturally. Mukei keeps the product shell and encrypted local storage usable even when an inference model still needs to be installed.",
+                text = "Start naturally. Ask, build, research, write, or describe what you want made.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -255,7 +345,7 @@ private fun HomeSurface(
                             fontWeight = FontWeight.Medium,
                         )
                         Text(
-                            text = "The secure backend is ready. Conversation inference is the missing capability, not an app startup failure.",
+                            text = "The secure backend and encrypted storage are ready. Conversation inference still needs a model.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -271,7 +361,7 @@ private fun HomeSurface(
                 value = draft,
                 onValueChange = { draft = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Message Mukei") },
+                placeholder = { Text("Tell Mukei what you want to do…") },
                 supportingText = {
                     Text("Sending is intentionally disabled until the Conversation vertical slice is wired end-to-end.")
                 },
@@ -332,7 +422,7 @@ private fun ReservedDestinationSurface(destination: TopLevelDestination) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = destination.label,
+            text = destination.screenTitle,
             style = MaterialTheme.typography.headlineMedium,
         )
         Text(
