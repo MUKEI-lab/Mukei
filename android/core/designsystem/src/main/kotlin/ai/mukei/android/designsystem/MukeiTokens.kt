@@ -42,7 +42,10 @@ object MukeiLayout {
     val PhoneTextPaddingComfortable = 20.dp
     val LargePhoneTextPadding = 24.dp
     val MinimumTouchTarget = 48.dp
+    val ReadableContentMaxWidth = 720.dp
+    val ReadinessProgressMaxWidth = 280.dp
 
+    const val DrawerWidthFraction = 0.86f
     const val TargetLineLengthCharactersMin = 60
     const val TargetLineLengthCharactersMax = 75
 }
