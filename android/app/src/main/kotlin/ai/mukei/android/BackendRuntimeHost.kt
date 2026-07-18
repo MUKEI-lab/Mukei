@@ -62,6 +62,7 @@ object BackendRuntimeHost {
     }
 
     private val started = AtomicBoolean(false)
+    private val bootstrapActive = AtomicBoolean(false)
     private val running = AtomicBoolean(false)
     private val activeWorkers = AtomicInteger(0)
     private val terminalFailure = AtomicReference<String?>(null)
@@ -96,76 +97,107 @@ object BackendRuntimeHost {
 
     fun start(context: Context) {
         if (!started.compareAndSet(false, true)) return
+
+        bootstrapActive.set(true)
         running.set(true)
         terminalFailure.set(null)
         eventSequenceTracker.reset()
+        resetEventStatus()
+        publish(State.Starting)
+
         val appContext = context.applicationContext
-        bootstrapExecutor.execute {
-            var ownedGateway: RustNativeGateway? = null
-            var workersLaunched = false
-            try {
-                val dataRoot = File(appContext.filesDir, "mukei").canonicalFile
-                if (!dataRoot.exists() && !dataRoot.mkdirs()) {
-                    throw IllegalStateException("app_data_directory_unavailable")
-                }
-                val configPath = File(dataRoot, "mukei.toml").canonicalFile
-                val configJson = JSONObject()
-                    .put("app_data_dir", dataRoot.absolutePath)
-                    .put("worker_threads", 2)
-                    .put("max_blocking_threads", 6)
-                    .put("event_capacity", 512)
-                    .toString()
-                    .toByteArray(StandardCharsets.UTF_8)
+        try {
+            bootstrapExecutor.execute {
+                var ownedGateway: RustNativeGateway? = null
+                var workersLaunched = false
+                try {
+                    val dataRoot = File(appContext.filesDir, "mukei").canonicalFile
+                    if (!dataRoot.exists() && !dataRoot.mkdirs()) {
+                        throw IllegalStateException("app_data_directory_unavailable")
+                    }
+                    val configPath = File(dataRoot, "mukei.toml").canonicalFile
+                    val configJson = JSONObject()
+                        .put("app_data_dir", dataRoot.absolutePath)
+                        .put("worker_threads", 2)
+                        .put("max_blocking_threads", 6)
+                        .put("event_capacity", 512)
+                        .toString()
+                        .toByteArray(StandardCharsets.UTF_8)
 
-                val activeGateway = SecureRuntimeFactory.open(appContext, configJson)
-                ownedGateway = activeGateway
-                val acknowledgement = ProtocolJsonCodec.decodeAcknowledgement(
-                    activeGateway.submitCommand(initializeEnvelope(configPath)),
-                )
-                if (acknowledgement.status != AcknowledgementStatus.ACCEPTED) {
-                    throw IllegalStateException(
-                        acknowledgement.rejectionReason ?: "initialize_rejected",
+                    val activeGateway = SecureRuntimeFactory.open(appContext, configJson)
+                    ownedGateway = activeGateway
+                    val acknowledgement = ProtocolJsonCodec.decodeAcknowledgement(
+                        activeGateway.submitCommand(initializeEnvelope(configPath)),
                     )
-                }
-                if (!running.get()) {
-                    publish(State.Stopped)
-                    return@execute
-                }
+                    if (acknowledgement.status != AcknowledgementStatus.ACCEPTED) {
+                        throw IllegalStateException(
+                            acknowledgement.rejectionReason ?: "initialize_rejected",
+                        )
+                    }
+                    if (!running.get()) {
+                        return@execute
+                    }
 
-                gateway.set(activeGateway)
-                val runtimeContract = RuntimeContractJsonCodec.decode(
-                    activeGateway.protocolCapabilities(),
-                )
-                val readiness = AppReadiness.fromSecurityStatus(activeGateway.securityStatus())
-                if (!readiness.shellUsable) {
-                    throw IllegalStateException("secure_storage_not_ready")
-                }
-                publish(
-                    State.Ready(
-                        readiness = readiness,
-                        runtimeContract = runtimeContract,
-                    ),
-                )
+                    gateway.set(activeGateway)
+                    val runtimeContract = RuntimeContractJsonCodec.decode(
+                        activeGateway.protocolCapabilities(),
+                    )
+                    val readiness = AppReadiness.fromSecurityStatus(activeGateway.securityStatus())
+                    if (!readiness.shellUsable) {
+                        throw IllegalStateException("secure_storage_not_ready")
+                    }
+                    if (!running.get()) {
+                        return@execute
+                    }
 
-                workersLaunched = true
-                launchWorkers(appContext, activeGateway)
-            } catch (failure: Throwable) {
-                running.set(false)
-                terminalFailure.compareAndSet(null, stableFailureCode(failure))
-                publish(State.Failed(terminalFailure.get() ?: "backend_runtime_failed"))
-            } finally {
-                if (!workersLaunched) {
-                    ownedGateway?.runCatching { close() }
+                    publish(
+                        State.Ready(
+                            readiness = readiness,
+                            runtimeContract = runtimeContract,
+                        ),
+                    )
+
+                    launchWorkers(appContext, activeGateway)
+                    workersLaunched = true
+                } catch (failure: Throwable) {
+                    running.set(false)
+                    terminalFailure.compareAndSet(null, stableFailureCode(failure))
+                } finally {
+                    bootstrapActive.set(false)
+                    if (!workersLaunched) {
+                        ownedGateway?.let { activeGateway ->
+                            gateway.compareAndSet(activeGateway, null)
+                            activeGateway.runCatching { close() }
+                        }
+                        eventSequenceTracker.reset()
+                        started.set(false)
+                        val failure = terminalFailure.get()
+                        publish(if (failure == null) State.Stopped else State.Failed(failure))
+                    }
                 }
             }
+        } catch (failure: Throwable) {
+            bootstrapActive.set(false)
+            running.set(false)
+            terminalFailure.compareAndSet(null, stableFailureCode(failure))
+            started.set(false)
+            publish(State.Failed(terminalFailure.get() ?: "backend_runtime_failed"))
         }
     }
 
     fun shutdown() {
         running.set(false)
-        if (activeWorkers.get() == 0) {
+        if (!started.get()) {
+            publish(State.Stopped)
+            return
+        }
+
+        // Never close a gateway concurrently with the bootstrap thread. A bootstrap
+        // observes running=false and performs its own cleanup in its finally block.
+        if (!bootstrapActive.get() && activeWorkers.get() == 0) {
             gateway.getAndSet(null)?.runCatching { close() }
             eventSequenceTracker.reset()
+            started.set(false)
             publish(State.Stopped)
         }
     }
@@ -226,6 +258,7 @@ object BackendRuntimeHost {
                 gateway.compareAndSet(activeGateway, null)
                 activeGateway.runCatching { close() }
                 eventSequenceTracker.reset()
+                started.set(false)
                 val failure = terminalFailure.get()
                 publish(if (failure == null) State.Stopped else State.Failed(failure))
             }
@@ -284,6 +317,10 @@ object BackendRuntimeHost {
                 .toString(),
         ),
     )
+
+    private fun resetEventStatus() {
+        mainHandler.post { eventStatus = EventStatus() }
+    }
 
     private fun stableFailureCode(failure: Throwable): String {
         val value = failure.message.orEmpty().trim()
