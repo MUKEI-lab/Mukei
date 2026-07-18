@@ -1,5 +1,6 @@
 package ai.mukei.android
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -96,6 +99,7 @@ private fun StartupFailureSurface(code: String) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(32.dp),
             verticalArrangement = Arrangement.Center,
         ) {
@@ -133,6 +137,14 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
     }
     LaunchedEffect(closeDrawerRequest) {
         if (closeDrawerRequest > 0) drawerState.close()
+    }
+
+    BackHandler(enabled = drawerState.isOpen || selected != TopLevelDestination.HOME) {
+        if (drawerState.isOpen) {
+            closeDrawerRequest += 1
+        } else {
+            selectedName = TopLevelDestination.HOME.name
+        }
     }
 
     ModalNavigationDrawer(
@@ -201,17 +213,18 @@ private fun HomeSurface(
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .padding(horizontal = 24.dp),
     ) {
-        Spacer(Modifier.weight(1f))
         Column(
             modifier = Modifier
+                .align(Alignment.Center)
                 .fillMaxWidth()
-                .widthIn(max = 720.dp),
+                .widthIn(max = 720.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(vertical = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
@@ -272,13 +285,13 @@ private fun HomeSurface(
             ) {
                 Text("Send")
             }
+            Spacer(Modifier.height(32.dp))
+            Text(
+                text = "Private intelligence · local-first foundation",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = "Private intelligence · local-first foundation",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
@@ -287,6 +300,7 @@ private fun ModelsSurface(readiness: AppReadiness) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -313,6 +327,7 @@ private fun ReservedDestinationSurface(destination: TopLevelDestination) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
