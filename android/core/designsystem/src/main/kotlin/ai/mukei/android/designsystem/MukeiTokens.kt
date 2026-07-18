@@ -26,6 +26,10 @@ object MukeiRadius {
     val Composer = 28.dp
 }
 
+object MukeiStroke {
+    val Thin = 1.dp
+}
+
 /** Motion timing contract. Feature animation code should reference these values. */
 object MukeiMotion {
     const val FastMilliseconds = 150
