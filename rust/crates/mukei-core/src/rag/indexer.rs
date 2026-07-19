@@ -224,7 +224,7 @@ impl<'a> IndexingTransaction<'a> {
     }
 }
 
-impl<'a> Drop for IndexingTransaction<'a> {
+impl Drop for IndexingTransaction<'_> {
     fn drop(&mut self) {
         if !self.committed {
             for chunk in self.pending.drain(..) {
