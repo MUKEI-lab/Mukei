@@ -162,8 +162,6 @@ impl<C: ObjectCipher> ImmutableObjectStore<C> {
         let parent = final_path
             .parent()
             .ok_or(ObjectStoreError::MalformedObject)?;
-        fs::create_dir_all(parent)?;
-        sync_directory(parent)?;
 
         let version = self.cipher.version();
         let associated_data = associated_data(&digest, plaintext_size, version);
@@ -175,6 +173,8 @@ impl<C: ObjectCipher> ImmutableObjectStore<C> {
         if ciphertext_size > MAX_ENCODED_OBJECT_BYTES {
             return Err(ObjectStoreError::ObjectTooLarge);
         }
+        fs::create_dir_all(parent)?;
+        sync_directory(parent)?;
         let encoded = encode_object(
             version,
             &digest,
