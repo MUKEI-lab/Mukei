@@ -37,14 +37,24 @@ impl MukeiRuntime {
         if Uuid::parse_str(conversation).is_err() || Uuid::parse_str(branch).is_err() {
             return false;
         }
-        if !self.ephemeral_chats.end(conversation, branch) {
-            return false;
-        }
+        let operation_ids = match self.ephemeral_chats.end(conversation, branch) {
+            Some(operation_ids) => operation_ids,
+            None => return false,
+        };
         self.purge_replay_for_conversation(conversation);
+        let purged_events = self
+            .events
+            .purge_temporary_chat(conversation, &operation_ids);
+        // The conversation stream is now intentionally suppressed. Publish the
+        // non-sensitive lifecycle signal on an application stream instead.
         self.events.emit(
-            &format!("conversation:{conversation}"),
+            "application:temporary-chat",
             "chat.temporary.ended",
-            json!({"branch_id": branch}),
+            json!({
+                "conversation_id": conversation,
+                "branch_id": branch,
+                "purged_events": purged_events,
+            }),
             None,
             None,
         );
