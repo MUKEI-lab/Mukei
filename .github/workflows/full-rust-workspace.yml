@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CARGO_TERM_COLOR: always
+  CARGO_TERM_COLOR: never
   RUSTFLAGS: "-D warnings"
   RUST_BACKTRACE: 1
 
@@ -68,13 +68,33 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Check workspace
         working-directory: rust
-        run: cargo check --workspace --all-targets
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check --workspace --all-targets 2>&1 | tee ../workspace-check.log
       - name: Test workspace
         working-directory: rust
-        run: cargo test --workspace --all-targets
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace --all-targets 2>&1 | tee ../workspace-test.log
       - name: Clippy workspace
         working-directory: rust
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee ../workspace-clippy.log
+      - name: Upload workspace diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-rust-workspace-${{ github.sha }}
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            workspace-check.log
+            workspace-test.log
+            workspace-clippy.log
 
   core-feature-matrix:
     name: core features (${{ matrix.name }})
@@ -98,7 +118,18 @@ jobs:
           workspaces: rust -> target
       - name: Check feature tuple
         working-directory: rust
-        run: cargo check -p mukei-core --no-default-features --features "${{ matrix.features }}" --all-targets
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check -p mukei-core --no-default-features --features "${{ matrix.features }}" --all-targets 2>&1 | tee "../feature-${{ matrix.name }}.log"
+      - name: Upload feature diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-rust-feature-${{ matrix.name }}-${{ github.sha }}
+          if-no-files-found: ignore
+          retention-days: 7
+          path: feature-${{ matrix.name }}.log
 
   android-jni-contracts:
     name: Android JNI secure and RAG contracts
@@ -112,16 +143,26 @@ jobs:
           workspaces: rust -> target
       - name: Test secure runtime boundary
         working-directory: rust
-        run: >-
-          cargo test -p mukei-android-jni --lib
-          --no-default-features
-          --features secure_runtime,runtime_hardening
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p mukei-android-jni --lib --no-default-features --features secure_runtime,runtime_hardening 2>&1 | tee ../jni-secure.log
       - name: Check production RAG composition
         working-directory: rust
-        run: >-
-          cargo check -p mukei-android-jni
-          --no-default-features
-          --features secure_runtime,rag_runtime,runtime_hardening
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check -p mukei-android-jni --no-default-features --features secure_runtime,rag_runtime,runtime_hardening 2>&1 | tee ../jni-rag.log
+      - name: Upload JNI diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-rust-jni-${{ github.sha }}
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            jni-secure.log
+            jni-rag.log
 
   final-status:
     name: publish final full Rust status
