@@ -377,7 +377,9 @@ pub struct DocumentPayload {
 /// New durable project payload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectCreatePayload {
+    /// User-visible project name, trimmed and bounded by protocol validation.
     pub name: String,
+    /// Optional user-authored project description.
     #[serde(default)]
     pub description: String,
 }
@@ -385,8 +387,11 @@ pub struct ProjectCreatePayload {
 /// Mutable project metadata payload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectUpdatePayload {
+    /// Stable project identity allocated by the native runtime.
     pub project_id: String,
+    /// Replacement user-visible project name.
     pub name: String,
+    /// Replacement optional project description.
     #[serde(default)]
     pub description: String,
 }
@@ -394,6 +399,7 @@ pub struct ProjectUpdatePayload {
 /// Payload containing one project identity.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectPayload {
+    /// Stable project identity allocated by the native runtime.
     pub project_id: String,
 }
 
