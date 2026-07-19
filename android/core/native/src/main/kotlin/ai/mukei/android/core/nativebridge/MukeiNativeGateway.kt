@@ -1,5 +1,8 @@
 package ai.mukei.android.core.nativebridge
 
+import ai.mukei.android.protocol.TemporaryChatEndV2
+import ai.mukei.android.protocol.TemporaryChatJsonCodec
+import ai.mukei.android.protocol.TemporaryChatSessionV2
 import java.io.Closeable
 import java.security.SecureRandom
 import java.util.concurrent.atomic.AtomicBoolean
@@ -8,6 +11,8 @@ interface MukeiNativeGateway : Closeable {
     fun protocolCapabilities(): ByteArray
     fun securityStatus(): ByteArray
     fun submitCommand(commandJson: ByteArray): ByteArray
+    fun beginTemporaryChat(): TemporaryChatSessionV2
+    fun endTemporaryChat(conversationId: String, branchId: String): TemporaryChatEndV2
 
     fun drainEvents(
         maximumEvents: Int = 32,
@@ -54,6 +59,23 @@ class RustNativeGateway private constructor(
         checkOpen()
         require(commandJson.isNotEmpty()) { "Command envelope must not be empty" }
         return NativeBindings.submitCommand(nativeHandle, commandJson)
+    }
+
+    override fun beginTemporaryChat(): TemporaryChatSessionV2 {
+        checkOpen()
+        return TemporaryChatJsonCodec.decodeSession(NativeBindings.beginTemporaryChat(nativeHandle))
+    }
+
+    override fun endTemporaryChat(
+        conversationId: String,
+        branchId: String,
+    ): TemporaryChatEndV2 {
+        checkOpen()
+        require(conversationId.isNotBlank()) { "Temporary conversation id must not be blank" }
+        require(branchId.isNotBlank()) { "Temporary branch id must not be blank" }
+        return TemporaryChatJsonCodec.decodeEnd(
+            NativeBindings.endTemporaryChat(nativeHandle, conversationId, branchId),
+        )
     }
 
     override fun drainEvents(
@@ -181,6 +203,13 @@ internal object NativeBindings {
     external fun destroySecureRuntime(handle: Long)
     external fun protocolCapabilities(handle: Long): ByteArray
     external fun securityStatus(handle: Long): ByteArray
+    external fun beginTemporaryChat(handle: Long): ByteArray
+
+    external fun endTemporaryChat(
+        handle: Long,
+        conversationId: String,
+        branchId: String,
+    ): ByteArray
 
     external fun submitCommand(
         handle: Long,
