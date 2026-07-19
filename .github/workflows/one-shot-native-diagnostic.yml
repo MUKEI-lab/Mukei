@@ -1,0 +1,101 @@
+name: one-shot-native-diagnostic
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - '.github/workflows/one-shot-native-diagnostic.yml'
+
+permissions:
+  contents: read
+
+env:
+  RUSTUP_TOOLCHAIN: '1.86.0'
+  ANDROID_NDK_VERSION: '27.2.12479018'
+  CARGO_NDK_VERSION: '4.1.2'
+
+jobs:
+  native-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: dtolnay/rust-toolchain@1.86.0
+      - name: Install native build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libssl-dev perl make
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;${ANDROID_NDK_VERSION}"
+          rustup target add --toolchain "${RUSTUP_TOOLCHAIN}" aarch64-linux-android
+          cargo install cargo-ndk --version "${CARGO_NDK_VERSION}" --locked
+      - name: Prepare dependency graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fetch --manifest-path rust/Cargo.toml
+          registry_root="${CARGO_HOME:-$HOME/.cargo}/registry/src"
+          expected='extern "C" long syscall(long, ...) noexcept;'
+          replacement='extern "C" long syscall(long, ...);'
+          mapfile -t headers < <(find "$registry_root" -type f -path '*/numkong-7.7.0/include/numkong/capabilities.h' -print | sort)
+          test "${#headers[@]}" -eq 1
+          python3 - "${headers[0]}" "$expected" "$replacement" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1]); old=sys.argv[2]; new=sys.argv[3]
+          s=p.read_text()
+          if s.count(old)==1 and s.count(new)==0:
+              p.write_text(s.replace(old,new,1))
+          elif not (s.count(old)==0 and s.count(new)==1):
+              raise SystemExit('Unexpected NumKong declaration state')
+          PY
+      - name: Build native ARM64 with captured log
+        id: native
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics
+          ndk="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}"
+          export ANDROID_NDK_HOME="$ndk"
+          export ANDROID_NDK_ROOT="$ndk"
+          output="$GITHUB_WORKSPACE/android/core/native/src/main/jniLibs"
+          rm -rf "$output"
+          mkdir -p "$output"
+          {
+            cmake -S rust/llama-cpp-prebuilt \
+              -B build/llama-arm64-v8a \
+              -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
+              -DANDROID_ABI=arm64-v8a \
+              -DANDROID_PLATFORM=android-26 \
+              -DANDROID_STL=c++_static \
+              -DMUKEI_LLAMA_FORCE_REBUILD=ON
+            cmake --build build/llama-arm64-v8a --target mukei_llama_native
+            export MUKEI_LLAMA_NATIVE_LIB_DIR="$GITHUB_WORKSPACE/rust/llama-cpp-prebuilt/prebuilt/arm64-v8a"
+            test -s "$MUKEI_LLAMA_NATIVE_LIB_DIR/libmukei_llama_native.so"
+            cd rust
+            cargo ndk -t arm64-v8a -o ../android/core/native/src/main/jniLibs \
+              build -p mukei-android-jni --release \
+              --no-default-features \
+              --features runtime_production,runtime_hardening
+          } 2>&1 | tee diagnostics/native-build.log
+      - name: Upload native diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-arm64-diagnostic-${{ github.sha }}
+          path: diagnostics/native-build.log
+          if-no-files-found: error
+          retention-days: 7
+      - name: Enforce native build result
+        if: steps.native.outcome == 'failure'
+        run: exit 1
