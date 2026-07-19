@@ -74,7 +74,10 @@ fn build_payload() -> Result<String> {
     if let Ok(cpuinfo) = fs::read_to_string("/proc/cpuinfo") {
         let model = cpuinfo
             .lines()
-            .find_map(|line| line.split_once(':').map(|(key, value)| (key.trim(), value.trim())))
+            .find_map(|line| {
+                line.split_once(':')
+                    .map(|(key, value)| (key.trim(), value.trim()))
+            })
             .filter(|(key, _)| *key == "model name" || *key == "Hardware" || *key == "Processor")
             .map(|(_, value)| value.to_string())
             .unwrap_or_else(|| "unknown".to_string());
@@ -101,10 +104,7 @@ mod tests {
 
     #[tokio::test]
     async fn returns_canonical_external_data_wrapper() {
-        let value = HardwareTool
-            .run(serde_json::json!({}))
-            .await
-            .unwrap();
+        let value = HardwareTool.run(serde_json::json!({})).await.unwrap();
         assert!(value.starts_with("<external_data source=\"hardware\" trust=\"untrusted\">"));
     }
 }

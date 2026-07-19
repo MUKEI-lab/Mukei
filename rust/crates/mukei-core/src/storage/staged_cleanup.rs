@@ -187,7 +187,10 @@ fn path_contains_symlink(root: &Path, relative: &Path) -> Result<bool> {
 }
 
 fn cleanup_io_error(error: std::io::Error) -> MukeiError {
-    MukeiError::Invariant(format!("staged plaintext cleanup I/O failed: {}", error.kind()))
+    MukeiError::Invariant(format!(
+        "staged plaintext cleanup I/O failed: {}",
+        error.kind()
+    ))
 }
 
 fn is_safe_relative_path(path: &Path) -> bool {
@@ -339,9 +342,11 @@ mod tests {
         let pool = DatabasePool::open(&root.path().join("storage.db")).unwrap();
         Migrator::embedded().apply_pending(&pool).await.unwrap();
 
-        assert!(StagedPlaintextCleanup::sweep_terminal_batch(&pool, root.path(), 0)
-            .await
-            .is_err());
+        assert!(
+            StagedPlaintextCleanup::sweep_terminal_batch(&pool, root.path(), 0)
+                .await
+                .is_err()
+        );
         assert!(StagedPlaintextCleanup::sweep_terminal_batch(
             &pool,
             root.path(),

@@ -10,14 +10,12 @@ pub mod tools;
 pub mod watchdog;
 
 pub use context::{ContextBudget, ContextBudgetManager, TokenCount};
-pub use loop_::{
-    AgentEventSink, AgentLoop, AgentLoopHandle, AgentRunOutcome, AgentRunRequest,
-};
+pub use loop_::{AgentEventSink, AgentLoop, AgentLoopHandle, AgentRunOutcome, AgentRunRequest};
+pub use tools::{render_repeat_output_envelope, render_tool_error_envelope};
 pub use tools::{
     FailureKind, FailureTracker, OutputRepeatTracker, ToolExecutionPolicy, ToolExecutor,
     ToolOutcome,
 };
-pub use tools::{render_repeat_output_envelope, render_tool_error_envelope};
 pub use watchdog::{Watchdog, WatchdogHandle};
 
 /// Platform-neutral runtime state snapshot retained for domain callers.

@@ -248,7 +248,9 @@ impl PlatformRequestBroker {
         if !state.in_flight.remove(&response.request_id) {
             return Err(PlatformPortError::UnknownRequest);
         }
-        state.responses.insert(response.request_id.clone(), response);
+        state
+            .responses
+            .insert(response.request_id.clone(), response);
         drop(state);
         self.response_changed.notify_waiters();
         Ok(())
@@ -298,7 +300,9 @@ impl PlatformRequestBroker {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let pending_before = state.pending.len();
-        state.pending.retain(|request| request.request_id != request_id);
+        state
+            .pending
+            .retain(|request| request.request_id != request_id);
         let removed_pending = state.pending.len() != pending_before;
         let removed_in_flight = state.in_flight.remove(request_id);
         let removed_response = state.responses.remove(request_id).is_some();

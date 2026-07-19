@@ -169,7 +169,8 @@ impl<C: ObjectCipher> ImmutableObjectStore<C> {
             .cipher
             .seal(plaintext, &associated_data)
             .map_err(ObjectStoreError::Encryption)?;
-        let ciphertext_size = u64::try_from(ciphertext.len()).map_err(|_| ObjectStoreError::ObjectTooLarge)?;
+        let ciphertext_size =
+            u64::try_from(ciphertext.len()).map_err(|_| ObjectStoreError::ObjectTooLarge)?;
         if ciphertext_size > MAX_ENCODED_OBJECT_BYTES {
             return Err(ObjectStoreError::ObjectTooLarge);
         }
@@ -330,8 +331,8 @@ fn read_encoded_object(
     {
         return Err(ObjectStoreError::MalformedObject);
     }
-    let ciphertext_size = usize::try_from(encrypted_size)
-        .map_err(|_| ObjectStoreError::MalformedObject)?;
+    let ciphertext_size =
+        usize::try_from(encrypted_size).map_err(|_| ObjectStoreError::MalformedObject)?;
     let mut ciphertext = vec![0u8; ciphertext_size];
     file.read_exact(&mut ciphertext)
         .map_err(|_| ObjectStoreError::MalformedObject)?;

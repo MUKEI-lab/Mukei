@@ -70,8 +70,7 @@ fn native_build_id() -> Option<String> {
 
 pub(crate) fn implementation_available() -> bool {
     let abi_version = unsafe { mukei_llama_abi_version() };
-    abi_version == EXPECTED_ABI_VERSION
-        && native_build_id().as_deref() == Some(EXPECTED_BUILD_ID)
+    abi_version == EXPECTED_ABI_VERSION && native_build_id().as_deref() == Some(EXPECTED_BUILD_ID)
 }
 
 fn status_message(code: i32) -> String {
@@ -104,12 +103,7 @@ pub(crate) struct AndroidLlamaBackendFactory {
 }
 
 impl AndroidLlamaBackendFactory {
-    pub(crate) fn new(
-        n_ctx: u32,
-        n_threads: u32,
-        gpu_layers: i32,
-        max_new_tokens: u32,
-    ) -> Self {
+    pub(crate) fn new(n_ctx: u32, n_threads: u32, gpu_layers: i32, max_new_tokens: u32) -> Self {
         Self {
             n_ctx: n_ctx.max(1),
             n_threads: n_threads.max(1),
@@ -188,9 +182,8 @@ impl NativeLlamaBackend {
             };
             state.drain_complete_utf8();
             if state.callback_error.is_none() && !state.pending.is_empty() {
-                state.callback_error = Some(
-                    "native inference ended with an incomplete UTF-8 sequence".to_string(),
-                );
+                state.callback_error =
+                    Some("native inference ended with an incomplete UTF-8 sequence".to_string());
             }
             (
                 status,
@@ -264,11 +257,12 @@ impl InferenceBackendFactory for AndroidLlamaBackendFactory {
                 "native inference ABI or provenance does not match this build".to_string(),
             ));
         }
-        let catalogue = mukei_core::engine::lookup_model_str(&descriptor.model_id).ok_or_else(|| {
-            MukeiError::ModelLoadFailed(
-                "selected model is not in the trusted catalogue".to_string(),
-            )
-        })?;
+        let catalogue =
+            mukei_core::engine::lookup_model_str(&descriptor.model_id).ok_or_else(|| {
+                MukeiError::ModelLoadFailed(
+                    "selected model is not in the trusted catalogue".to_string(),
+                )
+            })?;
         if descriptor.revision != catalogue.expected_sha256
             || descriptor.artifact.artifact_id() != catalogue.expected_sha256
         {
@@ -345,9 +339,8 @@ impl CallbackState {
                 }
                 Err(error) if error.error_len().is_none() => return,
                 Err(_) => {
-                    self.callback_error = Some(
-                        "native inference emitted an invalid UTF-8 sequence".to_string(),
-                    );
+                    self.callback_error =
+                        Some("native inference emitted an invalid UTF-8 sequence".to_string());
                     return;
                 }
             }

@@ -1,10 +1,10 @@
 #![allow(non_snake_case)]
 
-mod runtime_registry;
 #[cfg(feature = "native_inference")]
 mod native_inference;
 #[cfg(feature = "rag_runtime")]
 mod native_rag;
+mod runtime_registry;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr::null_mut;
@@ -19,10 +19,9 @@ use mukei_core::application_runtime::{
 };
 use mukei_core::platform::{PlatformResponse, MAX_PLATFORM_DRAIN_ITEMS};
 use mukei_core::ui_protocol::{
-    ClientKind, CommandAcknowledgementV2, CommandEnvelopeV2, EventBatchV2,
-    ProtocolVersion, RejectionReason, RuntimeContractSnapshot, SnapshotDomainV2,
-    SnapshotEnvelopeV2, CAP_ANDROID_JNI_TRANSPORT, MAX_COMMAND_ENVELOPE_BYTES,
-    MAX_EVENT_BATCH_ITEMS,
+    ClientKind, CommandAcknowledgementV2, CommandEnvelopeV2, EventBatchV2, ProtocolVersion,
+    RejectionReason, RuntimeContractSnapshot, SnapshotDomainV2, SnapshotEnvelopeV2,
+    CAP_ANDROID_JNI_TRANSPORT, MAX_COMMAND_ENVELOPE_BYTES, MAX_EVENT_BATCH_ITEMS,
 };
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
@@ -47,22 +46,19 @@ fn runtime_services(config: &RuntimeConfig) -> RuntimeServices {
     if !native_inference::implementation_available() {
         return RuntimeServices::default();
     }
-    let product = mukei_core::config::MukeiConfig::default_for_data_root(Path::new(
-        &config.app_data_dir,
-    ));
+    let product =
+        mukei_core::config::MukeiConfig::default_for_data_root(Path::new(&config.app_data_dir));
     let max_new_tokens = product
         .watchdog
         .max_token_budget
         .clamp(1, u64::from(u32::MAX)) as u32;
     RuntimeServices {
-        backend_factory: Some(Arc::new(
-            native_inference::AndroidLlamaBackendFactory::new(
-                product.n_ctx,
-                product.n_threads,
-                product.gpu_layers,
-                max_new_tokens,
-            ),
-        )),
+        backend_factory: Some(Arc::new(native_inference::AndroidLlamaBackendFactory::new(
+            product.n_ctx,
+            product.n_threads,
+            product.gpu_layers,
+            max_new_tokens,
+        ))),
     }
 }
 
@@ -335,7 +331,9 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_su
         };
         let response_bytes = match env.convert_byte_array(&response_json) {
             Ok(bytes) => bytes,
-            Err(_) => return error_payload("invalid_platform_response", "Unreadable response bytes."),
+            Err(_) => {
+                return error_payload("invalid_platform_response", "Unreadable response bytes.")
+            }
         };
         if response_bytes.is_empty() || response_bytes.len() > MAX_PLATFORM_RESPONSE_BYTES {
             return error_payload(
