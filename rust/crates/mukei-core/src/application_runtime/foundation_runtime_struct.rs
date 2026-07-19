@@ -8,7 +8,6 @@ pub struct MukeiRuntime {
     events: Arc<EventBus>,
     platform: Arc<PlatformRequestBroker>,
     features: Arc<FeatureState>,
-    ephemeral_chats: Arc<EphemeralChatState>,
     settings: RwLock<HashMap<String, Value>>,
     replay: Mutex<HashMap<String, ReplayRecord>>,
     product_config: RwLock<Option<MukeiConfig>>,
