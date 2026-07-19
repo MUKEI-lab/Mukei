@@ -597,15 +597,11 @@ object BackendRuntimeHost {
         if (event.operationId != operationId) return
 
         when (event.eventType) {
-            "chat.token.delta" -> {
-                val token = eventPayload(event)
-                    .optString("text")
-                    .takeIf { it.isNotEmpty() }
-                    ?: return
-                conversationState = current.copy(
-                    streamingAssistant = current.streamingAssistant + token,
-                )
-            }
+            // The current runtime emits deltas before it knows whether an inference
+            // attempt is a user-visible final answer or an internal tool-call turn.
+            // Do not project those bytes into assistant UI until the protocol exposes
+            // an explicitly sanitized/final-only streaming capability.
+            "chat.token.delta" -> Unit
 
             "chat.generation.completed" -> {
                 val payload = eventPayload(event)
@@ -614,7 +610,7 @@ object BackendRuntimeHost {
                 } else {
                     null
                 }
-                val finalContent = completedContent ?: current.streamingAssistant
+                val finalContent = completedContent.orEmpty()
                 val completedMessages = if (finalContent.isEmpty()) {
                     current.messages
                 } else {
