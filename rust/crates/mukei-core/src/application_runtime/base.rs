@@ -72,6 +72,9 @@ impl MukeiRuntime {
             CommandType::ModelDelete,
             CommandType::DocumentGrant,
             CommandType::DocumentRevoke,
+            CommandType::ProjectCreate,
+            CommandType::ProjectUpdate,
+            CommandType::ProjectArchive,
             CommandType::SettingsUpdate,
         ];
         if self.backend_factory.is_some() {

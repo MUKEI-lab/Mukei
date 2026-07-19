@@ -71,6 +71,23 @@ struct ConversationProjection {
     messages: Vec<ChatMessage>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ProjectStatus {
+    Active,
+    Archived,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ProjectProjection {
+    project_id: String,
+    name: String,
+    description: String,
+    status: ProjectStatus,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
 enum PersistenceCommand {
     Save {
         store: Arc<dyn RuntimeProjectionStore>,
@@ -92,6 +109,7 @@ struct FeatureState {
     conversations: RwLock<HashMap<(String, String), Vec<ChatMessage>>>,
     models: RwLock<HashMap<String, ModelProjection>>,
     documents: RwLock<HashMap<String, DocumentProjection>>,
+    projects: RwLock<HashMap<String, ProjectProjection>>,
     projection_store: RwLock<Option<Arc<dyn RuntimeProjectionStore>>>,
     persistence_sender: mpsc::UnboundedSender<PersistenceCommand>,
     persistence_enqueue: Mutex<()>,
@@ -141,6 +159,7 @@ impl FeatureState {
             conversations: RwLock::new(HashMap::new()),
             models: RwLock::new(HashMap::new()),
             documents: RwLock::new(HashMap::new()),
+            projects: RwLock::new(HashMap::new()),
             projection_store: RwLock::new(None),
             persistence_sender,
             persistence_enqueue: Mutex::new(()),
@@ -210,6 +229,17 @@ impl FeatureState {
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = records
                 .into_iter()
                 .map(|record| ((record.conversation_id, record.branch_id), record.messages))
+                .collect();
+        }
+        if let Some(value) = store.load("projects").await? {
+            let records: Vec<ProjectProjection> =
+                serde_json::from_value(value).map_err(|_| MukeiError::DatabaseCorruption)?;
+            *self
+                .projects
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = records
+                .into_iter()
+                .map(|record| (record.project_id.clone(), record))
                 .collect();
         }
         self.persist_operations();

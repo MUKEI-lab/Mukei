@@ -34,6 +34,13 @@ impl FeatureState {
                 .values()
                 .cloned()
                 .collect::<Vec<_>>();
+            let projects = self
+                .projects
+                .read()
+                .unwrap_or_else(|p| p.into_inner())
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
             let conversations = self
                 .conversations
                 .read()
@@ -66,6 +73,11 @@ impl FeatureState {
                 (
                     "conversations",
                     serde_json::to_value(conversations)
+                        .map_err(|error| MukeiError::Internal(error.to_string()))?,
+                ),
+                (
+                    "projects",
+                    serde_json::to_value(projects)
                         .map_err(|error| MukeiError::Internal(error.to_string()))?,
                 ),
             ];

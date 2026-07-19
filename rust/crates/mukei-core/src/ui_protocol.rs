@@ -13,7 +13,7 @@ use serde_json::Value;
 /// Current incompatible protocol generation.
 pub const PROTOCOL_MAJOR: u16 = 2;
 /// Current backward-compatible protocol generation.
-pub const PROTOCOL_MINOR: u16 = 1;
+pub const PROTOCOL_MINOR: u16 = 2;
 /// Oldest peer major accepted by this implementation.
 pub const MIN_SUPPORTED_PEER_MAJOR: u16 = 2;
 /// Maximum serialized command envelope accepted by a native transport.
@@ -225,6 +225,12 @@ pub enum CommandType {
     DocumentRetryIngestion,
     /// Import a selected Android document into the active chat workspace.
     StorageImportFile,
+    /// Create a durable encrypted project record.
+    ProjectCreate,
+    /// Update an active project record.
+    ProjectUpdate,
+    /// Archive a project without deleting its durable identity.
+    ProjectArchive,
     /// Persist one product setting.
     SettingsUpdate,
     /// Resume an interrupted response.
@@ -249,6 +255,9 @@ impl CommandType {
             "document.revoke" => Some(Self::DocumentRevoke),
             "document.retry_ingestion" => Some(Self::DocumentRetryIngestion),
             "storage.import_file" => Some(Self::StorageImportFile),
+            "project.create" => Some(Self::ProjectCreate),
+            "project.update" => Some(Self::ProjectUpdate),
+            "project.archive" => Some(Self::ProjectArchive),
             "settings.update" => Some(Self::SettingsUpdate),
             "recovery.resume" => Some(Self::RecoveryResume),
             "recovery.regenerate" => Some(Self::RecoveryRegenerate),
@@ -271,6 +280,9 @@ impl CommandType {
             Self::DocumentRevoke => "document.revoke",
             Self::DocumentRetryIngestion => "document.retry_ingestion",
             Self::StorageImportFile => "storage.import_file",
+            Self::ProjectCreate => "project.create",
+            Self::ProjectUpdate => "project.update",
+            Self::ProjectArchive => "project.archive",
             Self::SettingsUpdate => "settings.update",
             Self::RecoveryResume => "recovery.resume",
             Self::RecoveryRegenerate => "recovery.regenerate",
@@ -288,6 +300,9 @@ impl CommandType {
                 | Self::DocumentRevoke
                 | Self::DocumentRetryIngestion
                 | Self::StorageImportFile
+                | Self::ProjectCreate
+                | Self::ProjectUpdate
+                | Self::ProjectArchive
                 | Self::RecoveryResume
                 | Self::RecoveryRegenerate
         )
@@ -359,6 +374,29 @@ pub struct DocumentPayload {
     pub document_id: String,
 }
 
+/// New durable project payload.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectCreatePayload {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// Mutable project metadata payload.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectUpdatePayload {
+    pub project_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// Payload containing one project identity.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectPayload {
+    pub project_id: String,
+}
+
 /// Product setting mutation payload.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SettingUpdatePayload {
@@ -387,6 +425,12 @@ pub enum ValidatedCommandPayload {
     Document(DocumentPayload),
     /// Selected document destined for encrypted workspace storage.
     StorageImport(StorageImportPayload),
+    /// New project metadata.
+    ProjectCreate(ProjectCreatePayload),
+    /// Updated project metadata.
+    ProjectUpdate(ProjectUpdatePayload),
+    /// Existing project identity.
+    Project(ProjectPayload),
     /// Setting mutation.
     SettingUpdate(SettingUpdatePayload),
 }
@@ -603,6 +647,8 @@ pub enum SnapshotDomainV2 {
     Protocol,
     /// Operation and replay registry summary.
     Operations,
+    /// Durable encrypted project records.
+    Projects,
 }
 
 impl SnapshotDomainV2 {
@@ -613,6 +659,7 @@ impl SnapshotDomainV2 {
             "settings" => Some(Self::Settings),
             "protocol" => Some(Self::Protocol),
             "operations" => Some(Self::Operations),
+            "projects" => Some(Self::Projects),
             _ => None,
         }
     }
@@ -781,6 +828,9 @@ fn validate_scope_for_command(
             CommandType::DocumentGrant
             | CommandType::AppInitialize
             | CommandType::DownloadCancel
+            | CommandType::ProjectCreate
+            | CommandType::ProjectUpdate
+            | CommandType::ProjectArchive
             | CommandType::SettingsUpdate,
             _,
         ) if has_conversation || has_model || has_document => {
@@ -894,6 +944,39 @@ pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand,
                 return Err(RejectionReason::InvalidPayload);
             }
             ValidatedCommandPayload::Document(value)
+        }
+        CommandType::ProjectCreate => {
+            let value: ProjectCreatePayload = serde_json::from_value(envelope.payload.clone())
+                .map_err(|_| RejectionReason::InvalidPayload)?;
+            if !non_empty_bounded(&value.name, 128)
+                || value.name.chars().any(char::is_control)
+                || value.description.len() > 4 * 1024
+                || value.description.chars().any(|character| character == '\0')
+            {
+                return Err(RejectionReason::InvalidPayload);
+            }
+            ValidatedCommandPayload::ProjectCreate(value)
+        }
+        CommandType::ProjectUpdate => {
+            let value: ProjectUpdatePayload = serde_json::from_value(envelope.payload.clone())
+                .map_err(|_| RejectionReason::InvalidPayload)?;
+            if !valid_protocol_id(&value.project_id, MAX_PROTOCOL_ID_LEN)
+                || !non_empty_bounded(&value.name, 128)
+                || value.name.chars().any(char::is_control)
+                || value.description.len() > 4 * 1024
+                || value.description.chars().any(|character| character == '\0')
+            {
+                return Err(RejectionReason::InvalidPayload);
+            }
+            ValidatedCommandPayload::ProjectUpdate(value)
+        }
+        CommandType::ProjectArchive => {
+            let value: ProjectPayload = serde_json::from_value(envelope.payload.clone())
+                .map_err(|_| RejectionReason::InvalidPayload)?;
+            if !valid_protocol_id(&value.project_id, MAX_PROTOCOL_ID_LEN) {
+                return Err(RejectionReason::InvalidPayload);
+            }
+            ValidatedCommandPayload::Project(value)
         }
         CommandType::SettingsUpdate => {
             let value: SettingUpdatePayload = serde_json::from_value(envelope.payload.clone())

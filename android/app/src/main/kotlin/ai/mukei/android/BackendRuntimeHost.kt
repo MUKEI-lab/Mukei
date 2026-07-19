@@ -98,8 +98,71 @@ fun submitStorageImport(
     }
 }
 
+data class ProjectCommandSubmission(
+    val status: String,
+    val operationId: String?,
+    val rejectionReason: String?,
+)
+
+fun createProject(name: String, description: String): ProjectCommandSubmission =
+    submitProjectCommand(
+        commandType = "project.create",
+        payload = JSONObject().put("name", name).put("description", description),
+    )
+
+fun updateProject(
+    projectId: String,
+    name: String,
+    description: String,
+): ProjectCommandSubmission = submitProjectCommand(
+    commandType = "project.update",
+    payload = JSONObject()
+        .put("project_id", projectId)
+        .put("name", name)
+        .put("description", description),
+)
+
+fun archiveProject(projectId: String): ProjectCommandSubmission = submitProjectCommand(
+    commandType = "project.archive",
+    payload = JSONObject().put("project_id", projectId),
+)
+
+private fun submitProjectCommand(
+    commandType: String,
+    payload: JSONObject,
+): ProjectCommandSubmission {
+    val activeGateway = gateway.get()
+        ?: return ProjectCommandSubmission("rejected", null, "backend_unavailable")
+    return try {
+        val envelope = JSONObject()
+            .put("protocol_version", JSONObject().put("major", 2).put("minor", 2))
+            .put("command_id", UUID.randomUUID().toString())
+            .put("request_id", UUID.randomUUID().toString())
+            .put("command_type", commandType)
+            .put("submitted_at", Instant.now().toString())
+            .put("correlation_id", UUID.randomUUID().toString())
+            .put("idempotency_key", "project-${UUID.randomUUID()}")
+            .put("payload", payload)
+        val acknowledgement = JSONObject(
+            String(
+                activeGateway.submitCommand(
+                    envelope.toString().toByteArray(StandardCharsets.UTF_8),
+                ),
+                StandardCharsets.UTF_8,
+            ),
+        )
+        ProjectCommandSubmission(
+            status = acknowledgement.optString("status", "rejected"),
+            operationId = acknowledgement.optString("operation_id").takeIf { it.isNotBlank() },
+            rejectionReason = acknowledgement.optString("rejection_reason").takeIf { it.isNotBlank() },
+        )
+    } catch (failure: Throwable) {
+        ProjectCommandSubmission("rejected", null, stableFailureCode(failure))
+    }
+}
+
 fun requestRuntimeSnapshot(domain: String): String? {
-    if (domain !in setOf("application", "settings", "protocol", "operations")) return null
+    if (domain !in setOf("application", "settings", "protocol", "operations", "projects")) return null
     val activeGateway = gateway.get() ?: return null
     return runCatching {
         String(activeGateway.requestSnapshot(domain), StandardCharsets.UTF_8)

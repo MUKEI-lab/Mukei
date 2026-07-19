@@ -135,6 +135,7 @@ pub enum RuntimeSnapshotDomain {
     Settings,
     Protocol,
     Operations,
+    Projects,
 }
 
 impl RuntimeSnapshotDomain {
@@ -145,6 +146,7 @@ impl RuntimeSnapshotDomain {
             "settings" => Some(Self::Settings),
             "protocol" => Some(Self::Protocol),
             "operations" => Some(Self::Operations),
+            "projects" => Some(Self::Projects),
             _ => None,
         }
     }

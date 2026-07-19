@@ -39,6 +39,7 @@ impl MukeiRuntime {
             RuntimeSnapshotDomain::Operations => {
                 self.features.snapshot(self.platform.snapshot())
             }
+            RuntimeSnapshotDomain::Projects => self.features.projects_snapshot(),
         };
         Ok(RuntimeSnapshotEnvelope {
             runtime_session_id: self.session_id.clone(),

@@ -351,6 +351,7 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                         openModels = { selectedName = TopLevelDestination.MODELS.name },
                     )
                     TopLevelDestination.STORAGE -> StorageSurface()
+                    TopLevelDestination.PROJECTS -> ProjectsSurface()
                     TopLevelDestination.MODELS -> ModelsSurface(state.readiness)
                     else -> ReservedDestinationSurface(selected)
                 }
