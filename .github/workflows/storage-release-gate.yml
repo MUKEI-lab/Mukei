@@ -59,7 +59,19 @@ jobs:
 
       - name: Run storage release gate
         shell: bash
-        run: bash scripts/storage-release-gate.sh
+        run: |
+          set -o pipefail
+          mkdir -p ci-storage-release-gate
+          bash scripts/storage-release-gate.sh 2>&1 | tee ci-storage-release-gate/release-gate.log
+
+      - name: Upload release gate diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-release-gate-${{ github.sha }}
+          path: ci-storage-release-gate
+          if-no-files-found: warn
+          retention-days: 14
 
   publish-result:
     name: publish release result
