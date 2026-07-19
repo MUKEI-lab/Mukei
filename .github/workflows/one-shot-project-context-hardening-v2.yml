@@ -1,0 +1,395 @@
+name: one-shot-project-context-hardening-v2
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - '.github/workflows/one-shot-project-context-hardening-v2.yml'
+
+permissions:
+  contents: write
+  statuses: write
+
+jobs:
+  harden-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Publish pending status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'pending', context: 'project-context-hardening-v2', description: 'Hardening Project context privacy and atomicity', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.82.0'
+          components: rustfmt,clippy
+      - name: Apply function-level hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          path=Path('rust/crates/mukei-core/src/application_runtime/projects.rs')
+          s=path.read_text(encoding='utf-8')
+
+          def function_span(text, signature, start_at=0):
+              start=text.find(signature,start_at)
+              if start < 0:
+                  raise SystemExit(f'missing function signature: {signature}')
+              brace=text.find('{',start)
+              if brace < 0:
+                  raise SystemExit(f'missing function body: {signature}')
+              depth=0
+              for i in range(brace,len(text)):
+                  if text[i]=='{': depth+=1
+                  elif text[i]=='}':
+                      depth-=1
+                      if depth==0:
+                          return start,i+1
+              raise SystemExit(f'unclosed function: {signature}')
+
+          def replace_function(signature,new_text,start_at=0):
+              global s
+              a,b=function_span(s,signature,start_at)
+              s=s[:a]+new_text+s[b:]
+
+          # Add one atomic mutation primitive inside FeatureState.
+          marker='    fn projects_snapshot(&self) -> Value {'
+          if s.count(marker)!=1:
+              raise SystemExit(f'projects_snapshot marker count={s.count(marker)}')
+          atomic='''    fn update_active_project(
+              &self,
+              project_id: &str,
+              update: impl FnOnce(&mut ProjectProjection) -> Result<(), RejectionReason>,
+          ) -> Result<ProjectProjection, RejectionReason> {
+              let updated = {
+                  let mut projects = self
+                      .projects
+                      .write()
+                      .unwrap_or_else(|poisoned| poisoned.into_inner());
+                  let project = projects
+                      .get_mut(project_id)
+                      .ok_or(RejectionReason::StaleScope)?;
+                  if project.status == ProjectStatus::Archived {
+                      return Err(RejectionReason::PolicyDenied);
+                  }
+                  update(project)?;
+                  project.clone()
+              };
+              self.persist_projects();
+              Ok(updated)
+          }
+
+          '''
+          s=s.replace(marker,atomic+marker,1)
+
+          runtime_pos=s.find('impl MukeiRuntime {')
+          if runtime_pos < 0: raise SystemExit('runtime impl missing')
+
+          # Remove the old read-then-write active check helper.
+          a,b=function_span(s,'    fn active_project(',runtime_pos)
+          s=s[:a]+s[b:]
+          runtime_pos=s.find('impl MukeiRuntime {')
+
+          replace_function('    fn update_project(','''    fn update_project(&self, command: &ValidatedCommand) -> CommandAcknowledgementV2 {
+              if let Err(acknowledgement) = self.ensure_ready(command) {
+                  return acknowledgement;
+              }
+              let ValidatedCommandPayload::ProjectUpdate(payload) = &command.payload else {
+                  return CommandAcknowledgementV2::rejected(
+                      Some(&command.envelope),
+                      RejectionReason::InvalidPayload,
+                  );
+              };
+              let name = payload.name.trim().to_owned();
+              let description = payload.description.trim().to_owned();
+              let updated = match self.features.update_active_project(&payload.project_id, |project| {
+                  project.name = name;
+                  project.description = description;
+                  project.updated_at = Utc::now();
+                  Ok(())
+              }) {
+                  Ok(project) => project,
+                  Err(reason) => {
+                      return CommandAcknowledgementV2::rejected(Some(&command.envelope), reason)
+                  }
+              };
+              let (acknowledgement, operation_id, _) = self.accept_operation(command);
+              self.complete_project_operation(command, &operation_id, "project.updated", &updated);
+              acknowledgement
+          }''',runtime_pos)
+
+          runtime_pos=s.find('impl MukeiRuntime {')
+          replace_function('    fn update_project_instructions(','''    fn update_project_instructions(&self, command: &ValidatedCommand) -> CommandAcknowledgementV2 {
+              if let Err(acknowledgement) = self.ensure_ready(command) {
+                  return acknowledgement;
+              }
+              let ValidatedCommandPayload::ProjectInstructions(payload) = &command.payload else {
+                  return CommandAcknowledgementV2::rejected(
+                      Some(&command.envelope),
+                      RejectionReason::InvalidPayload,
+                  );
+              };
+              let instructions = payload.instructions.trim().to_owned();
+              let updated = match self.features.update_active_project(&payload.project_id, |project| {
+                  project.instructions = instructions;
+                  project.updated_at = Utc::now();
+                  Ok(())
+              }) {
+                  Ok(project) => project,
+                  Err(reason) => {
+                      return CommandAcknowledgementV2::rejected(Some(&command.envelope), reason)
+                  }
+              };
+              let (acknowledgement, operation_id, _) = self.accept_operation(command);
+              self.complete_project_context_operation(
+                  command,
+                  &operation_id,
+                  "project.instructions.updated",
+                  json!({"project_id": updated.project_id, "updated_at": updated.updated_at}),
+              );
+              acknowledgement
+          }''',runtime_pos)
+
+          runtime_pos=s.find('impl MukeiRuntime {')
+          replace_function('    fn add_project_memory(','''    fn add_project_memory(&self, command: &ValidatedCommand) -> CommandAcknowledgementV2 {
+              if let Err(acknowledgement) = self.ensure_ready(command) {
+                  return acknowledgement;
+              }
+              let ValidatedCommandPayload::ProjectMemoryCreate(payload) = &command.payload else {
+                  return CommandAcknowledgementV2::rejected(
+                      Some(&command.envelope),
+                      RejectionReason::InvalidPayload,
+                  );
+              };
+              let now = Utc::now();
+              let memory_id = Uuid::new_v4().to_string();
+              let content = payload.content.trim().to_owned();
+              let updated = match self.features.update_active_project(&payload.project_id, |project| {
+                  if project.memory.len() >= MAX_PROJECT_MEMORY_ENTRIES {
+                      return Err(RejectionReason::PolicyDenied);
+                  }
+                  project.memory.push(ProjectMemoryEntry {
+                      memory_id: memory_id.clone(),
+                      content,
+                      created_at: now,
+                      updated_at: now,
+                  });
+                  project.updated_at = now;
+                  Ok(())
+              }) {
+                  Ok(project) => project,
+                  Err(reason) => {
+                      return CommandAcknowledgementV2::rejected(Some(&command.envelope), reason)
+                  }
+              };
+              let (acknowledgement, operation_id, _) = self.accept_operation(command);
+              self.complete_project_context_operation(
+                  command,
+                  &operation_id,
+                  "project.memory.added",
+                  json!({
+                      "project_id": updated.project_id,
+                      "memory_id": memory_id,
+                      "updated_at": updated.updated_at,
+                  }),
+              );
+              acknowledgement
+          }''',runtime_pos)
+
+          runtime_pos=s.find('impl MukeiRuntime {')
+          replace_function('    fn update_project_memory(','''    fn update_project_memory(&self, command: &ValidatedCommand) -> CommandAcknowledgementV2 {
+              if let Err(acknowledgement) = self.ensure_ready(command) {
+                  return acknowledgement;
+              }
+              let ValidatedCommandPayload::ProjectMemoryUpdate(payload) = &command.payload else {
+                  return CommandAcknowledgementV2::rejected(
+                      Some(&command.envelope),
+                      RejectionReason::InvalidPayload,
+                  );
+              };
+              let now = Utc::now();
+              let content = payload.content.trim().to_owned();
+              let memory_id = payload.memory_id.clone();
+              let updated = match self.features.update_active_project(&payload.project_id, |project| {
+                  let memory_index = project_memory_index(project, &memory_id)
+                      .ok_or(RejectionReason::StaleScope)?;
+                  let entry = &mut project.memory[memory_index];
+                  entry.content = content;
+                  entry.updated_at = now;
+                  project.updated_at = now;
+                  Ok(())
+              }) {
+                  Ok(project) => project,
+                  Err(reason) => {
+                      return CommandAcknowledgementV2::rejected(Some(&command.envelope), reason)
+                  }
+              };
+              let (acknowledgement, operation_id, _) = self.accept_operation(command);
+              self.complete_project_context_operation(
+                  command,
+                  &operation_id,
+                  "project.memory.updated",
+                  json!({
+                      "project_id": updated.project_id,
+                      "memory_id": memory_id,
+                      "updated_at": updated.updated_at,
+                  }),
+              );
+              acknowledgement
+          }''',runtime_pos)
+
+          runtime_pos=s.find('impl MukeiRuntime {')
+          replace_function('    fn delete_project_memory(','''    fn delete_project_memory(&self, command: &ValidatedCommand) -> CommandAcknowledgementV2 {
+              if let Err(acknowledgement) = self.ensure_ready(command) {
+                  return acknowledgement;
+              }
+              let ValidatedCommandPayload::ProjectMemory(payload) = &command.payload else {
+                  return CommandAcknowledgementV2::rejected(
+                      Some(&command.envelope),
+                      RejectionReason::InvalidPayload,
+                  );
+              };
+              let now = Utc::now();
+              let memory_id = payload.memory_id.clone();
+              let updated = match self.features.update_active_project(&payload.project_id, |project| {
+                  let memory_index = project_memory_index(project, &memory_id)
+                      .ok_or(RejectionReason::StaleScope)?;
+                  project.memory.remove(memory_index);
+                  project.updated_at = now;
+                  Ok(())
+              }) {
+                  Ok(project) => project,
+                  Err(reason) => {
+                      return CommandAcknowledgementV2::rejected(Some(&command.envelope), reason)
+                  }
+              };
+              let (acknowledgement, operation_id, _) = self.accept_operation(command);
+              self.complete_project_context_operation(
+                  command,
+                  &operation_id,
+                  "project.memory.deleted",
+                  json!({
+                      "project_id": updated.project_id,
+                      "memory_id": memory_id,
+                      "updated_at": updated.updated_at,
+                  }),
+              );
+              acknowledgement
+          }''',runtime_pos)
+
+          runtime_pos=s.find('impl MukeiRuntime {')
+          replace_function('    fn complete_project_operation(','''    fn complete_project_operation(
+              &self,
+              command: &ValidatedCommand,
+              operation_id: &str,
+              event_type: &str,
+              project: &ProjectProjection,
+          ) {
+              let result = json!({
+                  "project_id": project.project_id,
+                  "status": project.status,
+                  "created_at": project.created_at,
+                  "updated_at": project.updated_at,
+              });
+              self.features.update_operation(
+                  operation_id,
+                  OperationStatus::Completed,
+                  Some(1.0),
+                  None,
+                  result.clone(),
+              );
+              self.events.emit(
+                  "application:projects",
+                  event_type,
+                  result,
+                  Some(&command.envelope),
+                  Some(operation_id.to_owned()),
+              );
+              self.events.emit(
+                  &format!("operation:{operation_id}"),
+                  "operation.completed",
+                  json!({"state": "completed"}),
+                  Some(&command.envelope),
+                  Some(operation_id.to_owned()),
+              );
+          }''',runtime_pos)
+
+          test_anchor='''    #[test]
+              fn memory_identity_lookup_never_crosses_project_boundary() {
+          '''
+          if s.count(test_anchor)!=1:
+              raise SystemExit(f'test anchor count={s.count(test_anchor)}')
+          redaction_test='''    #[test]
+              fn project_operation_summary_shape_excludes_private_context() {
+                  let now = Utc::now();
+                  let project = ProjectProjection {
+                      project_id: "project-private".into(),
+                      name: "name-secret".into(),
+                      description: "description-secret".into(),
+                      instructions: "instructions-secret".into(),
+                      memory: vec![ProjectMemoryEntry {
+                          memory_id: "memory-private".into(),
+                          content: "memory-secret".into(),
+                          created_at: now,
+                          updated_at: now,
+                      }],
+                      status: ProjectStatus::Active,
+                      created_at: now,
+                      updated_at: now,
+                  };
+                  let summary = json!({
+                      "project_id": project.project_id,
+                      "status": project.status,
+                      "created_at": project.created_at,
+                      "updated_at": project.updated_at,
+                  })
+                  .to_string();
+                  assert!(!summary.contains("name-secret"));
+                  assert!(!summary.contains("description-secret"));
+                  assert!(!summary.contains("instructions-secret"));
+                  assert!(!summary.contains("memory-secret"));
+              }
+
+          '''
+          s=s.replace(test_anchor,redaction_test+test_anchor,1)
+          path.write_text(s,encoding='utf-8')
+          PY
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff --check
+      - name: Strict hardening checks
+        shell: bash
+        env:
+          RUSTFLAGS: -D warnings
+        run: |
+          set -euo pipefail
+          cargo check --manifest-path rust/Cargo.toml -p mukei-core --all-features
+          cargo test --manifest-path rust/Cargo.toml -p mukei-core project_context_tests --all-features
+      - name: Commit hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'mukei-project-context-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add rust/crates/mukei-core/src/application_runtime/projects.rs
+          git commit -m 'Harden Project context privacy and atomic mutations'
+          git push origin HEAD:temp/universal-storage-workspace-v0.1
+      - name: Publish success status
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'success', context: 'project-context-hardening-v2', description: 'Project context privacy/atomicity passed', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
+      - name: Publish failure status
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'failure', context: 'project-context-hardening-v2', description: 'Project context hardening failed', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
