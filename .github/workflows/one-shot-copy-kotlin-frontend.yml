@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 60
     env:
       SOURCE_KOTLIN_SHA: 1396f71ea2dbbbadd3f7a33f133b8ad6cd928517
+      FRONTEND_SYNC_REVISION: 'readiness-compat-v1'
     steps:
       - name: Publish pending frontend status
         uses: actions/github-script@v7
