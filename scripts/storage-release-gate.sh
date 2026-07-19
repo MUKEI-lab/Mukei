@@ -25,10 +25,10 @@ printf '==> rustfmt\n'
 cargo fmt --all -- --check
 
 printf '==> Embedded migration contract\n'
-cargo test --locked -p mukei-core --features rusqlite --test embedded_migrations
+cargo test --locked -p mukei-core --features rusqlite --test universal_storage_embedded_migrations
 
 printf '==> Canonical V015 -> V016 forward upgrade\n'
-cargo test --locked -p mukei-core --features rusqlite --test universal_storage_v016_forward_upgrade
+cargo test --locked -p mukei-core --features rusqlite --test universal_storage_v016_upgrade
 
 printf '==> V016 adversarial invariant guards\n'
 cargo test --locked -p mukei-core --features rusqlite --test universal_storage_v016_guards
