@@ -12,6 +12,13 @@ struct EphemeralChatState {
     retired: RwLock<HashMap<(String, String), ()>>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EphemeralSessionState {
+    Active,
+    Retired,
+    Absent,
+}
+
 struct EphemeralOperation {
     conversation_id: String,
     branch_id: String,
@@ -48,18 +55,37 @@ impl EphemeralChatState {
         true
     }
 
-    fn is_registered(&self, conversation_id: &str, branch_id: &str) -> bool {
-        self.conversations
+    fn session_state(&self, conversation_id: &str, branch_id: &str) -> EphemeralSessionState {
+        let _lifecycle = self
+            .lifecycle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let key = (conversation_id.to_owned(), branch_id.to_owned());
+        if self
+            .conversations
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .contains_key(&(conversation_id.to_owned(), branch_id.to_owned()))
+            .contains_key(&key)
+        {
+            EphemeralSessionState::Active
+        } else if self
+            .retired
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains_key(&key)
+        {
+            EphemeralSessionState::Retired
+        } else {
+            EphemeralSessionState::Absent
+        }
+    }
+
+    fn is_registered(&self, conversation_id: &str, branch_id: &str) -> bool {
+        self.session_state(conversation_id, branch_id) == EphemeralSessionState::Active
     }
 
     fn was_retired(&self, conversation_id: &str, branch_id: &str) -> bool {
-        self.retired
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .contains_key(&(conversation_id.to_owned(), branch_id.to_owned()))
+        self.session_state(conversation_id, branch_id) == EphemeralSessionState::Retired
     }
 
     fn append_message(
