@@ -34,10 +34,12 @@ import org.json.JSONObject
 object BackendRuntimeHost {
     sealed interface State {
         data object Starting : State
+
         data class Ready(
             val readiness: AppReadiness,
             val runtimeContract: RuntimeContractSnapshot,
         ) : State
+
         data class Failed(val code: String) : State
         data object Stopped : State
     }
@@ -94,6 +96,7 @@ object BackendRuntimeHost {
     private val activeWorkers = AtomicInteger(0)
     private val terminalFailure = AtomicReference<String?>(null)
     private val mainHandler = Handler(Looper.getMainLooper())
+
     private val bootstrapExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "mukei-backend-bootstrap").apply { isDaemon = true }
     }
@@ -106,6 +109,7 @@ object BackendRuntimeHost {
     private val commandExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "mukei-command-dispatcher").apply { isDaemon = true }
     }
+
     private val gateway = AtomicReference<RustNativeGateway?>(null)
     private val eventListeners = CopyOnWriteArraySet<EventBatchListener>()
     private val eventSequenceTracker = EventSequenceTracker()
@@ -167,6 +171,7 @@ object BackendRuntimeHost {
 
                     val activeGateway = SecureRuntimeFactory.open(appContext, configJson)
                     ownedGateway = activeGateway
+
                     val acknowledgement = ProtocolJsonCodec.decodeAcknowledgement(
                         activeGateway.submitCommand(initializeEnvelope(configPath)),
                     )
@@ -175,9 +180,7 @@ object BackendRuntimeHost {
                             acknowledgement.rejectionReason ?: "initialize_rejected",
                         )
                     }
-                    if (!running.get()) {
-                        return@execute
-                    }
+                    if (!running.get()) return@execute
 
                     gateway.set(activeGateway)
                     val runtimeContract = RuntimeContractJsonCodec.decode(
@@ -187,9 +190,7 @@ object BackendRuntimeHost {
                     if (!readiness.shellUsable) {
                         throw IllegalStateException("secure_storage_not_ready")
                     }
-                    if (!running.get()) {
-                        return@execute
-                    }
+                    if (!running.get()) return@execute
 
                     publish(
                         State.Ready(
@@ -231,6 +232,7 @@ object BackendRuntimeHost {
     fun startNewChat(onReady: (Boolean) -> Unit = {}): Boolean {
         val current = conversationState
         if (current.busy) return false
+
         if (!current.temporary) {
             conversationState = newDurableConversation()
             onReady(true)
@@ -245,21 +247,28 @@ object BackendRuntimeHost {
         if (current.busy || current.temporary || !temporaryChatAvailable) return false
         val activeGateway = gateway.get() ?: return false
 
-        conversationState = current.copy(transitionInProgress = true, lastErrorCode = null)
+        conversationState = current.copy(
+            transitionInProgress = true,
+            lastErrorCode = null,
+        )
+
         return try {
             commandExecutor.execute {
                 val result = runCatching { activeGateway.beginTemporaryChat() }
                 mainHandler.post {
-                    if (conversationState.conversationId != current.conversationId ||
-                        !conversationState.transitionInProgress
+                    val latest = conversationState
+                    if (latest.conversationId != current.conversationId ||
+                        !latest.transitionInProgress
                     ) {
                         return@post
                     }
+
                     result.fold(
                         onSuccess = { session ->
-                            if (session.runtimeSessionId != ready.runtimeContract.runtimeSessionId ||
-                                session.ragEnabled
-                            ) {
+                            val contractMatches =
+                                session.runtimeSessionId == ready.runtimeContract.runtimeSessionId &&
+                                    !session.ragEnabled
+                            if (!contractMatches) {
                                 conversationState = current.copy(
                                     transitionInProgress = false,
                                     lastErrorCode = "temporary_chat_contract_mismatch",
@@ -302,7 +311,11 @@ object BackendRuntimeHost {
         if (!current.temporary || current.transitionInProgress) return false
         val activeGateway = gateway.get() ?: return false
 
-        conversationState = current.copy(transitionInProgress = true, lastErrorCode = null)
+        conversationState = current.copy(
+            transitionInProgress = true,
+            lastErrorCode = null,
+        )
+
         return try {
             commandExecutor.execute {
                 val result = runCatching {
@@ -316,6 +329,7 @@ object BackendRuntimeHost {
                     ) {
                         return@post
                     }
+
                     result.fold(
                         onSuccess = { ended ->
                             val contractMatches =
@@ -368,23 +382,30 @@ object BackendRuntimeHost {
             role = ChatRole.USER,
             text = normalized,
         )
-        val command = ProtocolJsonCodec.encodeCommand(
-            CommandEnvelopeV2(
-                protocolVersion = ProtocolVersion.CURRENT,
-                commandId = UUID.randomUUID().toString(),
-                requestId = UUID.randomUUID().toString(),
-                commandType = "chat.send_message",
-                submittedAt = Instant.now(),
-                operationId = operationId,
-                correlationId = UUID.randomUUID().toString(),
-                idempotencyKey = UUID.randomUUID().toString(),
-                scope = CommandScope(
-                    conversationId = current.conversationId,
-                    branchId = current.branchId,
+        val command = runCatching {
+            ProtocolJsonCodec.encodeCommand(
+                CommandEnvelopeV2(
+                    protocolVersion = ProtocolVersion.CURRENT,
+                    commandId = UUID.randomUUID().toString(),
+                    requestId = UUID.randomUUID().toString(),
+                    commandType = "chat.send_message",
+                    submittedAt = Instant.now(),
+                    operationId = operationId,
+                    correlationId = UUID.randomUUID().toString(),
+                    idempotencyKey = UUID.randomUUID().toString(),
+                    scope = CommandScope(
+                        conversationId = current.conversationId,
+                        branchId = current.branchId,
+                    ),
+                    payloadJson = JSONObject()
+                        .put("text", normalized)
+                        .toString(),
                 ),
-                payloadJson = JSONObject().put("text", normalized).toString(),
-            ),
-        )
+            )
+        }.getOrElse { failure ->
+            conversationState = current.copy(lastErrorCode = stableFailureCode(failure))
+            return false
+        }
 
         conversationState = current.copy(
             messages = current.messages + userMessage,
@@ -396,7 +417,9 @@ object BackendRuntimeHost {
         return try {
             commandExecutor.execute {
                 val result = runCatching {
-                    ProtocolJsonCodec.decodeAcknowledgement(activeGateway.submitCommand(command))
+                    ProtocolJsonCodec.decodeAcknowledgement(
+                        activeGateway.submitCommand(command),
+                    )
                 }
                 mainHandler.post {
                     val latest = conversationState
@@ -406,6 +429,7 @@ object BackendRuntimeHost {
                     ) {
                         return@post
                     }
+
                     result.fold(
                         onSuccess = { acknowledgement ->
                             if (acknowledgement.status != AcknowledgementStatus.ACCEPTED ||
@@ -443,6 +467,7 @@ object BackendRuntimeHost {
             return
         }
 
+        // Bootstrap owns cleanup until it has handed the gateway to workers.
         if (!bootstrapActive.get() && activeWorkers.get() == 0) {
             gateway.getAndSet(null)?.runCatching { close() }
             eventSequenceTracker.reset()
@@ -456,6 +481,7 @@ object BackendRuntimeHost {
         activeGateway: RustNativeGateway,
     ) {
         activeWorkers.set(2)
+
         platformExecutor.execute {
             runWorker(activeGateway) {
                 val processor = AndroidPlatformRequestProcessor(appContext, activeGateway)
@@ -473,17 +499,22 @@ object BackendRuntimeHost {
                 }
             }
         }
+
         eventExecutor.execute {
             runWorker(activeGateway) {
                 while (isActive(activeGateway)) {
                     var batch = drainEventBatch(
-                        activeGateway,
-                        EVENT_BATCH_SIZE,
-                        EVENT_LONG_POLL_MILLISECONDS,
+                        activeGateway = activeGateway,
+                        maximumEvents = EVENT_BATCH_SIZE,
+                        timeoutMilliseconds = EVENT_LONG_POLL_MILLISECONDS,
                     )
                     dispatch(batch)
                     while (isActive(activeGateway) && batch.hasMore) {
-                        batch = drainEventBatch(activeGateway, EVENT_BATCH_SIZE, 0)
+                        batch = drainEventBatch(
+                            activeGateway = activeGateway,
+                            maximumEvents = EVENT_BATCH_SIZE,
+                            timeoutMilliseconds = 0,
+                        )
                         dispatch(batch)
                     }
                 }
@@ -536,7 +567,13 @@ object BackendRuntimeHost {
     }
 
     private fun dispatch(batch: RuntimeEventBatch) {
-        if (batch.events.isEmpty() && batch.sequenceGapCount == 0 && !batch.runtimeSessionChanged) return
+        if (batch.events.isEmpty() &&
+            batch.sequenceGapCount == 0 &&
+            !batch.runtimeSessionChanged
+        ) {
+            return
+        }
+
         val lastType = batch.events.lastOrNull()?.eventType
         mainHandler.post {
             eventStatus = eventStatus.copy(
@@ -561,19 +598,23 @@ object BackendRuntimeHost {
 
         when (event.eventType) {
             "chat.token.delta" -> {
-                val token = eventPayload(event).optString("text")
-                if (token.isNotEmpty()) {
-                    conversationState = current.copy(
-                        streamingAssistant = current.streamingAssistant + token,
-                    )
-                }
+                val token = eventPayload(event)
+                    .optString("text")
+                    .takeIf { it.isNotEmpty() }
+                    ?: return
+                conversationState = current.copy(
+                    streamingAssistant = current.streamingAssistant + token,
+                )
             }
 
             "chat.generation.completed" -> {
                 val payload = eventPayload(event)
-                val finalContent = payload.optString("content")
-                    .takeIf { it.isNotEmpty() }
-                    ?: current.streamingAssistant
+                val completedContent = if (payload.has("content") && !payload.isNull("content")) {
+                    payload.optString("content").takeIf { it.isNotEmpty() }
+                } else {
+                    null
+                }
+                val finalContent = completedContent ?: current.streamingAssistant
                 val completedMessages = if (finalContent.isEmpty()) {
                     current.messages
                 } else {
@@ -592,7 +633,8 @@ object BackendRuntimeHost {
             }
 
             "operation.failed" -> {
-                val code = eventPayload(event).optString("code")
+                val code = eventPayload(event)
+                    .optString("code")
                     .takeIf { it.isNotBlank() }
                     ?: "chat_generation_failed"
                 conversationState = current.copy(
@@ -613,21 +655,23 @@ object BackendRuntimeHost {
     }
 
     private fun eventPayload(event: EventEnvelopeV2): JSONObject =
-        runCatching { JSONObject(event.payloadJson) }.getOrElse { JSONObject() }
+        runCatching { JSONObject(event.payloadJson) }
+            .getOrElse { JSONObject() }
 
-    private fun initializeEnvelope(configPath: File): ByteArray = ProtocolJsonCodec.encodeCommand(
-        CommandEnvelopeV2(
-            protocolVersion = ProtocolVersion.CURRENT,
-            commandId = UUID.randomUUID().toString(),
-            requestId = UUID.randomUUID().toString(),
-            commandType = "app.initialize",
-            submittedAt = Instant.now(),
-            correlationId = UUID.randomUUID().toString(),
-            payloadJson = JSONObject()
-                .put("config_path", configPath.absolutePath)
-                .toString(),
-        ),
-    )
+    private fun initializeEnvelope(configPath: File): ByteArray =
+        ProtocolJsonCodec.encodeCommand(
+            CommandEnvelopeV2(
+                protocolVersion = ProtocolVersion.CURRENT,
+                commandId = UUID.randomUUID().toString(),
+                requestId = UUID.randomUUID().toString(),
+                commandType = "app.initialize",
+                submittedAt = Instant.now(),
+                correlationId = UUID.randomUUID().toString(),
+                payloadJson = JSONObject()
+                    .put("config_path", configPath.absolutePath)
+                    .toString(),
+            ),
+        )
 
     private fun newDurableConversation(): ConversationState = ConversationState(
         conversationId = UUID.randomUUID().toString(),
@@ -643,9 +687,14 @@ object BackendRuntimeHost {
     private fun stableFailureCode(failure: Throwable): String {
         val value = failure.message.orEmpty().trim()
         return value.takeIf {
-            it.isNotEmpty() && it.length <= 96 && it.all { character ->
-                character.isLetterOrDigit() || character == '_' || character == '-' || character == '.'
-            }
+            it.isNotEmpty() &&
+                it.length <= 96 &&
+                it.all { character ->
+                    character.isLetterOrDigit() ||
+                        character == '_' ||
+                        character == '-' ||
+                        character == '.'
+                }
         } ?: "backend_runtime_failed"
     }
 
