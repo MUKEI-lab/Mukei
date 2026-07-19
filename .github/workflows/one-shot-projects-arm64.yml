@@ -1,4 +1,5 @@
 name: one-shot-projects-arm64
+# Rebuild trigger: strict Rust 1.82 Project protocol gate fixed.
 
 on:
   push:
