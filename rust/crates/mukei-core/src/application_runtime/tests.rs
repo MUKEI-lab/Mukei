@@ -254,6 +254,76 @@ mod tests {
     }
 
     #[test]
+    fn ending_temporary_chat_scrubs_queued_and_late_sensitive_events() {
+        const SECRET: &str = "temporary-event-secret";
+        const LATE_SECRET: &str = "temporary-late-secret";
+        let runtime = runtime();
+        initialize(&runtime);
+        // Remove unrelated initialization noise so this test observes only its own events.
+        let _ = runtime.events.drain(MAX_DRAIN_BATCH, Duration::ZERO);
+
+        let (conversation, branch) = runtime.begin_temporary_chat().expect("temporary chat");
+        let (operation_id, _token) = runtime
+            .ephemeral_chats
+            .create_operation(&conversation, &branch, None)
+            .expect("temporary operation");
+        runtime.events.emit(
+            &format!("conversation:{conversation}"),
+            "chat.token.delta",
+            json!({"text": SECRET}),
+            None,
+            Some(operation_id.clone()),
+        );
+        runtime.events.emit(
+            &format!("operation:{operation_id}"),
+            "chat.token.delta",
+            json!({"text": SECRET}),
+            None,
+            Some(operation_id.clone()),
+        );
+        runtime.events.emit(
+            "application:test",
+            "test.keep",
+            json!({"marker": "keep-me"}),
+            None,
+            None,
+        );
+
+        assert!(runtime.end_temporary_chat(&conversation, &branch));
+
+        // Simulate a producer that passed its session-active check immediately before
+        // end. Tombstoned streams/operations must suppress this post-purge emission.
+        runtime.events.emit(
+            &format!("conversation:{conversation}"),
+            "chat.token.delta",
+            json!({"text": LATE_SECRET}),
+            None,
+            Some(operation_id.clone()),
+        );
+        runtime.events.emit(
+            &format!("operation:{operation_id}"),
+            "chat.token.delta",
+            json!({"text": LATE_SECRET}),
+            None,
+            Some(operation_id),
+        );
+
+        let drained = runtime.events.drain(MAX_DRAIN_BATCH, Duration::ZERO);
+        assert!(drained.events.iter().all(|event| {
+            let payload = event.payload.to_string();
+            !payload.contains(SECRET) && !payload.contains(LATE_SECRET)
+        }));
+        assert!(drained
+            .events
+            .iter()
+            .any(|event| event.event_type == "test.keep"));
+        assert!(drained
+            .events
+            .iter()
+            .any(|event| event.event_type == "chat.temporary.ended"));
+    }
+
+    #[test]
     fn document_grant_queues_android_platform_request() {
         let runtime = runtime();
         initialize(&runtime);

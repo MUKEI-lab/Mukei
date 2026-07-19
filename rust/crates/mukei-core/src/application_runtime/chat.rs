@@ -103,7 +103,10 @@ impl MukeiRuntime {
             self.append_chat_message(&conversation, &branch, user_message.clone());
         }
         let (acknowledgement, operation_id, operation_token, temporary) =
-            self.accept_chat_operation(command, &conversation, &branch);
+            match self.accept_chat_operation(command, &conversation, &branch) {
+                Ok(value) => value,
+                Err(ack) => return ack,
+            };
         let events = Arc::clone(&self.events);
         let features = Arc::clone(&self.features);
         let ephemeral_chats = Arc::clone(&self.ephemeral_chats);
@@ -324,7 +327,10 @@ impl MukeiRuntime {
             );
         }
         let (acknowledgement, operation_id, _, temporary) =
-            self.accept_chat_operation(command, &conversation, &branch);
+            match self.accept_chat_operation(command, &conversation, &branch) {
+                Ok(value) => value,
+                Err(ack) => return ack,
+            };
         let removed = self.clear_chat_conversation(&conversation, &branch);
         if temporary {
             self.ephemeral_chats.finish_operation(&operation_id);
