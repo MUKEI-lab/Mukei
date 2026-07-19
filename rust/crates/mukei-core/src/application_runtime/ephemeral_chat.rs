@@ -177,7 +177,8 @@ impl EphemeralChatState {
         true
     }
 
-    fn end(&self, conversation_id: &str, branch_id: &str) -> bool {
+    /// End a session and return operation IDs that were cancelled with it.
+    fn end(&self, conversation_id: &str, branch_id: &str) -> Option<Vec<String>> {
         let key = (conversation_id.to_owned(), branch_id.to_owned());
         let removed = self
             .conversations
@@ -186,7 +187,7 @@ impl EphemeralChatState {
             .remove(&key)
             .is_some();
         if !removed {
-            return false;
+            return None;
         }
         self.retired
             .write()
@@ -204,12 +205,12 @@ impl EphemeralChatState {
             })
             .map(|(operation_id, _)| operation_id.clone())
             .collect::<Vec<_>>();
-        for operation_id in operation_ids {
-            if let Some(operation) = operations.remove(&operation_id) {
+        for operation_id in &operation_ids {
+            if let Some(operation) = operations.remove(operation_id) {
                 operation.token.cancel();
             }
         }
-        true
+        Some(operation_ids)
     }
 
     fn cancel_all_and_clear(&self) {
@@ -263,7 +264,7 @@ mod ephemeral_chat_state_tests {
             1
         );
 
-        assert!(state.end(&conversation, &branch));
+        assert!(state.end(&conversation, &branch).is_some());
         assert!(state.was_retired(&conversation, &branch));
         assert!(!state.begin(&conversation, &branch));
         assert!(state
@@ -284,7 +285,10 @@ mod ephemeral_chat_state_tests {
         assert!(!token_a.is_cancelled());
         assert!(!token_b.is_cancelled());
 
-        assert!(state.end(&conversation_a, &branch_a));
+        let ended_operations = state
+            .end(&conversation_a, &branch_a)
+            .expect("temporary session");
+        assert_eq!(ended_operations, vec![operation_a.clone()]);
         assert!(token_a.is_cancelled());
         assert!(!token_b.is_cancelled());
         assert!(!state.cancel_operation(&operation_a));
