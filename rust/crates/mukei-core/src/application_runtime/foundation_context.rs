@@ -56,6 +56,18 @@ impl CommandRouter {
         runtime: &MukeiRuntime,
         command: &ValidatedCommand,
     ) -> CommandAcknowledgementV2 {
+        if matches!(
+            command.command_type,
+            CommandType::DocumentGrant
+                | CommandType::DocumentRevoke
+                | CommandType::DocumentRetryIngestion
+        ) && runtime.command_targets_temporary_chat(command)
+        {
+            return CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::CapabilityUnavailable,
+            );
+        }
         match command.command_type {
             CommandType::AppInitialize => runtime.initialize(command),
             CommandType::ChatSendMessage => runtime.send_message(command),

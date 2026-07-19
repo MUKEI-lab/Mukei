@@ -79,12 +79,15 @@ impl MukeiRuntime {
                 RejectionReason::BackendUnavailable,
             );
         }
-        let Some(agent_loop) = self
-            .agent_loop
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
-        else {
+        let agent_loop = if self.ephemeral_chats.is_registered(&conversation, &branch) {
+            self.temporary_agent_loop()
+        } else {
+            self.agent_loop
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
+        };
+        let Some(agent_loop) = agent_loop else {
             return CommandAcknowledgementV2::rejected(
                 Some(&command.envelope),
                 RejectionReason::BackendUnavailable,

@@ -3,9 +3,8 @@ impl MukeiRuntime {
     ///
     /// IDs are minted by the runtime rather than supplied by the caller so an
     /// ephemeral session cannot intentionally reuse a durable conversation key.
-    /// This remains crate-private until RAG/session isolation and Protocol/JNI
-    /// exposure are implemented and tested.
-    pub(crate) fn begin_temporary_chat(&self) -> Option<(String, String)> {
+    /// Temporary Chat deliberately has no RAG context attached.
+    pub fn begin_temporary_chat(&self) -> Option<(String, String)> {
         if self.closed.load(Ordering::Acquire) || self.state() != RuntimeState::Ready {
             return None;
         }
@@ -23,7 +22,7 @@ impl MukeiRuntime {
             self.events.emit(
                 &format!("conversation:{conversation}"),
                 "chat.temporary.started",
-                json!({"branch_id": branch}),
+                json!({"branch_id": branch, "rag_enabled": false}),
                 None,
                 None,
             );
@@ -33,7 +32,7 @@ impl MukeiRuntime {
     }
 
     /// End and purge one Temporary Chat session.
-    pub(crate) fn end_temporary_chat(&self, conversation: &str, branch: &str) -> bool {
+    pub fn end_temporary_chat(&self, conversation: &str, branch: &str) -> bool {
         if Uuid::parse_str(conversation).is_err() || Uuid::parse_str(branch).is_err() {
             return false;
         }
@@ -61,8 +60,24 @@ impl MukeiRuntime {
         true
     }
 
-    pub(crate) fn temporary_chat_active(&self, conversation: &str, branch: &str) -> bool {
+    /// Whether one runtime-minted Temporary Chat session is currently active.
+    pub fn temporary_chat_active(&self, conversation: &str, branch: &str) -> bool {
         self.ephemeral_chats.is_registered(conversation, branch)
+    }
+
+    fn command_targets_temporary_chat(&self, command: &ValidatedCommand) -> bool {
+        let Some(scope) = command.envelope.scope.as_ref() else {
+            return false;
+        };
+        let (Some(conversation), Some(branch)) =
+            (scope.conversation_id.as_deref(), scope.branch_id.as_deref())
+        else {
+            return false;
+        };
+        !matches!(
+            self.ephemeral_chats.session_state(conversation, branch),
+            EphemeralSessionState::Absent
+        )
     }
 
     fn purge_replay_for_conversation(&self, conversation: &str) {

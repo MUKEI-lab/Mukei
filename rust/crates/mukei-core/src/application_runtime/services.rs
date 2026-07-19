@@ -110,12 +110,12 @@ impl MukeiRuntime {
         self.async_runtime.block_on(store.save("settings", value))
     }
 
-    fn install_agent_loop(&self, product_config: &MukeiConfig) {
-        let rag_service = self
-            .rag_service
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
+    fn build_agent_loop(
+        &self,
+        product_config: &MukeiConfig,
+        rag_service: Option<Arc<dyn RuntimeRagService>>,
+        temporary: bool,
+    ) -> Arc<AgentLoop> {
         let context = ContextBudgetManager::new(
             Arc::new(RuntimeContextBackend {
                 features: Arc::clone(&self.features),
@@ -126,11 +126,13 @@ impl MukeiRuntime {
             product_config.n_ctx,
         );
 
-        let remote_policy = *self
-            .remote_policy
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let registry = {
+        let registry = if temporary {
+            ToolRegistry::temporary_chat()
+        } else {
+            let remote_policy = *self
+                .remote_policy
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let secrets = self
                 .remote_tool_secrets
                 .lock()
@@ -163,10 +165,92 @@ impl MukeiRuntime {
             Duration::from_secs(product_config.watchdog.max_wall_seconds),
         ));
         let backend: Arc<dyn crate::engine::InferenceBackend> = self.activation.clone();
-        let agent_loop = AgentLoop::new_with_backend(context, executor, watchdog, backend);
+        AgentLoop::new_with_backend(context, executor, watchdog, backend)
+    }
+
+    fn temporary_agent_loop(&self) -> Option<Arc<AgentLoop>> {
+        let config = self
+            .product_config
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()?;
+        Some(self.build_agent_loop(&config, None, true))
+    }
+
+    fn install_agent_loop(&self, product_config: &MukeiConfig) {
+        let rag_service = self
+            .rag_service
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let agent_loop = self.build_agent_loop(product_config, rag_service, false);
         *self
             .agent_loop
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(agent_loop);
+    }
+}
+
+#[cfg(test)]
+mod temporary_chat_rag_tests {
+    use super::*;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingRag {
+        retrievals: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeRagService for CountingRag {
+        async fn ingest_document(
+            &self,
+            _document_id: &str,
+            _staged_path: &Path,
+            _mime_type: &str,
+        ) -> Result<RagIngestResult, MukeiError> {
+            Ok(RagIngestResult { chunk_count: 0 })
+        }
+
+        async fn retrieve(&self, _query: &str, _top_k: usize) -> Result<Vec<String>, MukeiError> {
+            self.retrievals.fetch_add(1, Ordering::AcqRel);
+            Ok(vec!["normal-rag-only".to_string()])
+        }
+
+        async fn revoke_document(&self, _document_id: &str) -> Result<usize, MukeiError> {
+            Ok(0)
+        }
+    }
+
+    #[test]
+    fn temporary_agent_context_never_calls_attached_rag_service() {
+        let runtime = MukeiRuntime::create(RuntimeConfig {
+            app_data_dir: format!("/tmp/mukei-temp-rag-test-{}", Uuid::new_v4()),
+            worker_threads: 1,
+            max_blocking_threads: 2,
+            event_capacity: 64,
+        })
+        .expect("runtime");
+        let product = MukeiConfig::default_for_data_root(Path::new(&runtime.config.app_data_dir));
+        let rag = Arc::new(CountingRag {
+            retrievals: AtomicUsize::new(0),
+        });
+        let normal = runtime.build_agent_loop(&product, Some(rag.clone()), false);
+        let temporary = runtime.build_agent_loop(&product, None, true);
+        let conversation = ConversationId::new();
+        let branch = BranchId::new();
+        let history = vec![ChatMessage::user_with_id(MessageId::new(), branch, "find my notes")];
+
+        runtime
+            .async_runtime
+            .block_on(normal.context.build_for(conversation, branch, &history))
+            .expect("normal context");
+        assert_eq!(rag.retrievals.load(Ordering::Acquire), 1);
+
+        runtime
+            .async_runtime
+            .block_on(temporary.context.build_for(conversation, branch, &history))
+            .expect("temporary context");
+        assert_eq!(rag.retrievals.load(Ordering::Acquire), 1);
     }
 }
