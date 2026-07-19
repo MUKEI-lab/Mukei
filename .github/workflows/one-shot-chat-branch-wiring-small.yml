@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - temp/universal-storage-workspace-v0.1
+      - temp/chat-branch-wiring-trigger
     paths:
       - '.github/workflows/one-shot-chat-branch-wiring-small.yml'
 
