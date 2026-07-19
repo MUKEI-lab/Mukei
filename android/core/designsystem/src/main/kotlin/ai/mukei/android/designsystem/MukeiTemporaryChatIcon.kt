@@ -6,10 +6,12 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -25,8 +27,12 @@ import androidx.compose.ui.unit.dp
  * Incognito-style glyph for a process-local Temporary Chat session.
  *
  * The caller owns the actual privacy/session state. This glyph only reflects that state visually:
- * tint changes animate between normal/temporary modes, while an immediately-visible transition
- * ring appears whenever the owning IconButton is disabled during a native begin/end hand-off.
+ * - normal/temporary tint changes morph smoothly;
+ * - active Temporary Chat gets a restrained filled-lens treatment;
+ * - an immediately-visible transition ring appears while the owning IconButton is disabled during
+ *   the native begin/end hand-off.
+ *
+ * The visual feedback may be optimistic, but session truth remains owned by the runtime contract.
  */
 @Composable
 fun MukeiTemporaryChatIcon(
@@ -36,6 +42,8 @@ fun MukeiTemporaryChatIcon(
     size: Dp = 22.dp,
 ) {
     val ambientContent = LocalContentColor.current
+    val active = tint == MaterialTheme.colorScheme.primary
+
     // Material3 IconButton lowers LocalContentColor alpha while disabled. The Temporary Chat
     // action is disabled only during begin/end hand-off, so this gives immediate transition
     // feedback without duplicating runtime state inside the design-system component.
@@ -44,6 +52,11 @@ fun MukeiTemporaryChatIcon(
         targetValue = tint,
         animationSpec = tween(durationMillis = 180),
         label = "temporary-chat-tint",
+    )
+    val activeProgress by animateFloatAsState(
+        targetValue = if (active) 1f else 0f,
+        animationSpec = tween(durationMillis = 190),
+        label = "temporary-chat-active",
     )
     val transitionProgress by animateFloatAsState(
         targetValue = if (transitioning) 1f else 0f,
@@ -79,7 +92,7 @@ fun MukeiTemporaryChatIcon(
                 sweepAngle = 244f,
                 useCenter = false,
                 topLeft = p(0.08f, 0.08f),
-                size = androidx.compose.ui.geometry.Size(w * 0.84f, h * 0.84f),
+                size = Size(w * 0.84f, h * 0.84f),
                 style = Stroke(
                     width = baseStrokeWidth * 0.78f,
                     cap = StrokeCap.Round,
@@ -87,7 +100,7 @@ fun MukeiTemporaryChatIcon(
             )
         }
 
-        val hatLift = 0.025f * transitionProgress
+        val hatLift = 0.025f * transitionProgress + 0.008f * activeProgress
         val glassesDrop = 0.018f * transitionProgress
 
         // Minimal hat/brim silhouette.
@@ -106,19 +119,26 @@ fun MukeiTemporaryChatIcon(
             StrokeCap.Round,
         )
 
+        val leftLensCenter = p(0.34f, 0.64f + glassesDrop)
+        val rightLensCenter = p(0.66f, 0.64f + glassesDrop)
+        val lensRadius = w * 0.145f
+
+        // Active Temporary Chat settles into a subtle filled-lens state. This remains restrained
+        // enough for the top bar while making mode state visible without relying on color alone.
+        if (activeProgress > 0f) {
+            val fill = animatedTint.copy(alpha = 0.11f * activeProgress)
+            drawCircle(fill, radius = lensRadius * 0.82f, center = leftLensCenter)
+            drawCircle(fill, radius = lensRadius * 0.82f, center = rightLensCenter)
+            drawCircle(
+                animatedTint.copy(alpha = 0.55f * activeProgress),
+                radius = w * 0.025f * activeProgress,
+                center = p(0.50f, 0.83f),
+            )
+        }
+
         // Incognito glasses: visually distinct from a chat bubble and from New Chat.
-        drawCircle(
-            animatedTint,
-            radius = w * 0.145f,
-            center = p(0.34f, 0.64f + glassesDrop),
-            style = stroke,
-        )
-        drawCircle(
-            animatedTint,
-            radius = w * 0.145f,
-            center = p(0.66f, 0.64f + glassesDrop),
-            style = stroke,
-        )
+        drawCircle(animatedTint, radius = lensRadius, center = leftLensCenter, style = stroke)
+        drawCircle(animatedTint, radius = lensRadius, center = rightLensCenter, style = stroke)
         drawLine(
             animatedTint,
             p(0.485f, 0.64f + glassesDrop),
