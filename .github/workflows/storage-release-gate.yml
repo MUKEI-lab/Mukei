@@ -1,0 +1,42 @@
+name: storage-release-gate
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - 'rust/**'
+      - 'scripts/storage-release-gate.sh'
+      - '.github/workflows/storage-release-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: storage-release-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-gate:
+    name: release-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install 1.86.0 --profile minimal --component rustfmt --component clippy
+          rustup override set 1.86.0
+          rustc --version --verbose
+          cargo --version
+
+      - name: Run storage release gate
+        shell: bash
+        run: bash scripts/storage-release-gate.sh
