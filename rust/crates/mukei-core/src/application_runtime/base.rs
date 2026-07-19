@@ -75,6 +75,10 @@ impl MukeiRuntime {
             CommandType::ProjectCreate,
             CommandType::ProjectUpdate,
             CommandType::ProjectArchive,
+            CommandType::ProjectInstructionsUpdate,
+    CommandType::ProjectMemoryAdd,
+    CommandType::ProjectMemoryUpdate,
+    CommandType::ProjectMemoryDelete,
             CommandType::SettingsUpdate,
         ];
         if self.backend_factory.is_some() {

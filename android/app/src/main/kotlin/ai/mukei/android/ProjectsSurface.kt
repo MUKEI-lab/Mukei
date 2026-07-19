@@ -331,6 +331,12 @@ private fun ProjectDetailSurface(
                 }
             }
 
+            Spacer(Modifier.height(MukeiSpacing.Medium))
+    ProjectContextSurface(
+        projectId = project.projectId,
+        readOnly = project.state == ProjectState.ARCHIVED,
+    )
+
             banner?.let { message ->
                 Spacer(Modifier.height(MukeiSpacing.Medium))
                 ProjectBanner(message)

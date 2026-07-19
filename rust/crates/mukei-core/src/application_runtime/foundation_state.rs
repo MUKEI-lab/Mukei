@@ -79,10 +79,22 @@ enum ProjectStatus {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+struct ProjectMemoryEntry {
+    memory_id: String,
+    content: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct ProjectProjection {
     project_id: String,
     name: String,
     description: String,
+    #[serde(default)]
+    instructions: String,
+    #[serde(default)]
+    memory: Vec<ProjectMemoryEntry>,
     status: ProjectStatus,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,

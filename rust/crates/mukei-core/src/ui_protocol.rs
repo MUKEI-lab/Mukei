@@ -13,7 +13,7 @@ use serde_json::Value;
 /// Current incompatible protocol generation.
 pub const PROTOCOL_MAJOR: u16 = 2;
 /// Current backward-compatible protocol generation.
-pub const PROTOCOL_MINOR: u16 = 2;
+pub const PROTOCOL_MINOR: u16 = 3;
 /// Oldest peer major accepted by this implementation.
 pub const MIN_SUPPORTED_PEER_MAJOR: u16 = 2;
 /// Maximum serialized command envelope accepted by a native transport.
@@ -231,6 +231,14 @@ pub enum CommandType {
     ProjectUpdate,
     /// Archive a project without deleting its durable identity.
     ProjectArchive,
+    /// Replace persistent instructions owned by one active project.
+    ProjectInstructionsUpdate,
+    /// Add one isolated memory entry to an active project.
+    ProjectMemoryAdd,
+    /// Update one isolated memory entry inside its owning project.
+    ProjectMemoryUpdate,
+    /// Delete one isolated memory entry inside its owning project.
+    ProjectMemoryDelete,
     /// Persist one product setting.
     SettingsUpdate,
     /// Resume an interrupted response.
@@ -258,6 +266,10 @@ impl CommandType {
             "project.create" => Some(Self::ProjectCreate),
             "project.update" => Some(Self::ProjectUpdate),
             "project.archive" => Some(Self::ProjectArchive),
+            "project.instructions.update" => Some(Self::ProjectInstructionsUpdate),
+            "project.memory.add" => Some(Self::ProjectMemoryAdd),
+            "project.memory.update" => Some(Self::ProjectMemoryUpdate),
+            "project.memory.delete" => Some(Self::ProjectMemoryDelete),
             "settings.update" => Some(Self::SettingsUpdate),
             "recovery.resume" => Some(Self::RecoveryResume),
             "recovery.regenerate" => Some(Self::RecoveryRegenerate),
@@ -283,6 +295,10 @@ impl CommandType {
             Self::ProjectCreate => "project.create",
             Self::ProjectUpdate => "project.update",
             Self::ProjectArchive => "project.archive",
+            Self::ProjectInstructionsUpdate => "project.instructions.update",
+            Self::ProjectMemoryAdd => "project.memory.add",
+            Self::ProjectMemoryUpdate => "project.memory.update",
+            Self::ProjectMemoryDelete => "project.memory.delete",
             Self::SettingsUpdate => "settings.update",
             Self::RecoveryResume => "recovery.resume",
             Self::RecoveryRegenerate => "recovery.regenerate",
@@ -303,6 +319,10 @@ impl CommandType {
                 | Self::ProjectCreate
                 | Self::ProjectUpdate
                 | Self::ProjectArchive
+                | Self::ProjectInstructionsUpdate
+                | Self::ProjectMemoryAdd
+                | Self::ProjectMemoryUpdate
+                | Self::ProjectMemoryDelete
                 | Self::RecoveryResume
                 | Self::RecoveryRegenerate
         )
@@ -403,6 +423,44 @@ pub struct ProjectPayload {
     pub project_id: String,
 }
 
+/// Persistent instructions owned by one project.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectInstructionsPayload {
+    /// Stable project identity allocated by the native runtime.
+    pub project_id: String,
+    /// Replacement instructions. Empty content explicitly clears instructions.
+    pub instructions: String,
+}
+
+/// New isolated memory entry owned by one project.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectMemoryCreatePayload {
+    /// Stable project identity that owns the memory entry.
+    pub project_id: String,
+    /// User-authored memory content.
+    pub content: String,
+}
+
+/// Mutable isolated project-memory payload.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectMemoryUpdatePayload {
+    /// Stable project identity that owns the memory entry.
+    pub project_id: String,
+    /// Stable memory identity allocated inside the owning project.
+    pub memory_id: String,
+    /// Replacement user-authored memory content.
+    pub content: String,
+}
+
+/// Identity pair for one memory entry inside one project.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectMemoryPayload {
+    /// Stable project identity that owns the memory entry.
+    pub project_id: String,
+    /// Stable memory identity that must resolve inside that project only.
+    pub memory_id: String,
+}
+
 /// Product setting mutation payload.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SettingUpdatePayload {
@@ -437,6 +495,14 @@ pub enum ValidatedCommandPayload {
     ProjectUpdate(ProjectUpdatePayload),
     /// Existing project identity.
     Project(ProjectPayload),
+    /// Replacement project instructions.
+    ProjectInstructions(ProjectInstructionsPayload),
+    /// New project-memory content.
+    ProjectMemoryCreate(ProjectMemoryCreatePayload),
+    /// Updated project-memory content.
+    ProjectMemoryUpdate(ProjectMemoryUpdatePayload),
+    /// Existing project-memory identity pair.
+    ProjectMemory(ProjectMemoryPayload),
     /// Setting mutation.
     SettingUpdate(SettingUpdatePayload),
 }
@@ -837,6 +903,10 @@ fn validate_scope_for_command(
             | CommandType::ProjectCreate
             | CommandType::ProjectUpdate
             | CommandType::ProjectArchive
+            | CommandType::ProjectInstructionsUpdate
+            | CommandType::ProjectMemoryAdd
+            | CommandType::ProjectMemoryUpdate
+            | CommandType::ProjectMemoryDelete
             | CommandType::SettingsUpdate,
             _,
         ) if has_conversation || has_model || has_document => {
@@ -983,6 +1053,53 @@ pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand,
                 return Err(RejectionReason::InvalidPayload);
             }
             ValidatedCommandPayload::Project(value)
+        }
+        CommandType::ProjectInstructionsUpdate => {
+            let value: ProjectInstructionsPayload =
+                serde_json::from_value(envelope.payload.clone())
+                    .map_err(|_| RejectionReason::InvalidPayload)?;
+            if !valid_protocol_id(&value.project_id, MAX_PROTOCOL_ID_LEN)
+                || value.instructions.len() > 4 * 1024
+                || value.instructions.chars().any(|character| character == ' ')
+            {
+                return Err(RejectionReason::InvalidPayload);
+            }
+            ValidatedCommandPayload::ProjectInstructions(value)
+        }
+        CommandType::ProjectMemoryAdd => {
+            let value: ProjectMemoryCreatePayload =
+                serde_json::from_value(envelope.payload.clone())
+                    .map_err(|_| RejectionReason::InvalidPayload)?;
+            if !valid_protocol_id(&value.project_id, MAX_PROTOCOL_ID_LEN)
+                || !non_empty_bounded(&value.content, 1024)
+                || value.content.chars().any(|character| character == ' ')
+            {
+                return Err(RejectionReason::InvalidPayload);
+            }
+            ValidatedCommandPayload::ProjectMemoryCreate(value)
+        }
+        CommandType::ProjectMemoryUpdate => {
+            let value: ProjectMemoryUpdatePayload =
+                serde_json::from_value(envelope.payload.clone())
+                    .map_err(|_| RejectionReason::InvalidPayload)?;
+            if !valid_protocol_id(&value.project_id, MAX_PROTOCOL_ID_LEN)
+                || !valid_protocol_id(&value.memory_id, MAX_PROTOCOL_ID_LEN)
+                || !non_empty_bounded(&value.content, 1024)
+                || value.content.chars().any(|character| character == ' ')
+            {
+                return Err(RejectionReason::InvalidPayload);
+            }
+            ValidatedCommandPayload::ProjectMemoryUpdate(value)
+        }
+        CommandType::ProjectMemoryDelete => {
+            let value: ProjectMemoryPayload = serde_json::from_value(envelope.payload.clone())
+                .map_err(|_| RejectionReason::InvalidPayload)?;
+            if !valid_protocol_id(&value.project_id, MAX_PROTOCOL_ID_LEN)
+                || !valid_protocol_id(&value.memory_id, MAX_PROTOCOL_ID_LEN)
+            {
+                return Err(RejectionReason::InvalidPayload);
+            }
+            ValidatedCommandPayload::ProjectMemory(value)
         }
         CommandType::SettingsUpdate => {
             let value: SettingUpdatePayload = serde_json::from_value(envelope.payload.clone())

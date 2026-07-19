@@ -127,6 +127,36 @@ fun archiveProject(projectId: String): ProjectCommandSubmission = submitProjectC
     payload = JSONObject().put("project_id", projectId),
 )
 
+fun updateProjectInstructions(projectId: String, instructions: String): ProjectCommandSubmission =
+    submitProjectCommand(
+        commandType = "project.instructions.update",
+        payload = JSONObject().put("project_id", projectId).put("instructions", instructions),
+    )
+
+fun addProjectMemory(projectId: String, content: String): ProjectCommandSubmission =
+    submitProjectCommand(
+        commandType = "project.memory.add",
+        payload = JSONObject().put("project_id", projectId).put("content", content),
+    )
+
+fun updateProjectMemory(
+    projectId: String,
+    memoryId: String,
+    content: String,
+): ProjectCommandSubmission = submitProjectCommand(
+    commandType = "project.memory.update",
+    payload = JSONObject()
+        .put("project_id", projectId)
+        .put("memory_id", memoryId)
+        .put("content", content),
+)
+
+fun deleteProjectMemory(projectId: String, memoryId: String): ProjectCommandSubmission =
+    submitProjectCommand(
+        commandType = "project.memory.delete",
+        payload = JSONObject().put("project_id", projectId).put("memory_id", memoryId),
+    )
+
 private fun submitProjectCommand(
     commandType: String,
     payload: JSONObject,
@@ -135,7 +165,7 @@ private fun submitProjectCommand(
         ?: return ProjectCommandSubmission("rejected", null, "backend_unavailable")
     return try {
         val envelope = JSONObject()
-            .put("protocol_version", JSONObject().put("major", 2).put("minor", 2))
+            .put("protocol_version", JSONObject().put("major", 2).put("minor", 3))
             .put("command_id", UUID.randomUUID().toString())
             .put("request_id", UUID.randomUUID().toString())
             .put("command_type", commandType)
