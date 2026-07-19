@@ -350,6 +350,7 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                         resetGeneration = newChatGeneration,
                         openModels = { selectedName = TopLevelDestination.MODELS.name },
                     )
+                    TopLevelDestination.STORAGE -> StorageSurface()
                     TopLevelDestination.MODELS -> ModelsSurface(state.readiness)
                     else -> ReservedDestinationSurface(selected)
                 }

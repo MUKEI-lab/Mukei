@@ -44,6 +44,68 @@ object BackendRuntimeHost {
         fun onEvents(batch: RuntimeEventBatch)
     }
 
+    data class StorageImportSubmission(
+    val status: String,
+    val operationId: String?,
+    val rejectionReason: String?,
+)
+
+fun submitStorageImport(
+    conversationId: String,
+    target: String,
+    displayName: String,
+    mimeType: String,
+): StorageImportSubmission {
+    val activeGateway = gateway.get()
+        ?: return StorageImportSubmission("rejected", null, "backend_unavailable")
+    if (conversationId.isBlank() || target.isBlank() || displayName.isBlank()) {
+        return StorageImportSubmission("rejected", null, "invalid_payload")
+    }
+    return try {
+        val envelope = JSONObject()
+            .put("protocol_version", JSONObject().put("major", 2).put("minor", 1))
+            .put("command_id", UUID.randomUUID().toString())
+            .put("request_id", UUID.randomUUID().toString())
+            .put("command_type", "storage.import_file")
+            .put("submitted_at", Instant.now().toString())
+            .put("correlation_id", UUID.randomUUID().toString())
+            .put("idempotency_key", "storage-import-${UUID.randomUUID()}")
+            .put("scope", JSONObject().put("conversation_id", conversationId))
+            .put(
+                "payload",
+                JSONObject()
+                    .put("target", target)
+                    .put("display_name", displayName)
+                    .put("mime_type", mimeType),
+            )
+        val acknowledgement = JSONObject(
+            String(
+                activeGateway.submitCommand(
+                    envelope.toString().toByteArray(StandardCharsets.UTF_8),
+                ),
+                StandardCharsets.UTF_8,
+            ),
+        )
+        StorageImportSubmission(
+            status = acknowledgement.optString("status", "rejected"),
+            operationId = acknowledgement.optString("operation_id")
+                .takeIf { it.isNotBlank() },
+            rejectionReason = acknowledgement.optString("rejection_reason")
+                .takeIf { it.isNotBlank() },
+        )
+    } catch (failure: Throwable) {
+        StorageImportSubmission("rejected", null, stableFailureCode(failure))
+    }
+}
+
+fun requestRuntimeSnapshot(domain: String): String? {
+    if (domain !in setOf("application", "settings", "protocol", "operations")) return null
+    val activeGateway = gateway.get() ?: return null
+    return runCatching {
+        String(activeGateway.requestSnapshot(domain), StandardCharsets.UTF_8)
+    }.getOrNull()
+}
+
     private val started = AtomicBoolean(false)
     private val running = AtomicBoolean(false)
     private val activeWorkers = AtomicInteger(0)
