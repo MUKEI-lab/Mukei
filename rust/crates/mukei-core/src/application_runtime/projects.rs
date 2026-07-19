@@ -1,3 +1,12 @@
+const MAX_PROJECT_MEMORY_ENTRIES: usize = 16;
+
+fn project_memory_index(project: &ProjectProjection, memory_id: &str) -> Option<usize> {
+    project
+        .memory
+        .iter()
+        .position(|entry| entry.memory_id == memory_id)
+}
+
 impl FeatureState {
     fn persist_projects(&self) {
         let _enqueue = self
@@ -17,6 +26,14 @@ impl FeatureState {
                 .cmp(&left.updated_at)
                 .then_with(|| left.project_id.cmp(&right.project_id))
         });
+        for project in &mut records {
+            project.memory.sort_by(|left, right| {
+                right
+                    .updated_at
+                    .cmp(&left.updated_at)
+                    .then_with(|| left.memory_id.cmp(&right.memory_id))
+            });
+        }
         if let Ok(value) = serde_json::to_value(records) {
             self.persist_value("projects", value);
         }
@@ -70,11 +87,39 @@ impl FeatureState {
                 .cmp(&left.updated_at)
                 .then_with(|| left.project_id.cmp(&right.project_id))
         });
+        for project in &mut projects {
+            project.memory.sort_by(|left, right| {
+                right
+                    .updated_at
+                    .cmp(&left.updated_at)
+                    .then_with(|| left.memory_id.cmp(&right.memory_id))
+            });
+        }
         json!({ "projects": projects })
     }
 }
 
 impl MukeiRuntime {
+    fn active_project(
+        &self,
+        command: &ValidatedCommand,
+        project_id: &str,
+    ) -> Result<ProjectProjection, CommandAcknowledgementV2> {
+        let Some(project) = self.features.project(project_id) else {
+            return Err(CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::StaleScope,
+            ));
+        };
+        if project.status == ProjectStatus::Archived {
+            return Err(CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::PolicyDenied,
+            ));
+        }
+        Ok(project)
+    }
+
     fn create_project(&self, command: &ValidatedCommand) -> CommandAcknowledgementV2 {
         if let Err(acknowledgement) = self.ensure_ready(command) {
             return acknowledgement;
@@ -92,6 +137,8 @@ impl MukeiRuntime {
             project_id: Uuid::new_v4().to_string(),
             name: payload.name.trim().to_owned(),
             description: payload.description.trim().to_owned(),
+            instructions: String::new(),
+            memory: Vec::new(),
             status: ProjectStatus::Active,
             created_at: now,
             updated_at: now,
@@ -111,17 +158,8 @@ impl MukeiRuntime {
                 RejectionReason::InvalidPayload,
             );
         };
-        let Some(existing) = self.features.project(&payload.project_id) else {
-            return CommandAcknowledgementV2::rejected(
-                Some(&command.envelope),
-                RejectionReason::StaleScope,
-            );
-        };
-        if existing.status == ProjectStatus::Archived {
-            return CommandAcknowledgementV2::rejected(
-                Some(&command.envelope),
-                RejectionReason::PolicyDenied,
-            );
+        if let Err(acknowledgement) = self.active_project(command, &payload.project_id) {
+            return acknowledgement;
         }
 
         let (acknowledgement, operation_id, _) = self.accept_operation(command);
@@ -136,6 +174,182 @@ impl MukeiRuntime {
             })
             .expect("project existence checked before update");
         self.complete_project_operation(command, &operation_id, "project.updated", &updated);
+        acknowledgement
+    }
+
+    fn update_project_instructions(&self, command: &ValidatedCommand) -> CommandAcknowledgementV2 {
+        if let Err(acknowledgement) = self.ensure_ready(command) {
+            return acknowledgement;
+        }
+        let ValidatedCommandPayload::ProjectInstructions(payload) = &command.payload else {
+            return CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::InvalidPayload,
+            );
+        };
+        if let Err(acknowledgement) = self.active_project(command, &payload.project_id) {
+            return acknowledgement;
+        }
+
+        let (acknowledgement, operation_id, _) = self.accept_operation(command);
+        let instructions = payload.instructions.trim().to_owned();
+        let updated = self
+            .features
+            .update_project(&payload.project_id, |project| {
+                project.instructions = instructions;
+                project.updated_at = Utc::now();
+            })
+            .expect("project existence checked before instructions update");
+        self.complete_project_context_operation(
+            command,
+            &operation_id,
+            "project.instructions.updated",
+            json!({
+                "project_id": updated.project_id,
+                "updated_at": updated.updated_at,
+            }),
+        );
+        acknowledgement
+    }
+
+    fn add_project_memory(&self, command: &ValidatedCommand) -> CommandAcknowledgementV2 {
+        if let Err(acknowledgement) = self.ensure_ready(command) {
+            return acknowledgement;
+        }
+        let ValidatedCommandPayload::ProjectMemoryCreate(payload) = &command.payload else {
+            return CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::InvalidPayload,
+            );
+        };
+        let project = match self.active_project(command, &payload.project_id) {
+            Ok(project) => project,
+            Err(acknowledgement) => return acknowledgement,
+        };
+        if project.memory.len() >= MAX_PROJECT_MEMORY_ENTRIES {
+            return CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::PolicyDenied,
+            );
+        }
+
+        let (acknowledgement, operation_id, _) = self.accept_operation(command);
+        let now = Utc::now();
+        let memory_id = Uuid::new_v4().to_string();
+        let content = payload.content.trim().to_owned();
+        let updated = self
+            .features
+            .update_project(&payload.project_id, |project| {
+                project.memory.push(ProjectMemoryEntry {
+                    memory_id: memory_id.clone(),
+                    content,
+                    created_at: now,
+                    updated_at: now,
+                });
+                project.updated_at = now;
+            })
+            .expect("project existence checked before memory add");
+        self.complete_project_context_operation(
+            command,
+            &operation_id,
+            "project.memory.added",
+            json!({
+                "project_id": updated.project_id,
+                "memory_id": memory_id,
+                "updated_at": updated.updated_at,
+            }),
+        );
+        acknowledgement
+    }
+
+    fn update_project_memory(&self, command: &ValidatedCommand) -> CommandAcknowledgementV2 {
+        if let Err(acknowledgement) = self.ensure_ready(command) {
+            return acknowledgement;
+        }
+        let ValidatedCommandPayload::ProjectMemoryUpdate(payload) = &command.payload else {
+            return CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::InvalidPayload,
+            );
+        };
+        let project = match self.active_project(command, &payload.project_id) {
+            Ok(project) => project,
+            Err(acknowledgement) => return acknowledgement,
+        };
+        let Some(memory_index) = project_memory_index(&project, &payload.memory_id) else {
+            return CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::StaleScope,
+            );
+        };
+
+        let (acknowledgement, operation_id, _) = self.accept_operation(command);
+        let now = Utc::now();
+        let content = payload.content.trim().to_owned();
+        let memory_id = payload.memory_id.clone();
+        let updated = self
+            .features
+            .update_project(&payload.project_id, |project| {
+                let entry = &mut project.memory[memory_index];
+                entry.content = content;
+                entry.updated_at = now;
+                project.updated_at = now;
+            })
+            .expect("project existence checked before memory update");
+        self.complete_project_context_operation(
+            command,
+            &operation_id,
+            "project.memory.updated",
+            json!({
+                "project_id": updated.project_id,
+                "memory_id": memory_id,
+                "updated_at": updated.updated_at,
+            }),
+        );
+        acknowledgement
+    }
+
+    fn delete_project_memory(&self, command: &ValidatedCommand) -> CommandAcknowledgementV2 {
+        if let Err(acknowledgement) = self.ensure_ready(command) {
+            return acknowledgement;
+        }
+        let ValidatedCommandPayload::ProjectMemory(payload) = &command.payload else {
+            return CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::InvalidPayload,
+            );
+        };
+        let project = match self.active_project(command, &payload.project_id) {
+            Ok(project) => project,
+            Err(acknowledgement) => return acknowledgement,
+        };
+        let Some(memory_index) = project_memory_index(&project, &payload.memory_id) else {
+            return CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::StaleScope,
+            );
+        };
+
+        let (acknowledgement, operation_id, _) = self.accept_operation(command);
+        let now = Utc::now();
+        let memory_id = payload.memory_id.clone();
+        let updated = self
+            .features
+            .update_project(&payload.project_id, |project| {
+                project.memory.remove(memory_index);
+                project.updated_at = now;
+            })
+            .expect("project existence checked before memory delete");
+        self.complete_project_context_operation(
+            command,
+            &operation_id,
+            "project.memory.deleted",
+            json!({
+                "project_id": updated.project_id,
+                "memory_id": memory_id,
+                "updated_at": updated.updated_at,
+            }),
+        );
         acknowledgement
     }
 
@@ -197,5 +411,88 @@ impl MukeiRuntime {
             Some(&command.envelope),
             Some(operation_id.to_owned()),
         );
+    }
+
+    fn complete_project_context_operation(
+        &self,
+        command: &ValidatedCommand,
+        operation_id: &str,
+        event_type: &str,
+        result: Value,
+    ) {
+        self.features.update_operation(
+            operation_id,
+            OperationStatus::Completed,
+            Some(1.0),
+            None,
+            result.clone(),
+        );
+        self.events.emit(
+            "application:projects",
+            event_type,
+            result,
+            Some(&command.envelope),
+            Some(operation_id.to_owned()),
+        );
+        self.events.emit(
+            &format!("operation:{operation_id}"),
+            "operation.completed",
+            json!({"state": "completed"}),
+            Some(&command.envelope),
+            Some(operation_id.to_owned()),
+        );
+    }
+}
+
+#[cfg(test)]
+mod project_context_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_project_projection_defaults_new_context_fields() {
+        let value = json!({
+            "project_id": "project-1",
+            "name": "Legacy",
+            "description": "existing record",
+            "status": "active",
+            "created_at": "2026-07-19T00:00:00Z",
+            "updated_at": "2026-07-19T00:00:00Z"
+        });
+        let project: ProjectProjection = serde_json::from_value(value).expect("legacy project");
+        assert!(project.instructions.is_empty());
+        assert!(project.memory.is_empty());
+    }
+
+    #[test]
+    fn memory_identity_lookup_never_crosses_project_boundary() {
+        let now = Utc::now();
+        let memory = ProjectMemoryEntry {
+            memory_id: "memory-a".into(),
+            content: "Only project A".into(),
+            created_at: now,
+            updated_at: now,
+        };
+        let project_a = ProjectProjection {
+            project_id: "project-a".into(),
+            name: "A".into(),
+            description: String::new(),
+            instructions: String::new(),
+            memory: vec![memory],
+            status: ProjectStatus::Active,
+            created_at: now,
+            updated_at: now,
+        };
+        let project_b = ProjectProjection {
+            project_id: "project-b".into(),
+            name: "B".into(),
+            description: String::new(),
+            instructions: String::new(),
+            memory: Vec::new(),
+            status: ProjectStatus::Active,
+            created_at: now,
+            updated_at: now,
+        };
+        assert_eq!(project_memory_index(&project_a, "memory-a"), Some(0));
+        assert_eq!(project_memory_index(&project_b, "memory-a"), None);
     }
 }
