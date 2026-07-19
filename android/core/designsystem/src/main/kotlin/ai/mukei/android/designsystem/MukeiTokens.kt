@@ -26,6 +26,10 @@ object MukeiRadius {
     val Composer = 28.dp
 }
 
+object MukeiStroke {
+    val Thin = 1.dp
+}
+
 /** Motion timing contract. Feature animation code should reference these values. */
 object MukeiMotion {
     const val FastMilliseconds = 150
@@ -44,6 +48,8 @@ object MukeiLayout {
     val MinimumTouchTarget = 48.dp
     val ReadableContentMaxWidth = 720.dp
     val ReadinessProgressMaxWidth = 280.dp
+    val ComposerTextMinHeight = 104.dp
+    val CompactStatusIconContainer = 40.dp
 
     const val DrawerWidthFraction = 0.86f
     const val TargetLineLengthCharactersMin = 60
