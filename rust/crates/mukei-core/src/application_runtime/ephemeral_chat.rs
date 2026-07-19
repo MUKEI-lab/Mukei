@@ -225,7 +225,7 @@ mod ephemeral_chat_state_tests {
         assert!(state.begin(&conversation, &branch));
         assert!(!state.begin(&conversation, &branch));
 
-        let message = ChatMessage::user_with_id(MessageId::new(), branch_id, "private".into());
+        let message = ChatMessage::user_with_id(MessageId::new(), branch_id, "private");
         assert!(state.append_message(&conversation, &branch, message));
         assert_eq!(
             state
