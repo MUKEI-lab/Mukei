@@ -30,7 +30,11 @@ async fn canonical_v015_database_applies_only_v016_on_next_boot() {
 
     let v15_dir = tempfile::tempdir().expect("temporary V015 migration directory");
     for (version, name, body) in bundled.iter().filter(|(version, _, _)| *version <= 15) {
-        let filename = format!("V{version:03}__{}.sql", name.trim_start_matches(&format!("V{version:03}__")));
+        let prefix = format!("V{version:03}__");
+        let suffix = name
+            .strip_prefix(prefix.as_str())
+            .expect("canonical migration name must match its version");
+        let filename = format!("V{version:03}__{suffix}.sql");
         std::fs::write(v15_dir.path().join(filename), body).expect("write canonical migration");
     }
 
@@ -102,5 +106,8 @@ async fn canonical_v015_database_applies_only_v016_on_next_boot() {
         .apply_pending(&pool)
         .await
         .expect("repeated boot after V016");
-    assert!(no_op.is_empty(), "V016 must be idempotent at migration-engine level");
+    assert!(
+        no_op.is_empty(),
+        "V016 must be idempotent at migration-engine level"
+    );
 }
