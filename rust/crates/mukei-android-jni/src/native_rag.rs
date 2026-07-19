@@ -4,10 +4,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use mukei_core::application_runtime::{RagIngestResult, RuntimeRagService};
 use mukei_core::error::{MukeiError, Result};
+use mukei_core::rag::chunker::Chunker;
 use mukei_core::rag::{
-    CandleMiniLmEmbedder, ChunkResolver, Chunker, Embedder, IndexMetadata, ResolvedChunk,
-    RetrievalRequest, RetrievalScope, Retriever, StoreHeader, StructuredRetriever, VectorStore,
-    ALL_MINILM_L6_V2_MANIFEST, STORE_FORMAT_VERSION,
+    CandleMiniLmEmbedder, ChunkResolver, Embedder, IndexMetadata, ResolvedChunk, RetrievalRequest,
+    RetrievalScope, Retriever, StoreHeader, VectorStore, ALL_MINILM_L6_V2_MANIFEST,
+    STORE_FORMAT_VERSION,
 };
 use mukei_core::storage::{DatabasePool, DbError, PooledConnectionExt};
 use tokio::sync::Mutex;
@@ -294,9 +295,9 @@ impl RuntimeRagService for AndroidRagService {
                 let ids = {
                     let mut statement = transaction
                         .prepare("SELECT chunk_uuid FROM chunks WHERE file_token = ?1")?;
-                    statement
-                        .query_map([&document_id_owned], |row| row.get::<_, String>(0))?
-                        .filter_map(|row| row.ok().and_then(|value| value.parse::<u64>().ok()))
+                    let rows = statement
+                        .query_map([&document_id_owned], |row| row.get::<_, String>(0))?;
+                    rows.filter_map(|row| row.ok().and_then(|value| value.parse::<u64>().ok()))
                         .collect::<Vec<_>>()
                 };
                 transaction.execute(
