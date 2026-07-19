@@ -37,7 +37,7 @@ impl MukeiRuntime {
             RuntimeSnapshotDomain::Protocol => serde_json::to_value(self.capabilities())
                 .map_err(|_| RuntimeError::UnsupportedSnapshot)?,
             RuntimeSnapshotDomain::Operations => {
-                self.features.snapshot(self.platform.snapshot())
+                self.features.snapshot_with_conversations(self.platform.snapshot())
             }
             RuntimeSnapshotDomain::Projects => self.features.projects_snapshot(),
         };
