@@ -10,8 +10,7 @@ use mukei_core::application_runtime::MukeiRuntime;
 // module. Keeping each transport in a real Rust module prevents textual
 // `include!` import collisions while preserving the exported JNI symbol names.
 use super::{
-    error_payload, guarded_bytes, invalid_handle_payload, runtime_entry, runtime_services,
-    serialize, to_java_bytes, RUNTIMES,
+    error_payload, guarded_bytes, invalid_handle_payload, runtime_entry, serialize, to_java_bytes,
 };
 
 const MAX_GENERATION: u32 = 0x7fff_ffff;
