@@ -229,6 +229,31 @@ mod tests {
     }
 
     #[test]
+    fn ended_temporary_chat_scope_cannot_fall_through_to_durable_chat() {
+        let runtime = runtime();
+        initialize(&runtime);
+        let (conversation, branch) = runtime.begin_temporary_chat().expect("temporary chat");
+        assert!(runtime.end_temporary_chat(&conversation, &branch));
+
+        let mut stale = command("chat.clear_conversation", json!({}));
+        stale.scope = Some(CommandScope {
+            conversation_id: Some(conversation.clone()),
+            branch_id: Some(branch.clone()),
+            ..CommandScope::default()
+        });
+        let acknowledgement = runtime.submit(stale);
+        assert_eq!(acknowledgement.status, AcknowledgementStatus::Rejected);
+        assert_eq!(
+            acknowledgement.rejection_reason,
+            Some(RejectionReason::StaleScope)
+        );
+        assert!(runtime.features.history(
+            ConversationId(Uuid::parse_str(&conversation).expect("conversation")),
+            BranchId(Uuid::parse_str(&branch).expect("branch")),
+        ).is_empty());
+    }
+
+    #[test]
     fn document_grant_queues_android_platform_request() {
         let runtime = runtime();
         initialize(&runtime);
