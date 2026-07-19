@@ -1,6 +1,7 @@
 package ai.mukei.android
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -21,13 +22,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -45,6 +47,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -206,6 +209,17 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
     var openDrawerRequest by remember { mutableIntStateOf(0) }
     var closeDrawerRequest by remember { mutableIntStateOf(0) }
     var newChatGeneration by rememberSaveable { mutableIntStateOf(0) }
+    var optionsExpanded by remember { mutableStateOf(false) }
+
+    val startNewChat = {
+        selectedName = TopLevelDestination.HOME.name
+        newChatGeneration += 1
+        optionsExpanded = false
+    }
+    val openDestination: (TopLevelDestination) -> Unit = { destination ->
+        selectedName = destination.name
+        optionsExpanded = false
+    }
 
     LaunchedEffect(openDrawerRequest) {
         if (openDrawerRequest > 0) drawerState.open()
@@ -214,11 +228,13 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
         if (closeDrawerRequest > 0) drawerState.close()
     }
 
-    BackHandler(enabled = drawerState.isOpen || selected != TopLevelDestination.HOME) {
-        if (drawerState.isOpen) {
-            closeDrawerRequest += 1
-        } else {
-            selectedName = TopLevelDestination.HOME.name
+    BackHandler(
+        enabled = optionsExpanded || drawerState.isOpen || selected != TopLevelDestination.HOME,
+    ) {
+        when {
+            optionsExpanded -> optionsExpanded = false
+            drawerState.isOpen -> closeDrawerRequest += 1
+            else -> selectedName = TopLevelDestination.HOME.name
         }
     }
 
@@ -233,7 +249,7 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                         .fillMaxHeight()
                         .padding(
                             horizontal = MukeiSpacing.Small,
-                            vertical = MukeiSpacing.Large,
+                            vertical = MukeiSpacing.Medium,
                         ),
                     verticalArrangement = Arrangement.spacedBy(MukeiSpacing.Micro),
                 ) {
@@ -245,7 +261,7 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                             closeDrawerRequest += 1
                         },
                     )
-                    Spacer(Modifier.height(MukeiSpacing.Small))
+                    Spacer(Modifier.height(MukeiSpacing.ExtraSmall))
                     listOf(
                         TopLevelDestination.STORAGE,
                         TopLevelDestination.PROJECTS,
@@ -260,7 +276,7 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                             },
                         )
                     }
-                    Spacer(Modifier.height(MukeiSpacing.Small))
+                    Spacer(Modifier.height(MukeiSpacing.ExtraSmall))
                     DrawerDestinationItem(
                         destination = TopLevelDestination.CHATS,
                         selected = selected,
@@ -313,27 +329,42 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                     },
                     actions = {
                         IconButton(
-                            onClick = {
-                                selectedName = TopLevelDestination.HOME.name
-                                newChatGeneration += 1
-                            },
+                            onClick = startNewChat,
                             modifier = Modifier.semantics {
                                 contentDescription = "New chat"
                             },
                         ) {
                             MukeiNewChatIcon(contentDescription = null)
                         }
-                        IconButton(
-                            onClick = {},
-                            enabled = false,
-                            modifier = Modifier.semantics {
-                                contentDescription = "Options unavailable in this build"
-                            },
-                        ) {
-                            MukeiIcon(
-                                icon = MukeiIconKey.MORE,
-                                contentDescription = null,
-                            )
+                        Box {
+                            IconButton(
+                                onClick = { optionsExpanded = true },
+                                modifier = Modifier.semantics {
+                                    contentDescription = "More options"
+                                },
+                            ) {
+                                MukeiIcon(
+                                    icon = MukeiIconKey.MORE,
+                                    contentDescription = null,
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = optionsExpanded,
+                                onDismissRequest = { optionsExpanded = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("New chat") },
+                                    onClick = startNewChat,
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Models") },
+                                    onClick = { openDestination(TopLevelDestination.MODELS) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Settings") },
+                                    onClick = { openDestination(TopLevelDestination.SETTINGS) },
+                                )
+                            }
                         }
                     },
                 )
@@ -365,8 +396,30 @@ private fun DrawerDestinationItem(
     onSelect: () -> Unit,
 ) {
     val isSelected = selected == destination
-    NavigationDrawerItem(
-        icon = {
+    val containerColor by animateColorAsState(
+        targetValue = if (isSelected) {
+            MaterialTheme.colorScheme.surfaceVariant
+        } else {
+            MaterialTheme.colorScheme.surface.copy(alpha = 0f)
+        },
+        label = "drawerSelection",
+    )
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = MukeiLayout.MinimumTouchTarget)
+            .clickable(onClick = onSelect),
+        shape = MaterialTheme.shapes.medium,
+        color = containerColor,
+    ) {
+        Row(
+            modifier = Modifier.padding(
+                horizontal = MukeiSpacing.Medium,
+                vertical = MukeiSpacing.ExtraSmall,
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(MukeiSpacing.Medium),
+        ) {
             MukeiIcon(
                 icon = destination.icon,
                 contentDescription = null,
@@ -376,17 +429,18 @@ private fun DrawerDestinationItem(
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
             )
-        },
-        label = {
             Text(
                 text = destination.drawerLabel,
+                style = MaterialTheme.typography.titleMedium,
                 fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
+                color = if (isSelected) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
             )
-        },
-        selected = isSelected,
-        onClick = onSelect,
-        shape = MaterialTheme.shapes.medium,
-    )
+        }
+    }
 }
 
 @Composable
@@ -487,13 +541,22 @@ private fun MukeiComposer(
     onDraftChange: (String) -> Unit,
     placeholder: String,
 ) {
+    var isFocused by remember { mutableStateOf(false) }
+    val borderColor by animateColorAsState(
+        targetValue = if (isFocused) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.outline
+        },
+        label = "composerBorder",
+    )
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(MukeiRadius.Composer),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(
             width = MukeiStroke.Thin,
-            color = MaterialTheme.colorScheme.outline,
+            color = borderColor,
         ),
     ) {
         Column(
@@ -502,7 +565,9 @@ private fun MukeiComposer(
             BasicTextField(
                 value = draft,
                 onValueChange = onDraftChange,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { isFocused = it.isFocused },
                 textStyle = MaterialTheme.typography.bodyLarge.copy(
                     color = MaterialTheme.colorScheme.onSurface,
                 ),
@@ -568,16 +633,22 @@ private fun MukeiCapabilityChip(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val container = if (selected) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        MaterialTheme.colorScheme.surface
-    }
-    val border = if (selected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.outline
-    }
+    val container by animateColorAsState(
+        targetValue = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        label = "capabilityContainer",
+    )
+    val border by animateColorAsState(
+        targetValue = if (selected) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.outline
+        },
+        label = "capabilityBorder",
+    )
     Surface(
         modifier = Modifier
             .heightIn(min = MukeiLayout.MinimumTouchTarget)
