@@ -55,6 +55,20 @@ impl ToolRegistry {
         registry
     }
 
+    /// Restricted registry for Temporary Chat.
+    ///
+    /// Temporary sessions do not expose file-reading or remote network tools. This
+    /// keeps their first public contract aligned with the explicit no-RAG/no-file
+    /// privacy boundary while preserving deterministic local utility tools.
+    pub fn temporary_chat() -> Self {
+        let mut registry = Self {
+            inner: HashMap::new(),
+        };
+        registry.register(hardware::HardwareTool);
+        registry.register(math::MathTool);
+        registry
+    }
+
     pub fn with_file_tool(file_tool: file_tool::FileTool) -> Self {
         let mut registry = Self::local_only();
         registry.register(file_tool);
@@ -131,6 +145,14 @@ mod tests {
                 "math_eval".to_string(),
                 "read_file".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn temporary_chat_registry_excludes_file_and_remote_tools() {
+        assert_eq!(
+            ToolRegistry::temporary_chat().names(),
+            vec!["get_hardware_info".to_string(), "math_eval".to_string()]
         );
     }
 
