@@ -287,7 +287,7 @@ mod secure_runtime {
                 }
             };
 
-            let mut services = super::super::runtime_services(&config);
+            let mut services = crate::runtime_services(&config);
             services.storage_importer = Some(importer);
             let runtime = match MukeiRuntime::create_with_services(config, services) {
                 Ok(runtime) => Arc::new(runtime),
@@ -323,7 +323,7 @@ mod secure_runtime {
             #[cfg(not(feature = "rag_runtime"))]
             let rag_ready = false;
 
-            let handle = match super::super::RUNTIMES.lock().insert(Arc::clone(&runtime)) {
+            let handle = match crate::RUNTIMES.lock().insert(Arc::clone(&runtime)) {
                 Some(handle) => handle,
                 None => {
                     runtime.shutdown();
@@ -388,7 +388,7 @@ mod secure_runtime {
     ) {
         let _ = catch_unwind(AssertUnwindSafe(|| {
             SECURE_RESOURCES.lock().remove(&handle);
-            let runtime = super::super::RUNTIMES.lock().remove(handle);
+            let runtime = crate::RUNTIMES.lock().remove(handle);
             if let Some(runtime) = runtime {
                 runtime.shutdown();
             }
