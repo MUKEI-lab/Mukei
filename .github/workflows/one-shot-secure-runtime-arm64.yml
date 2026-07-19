@@ -1,0 +1,201 @@
+name: one-shot-secure-runtime-arm64
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - '.github/workflows/one-shot-secure-runtime-arm64.yml'
+
+permissions:
+  contents: read
+  statuses: write
+
+env:
+  RUSTUP_TOOLCHAIN: '1.86.0'
+  ANDROID_NDK_VERSION: '27.2.12479018'
+  CARGO_NDK_VERSION: '4.1.2'
+
+jobs:
+  build-sign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Publish pending status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'pending',
+              context: 'secure-runtime-arm64',
+              description: 'Building secure runtime ARM64 APK',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: dtolnay/rust-toolchain@1.86.0
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Install pinned Android native tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libssl-dev perl make
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;${ANDROID_NDK_VERSION}"
+          rustup target add --toolchain "${RUSTUP_TOOLCHAIN}" aarch64-linux-android
+          cargo install cargo-ndk --version "${CARGO_NDK_VERSION}" --locked
+
+      - name: Build secure JNI runtime for ARM64
+        id: native
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics
+          ndk="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}"
+          export ANDROID_NDK_HOME="$ndk"
+          export ANDROID_NDK_ROOT="$ndk"
+          output="$GITHUB_WORKSPACE/android/core/native/src/main/jniLibs"
+          rm -rf "$output"
+          mkdir -p "$output"
+          {
+            cd rust
+            cargo ndk -t arm64-v8a -o ../android/core/native/src/main/jniLibs \
+              build -p mukei-android-jni --release \
+              --no-default-features \
+              --features secure_runtime,runtime_hardening
+          } 2>&1 | tee diagnostics/native-build.log
+
+          test -s "$output/arm64-v8a/libmukei_android.so"
+          cxx_shared="$(find "$ndk/toolchains/llvm/prebuilt" -path '*/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so' -print -quit)"
+          test -s "$cxx_shared"
+          cp "$cxx_shared" "$output/arm64-v8a/libc++_shared.so"
+          test -s "$output/arm64-v8a/libc++_shared.so"
+
+      - name: Upload native diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: secure-runtime-native-log-${{ github.sha }}
+          path: diagnostics/native-build.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Enforce native build
+        if: steps.native.outcome == 'failure'
+        run: exit 1
+
+      - name: Build release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle -p android :app:lintRelease :app:assembleRelease --stacktrace
+
+      - name: Verify runtime is packaged
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p deliver
+          apk="$(find android/app/build/outputs/apk/release -type f -name '*arm64-v8a*.apk' -print -quit)"
+          test -s "$apk"
+          unzip -l "$apk" | tee deliver/APK-CONTENTS.txt
+          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libmukei_android.so'
+          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libc++_shared.so'
+          echo "SOURCE_APK=$apk" >> "$GITHUB_ENV"
+
+      - name: Sign and verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          ZIPALIGN="$(find "$SDK_ROOT/build-tools" -type f -name zipalign | sort -V | tail -1)"
+          test -x "$APKSIGNER"
+          test -x "$ZIPALIGN"
+
+          keytool -genkeypair -noprompt \
+            -keystore "$RUNNER_TEMP/mukei-secure-runtime-test.jks" \
+            -storepass mukei-test-pass \
+            -keypass mukei-test-pass \
+            -alias mukei-secure-runtime-test \
+            -keyalg RSA -keysize 3072 -validity 3650 \
+            -dname 'CN=Mukei Secure Runtime Test,O=MUKEI-lab Test Build,C=US'
+
+          aligned="$RUNNER_TEMP/mukei-secure-runtime-arm64-aligned.apk"
+          out="deliver/mukei-secure-runtime-arm64-test-signed.apk"
+          "$ZIPALIGN" -p -f 4 "$SOURCE_APK" "$aligned"
+          "$APKSIGNER" sign \
+            --ks "$RUNNER_TEMP/mukei-secure-runtime-test.jks" \
+            --ks-key-alias mukei-secure-runtime-test \
+            --ks-pass pass:mukei-test-pass \
+            --key-pass pass:mukei-test-pass \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --out "$out" "$aligned"
+          "$APKSIGNER" verify --verbose --print-certs --min-sdk-version 26 "$out" | tee deliver/APKSIGNER-VERIFY.txt
+          sha256sum "$out" | tee deliver/SHA256SUMS
+          cat > deliver/SOURCE.txt <<EOF
+          Source branch: temp/universal-storage-workspace-v0.1
+          Source commit: $GITHUB_SHA
+          Runtime features: secure_runtime,runtime_hardening
+          Packaged native runtime: libmukei_android.so + libc++_shared.so
+          Inference/RAG: intentionally not bundled in this recovery build; UI reports model artifacts required.
+          Signing: disposable CI test key; NOT a production identity.
+          EOF
+
+      - name: Upload signed secure runtime APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mukei-secure-runtime-arm64-test-signed-${{ github.sha }}
+          path: deliver/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish success status
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              context: 'secure-runtime-arm64',
+              description: 'Secure runtime ARM64 APK built and signed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+
+      - name: Publish failure status
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'failure',
+              context: 'secure-runtime-arm64',
+              description: 'Secure runtime ARM64 build/sign failed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
