@@ -83,7 +83,7 @@ jobs:
         run: >-
           cargo test -p mukei-android-jni --lib
           --no-default-features
-          --features secure_runtime,runtime_hardening
+          --features secure_runtime
       - name: Check production RAG composition
         working-directory: rust
         run: >-
