@@ -5,7 +5,7 @@
 // authoritative snapshots. Android-only services are accessed through the
 // pull-based platform broker in `crate::platform`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{
@@ -187,6 +187,7 @@ struct ReplayRecord {
 struct EventBus {
     sender: SyncSender<EventEnvelopeV2>,
     receiver: Mutex<Receiver<EventEnvelopeV2>>,
+    queue_lock: Mutex<()>,
     sequences: Mutex<HashMap<String, u64>>,
     queued: AtomicUsize,
     dropped: AtomicU64,
@@ -198,6 +199,7 @@ impl EventBus {
         Self {
             sender,
             receiver: Mutex::new(receiver),
+            queue_lock: Mutex::new(()),
             sequences: Mutex::new(HashMap::new()),
             queued: AtomicUsize::new(0),
             dropped: AtomicU64::new(0),
@@ -247,6 +249,10 @@ impl EventBus {
         operation_id: Option<String>,
     ) {
         let event = self.build_event(stream_id, event_type, payload, command, operation_id);
+        let _queue = self
+            .queue_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         match self.sender.try_send(event) {
             Ok(()) => {
                 self.queued.fetch_add(1, Ordering::Release);
@@ -255,6 +261,73 @@ impl EventBus {
                 self.dropped.fetch_add(1, Ordering::Relaxed);
             }
         }
+    }
+
+    /// Purge queued events scoped to a Temporary Chat while preserving unrelated
+    /// events in original order. Emission is serialized during drain/requeue so
+    /// retained events cannot be displaced by concurrent senders.
+    fn purge_temporary_chat(&self, conversation_id: &str, operation_ids: &[String]) -> usize {
+        let conversation_stream = format!("conversation:{conversation_id}");
+        let operation_set = operation_ids.iter().cloned().collect::<HashSet<_>>();
+        let operation_streams = operation_ids
+            .iter()
+            .map(|operation_id| format!("operation:{operation_id}"))
+            .collect::<HashSet<_>>();
+
+        let _queue = self
+            .queue_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let receiver = self
+            .receiver
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut retained = Vec::new();
+        let mut removed = 0usize;
+        loop {
+            match receiver.try_recv() {
+                Ok(event) => {
+                    self.decrement_queued();
+                    let sensitive = event.stream_id == conversation_stream
+                        || operation_streams.contains(&event.stream_id)
+                        || event
+                            .operation_id
+                            .as_ref()
+                            .map(|operation_id| operation_set.contains(operation_id))
+                            .unwrap_or(false);
+                    if sensitive {
+                        removed = removed.saturating_add(1);
+                    } else {
+                        retained.push(event);
+                    }
+                }
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+            }
+        }
+
+        for event in retained {
+            match self.sender.try_send(event) {
+                Ok(()) => {
+                    self.queued.fetch_add(1, Ordering::Release);
+                }
+                Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {
+                    // This should be unreachable while queue_lock + receiver are held,
+                    // because retained <= the number just drained. Fail observably if
+                    // channel semantics ever change.
+                    self.dropped.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+
+        let mut sequences = self
+            .sequences
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        sequences.remove(&conversation_stream);
+        for stream_id in operation_streams {
+            sequences.remove(&stream_id);
+        }
+        removed
     }
 
     fn decrement_queued(&self) {
