@@ -57,6 +57,9 @@ object TemporaryChatJsonCodec {
             ended = root.optBoolean("ended", false),
             ragEnabled = root.optBoolean("rag_enabled", true),
         )
+        if (!value.ended) {
+            throw ProtocolCodecException("temporary_chat_end_not_confirmed")
+        }
         if (value.ragEnabled) {
             throw ProtocolCodecException("temporary_chat_rag_must_be_disabled")
         }
