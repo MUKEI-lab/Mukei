@@ -1,5 +1,6 @@
 package ai.mukei.android
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
@@ -32,6 +34,7 @@ internal fun MukeiAppShell(backendState: BackendRuntimeHost.State) {
     var initialOperationId by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf("") }
     var banner by remember { mutableStateOf<String?>(null) }
+    var selectedProjectId by remember { mutableStateOf<String?>(null) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         MukeiProductShell(backendState)
@@ -79,6 +82,7 @@ internal fun MukeiAppShell(backendState: BackendRuntimeHost.State) {
                                 conversationId = null
                                 branchId = null
                                 initialOperationId = null
+                                selectedProjectId = null
                                 banner = null
                             },
                         ) {
@@ -107,6 +111,7 @@ internal fun MukeiAppShell(backendState: BackendRuntimeHost.State) {
                                 conversationId = selectedConversation
                                 branchId = selectedBranch
                                 initialOperationId = null
+                                selectedProjectId = null
                                 banner = null
                             }
                         }
@@ -124,6 +129,41 @@ internal fun MukeiAppShell(backendState: BackendRuntimeHost.State) {
                                 .padding(MukeiSpacing.Large),
                             verticalArrangement = Arrangement.spacedBy(MukeiSpacing.Small),
                         ) {
+                            val projectOptions = loadActiveChatProjects()
+                            if (projectOptions.isNotEmpty()) {
+                                Text(
+                                    "Project context",
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(MukeiSpacing.ExtraSmall),
+                                ) {
+                                    TextButton(onClick = { selectedProjectId = null }) {
+                                        Text(if (selectedProjectId == null) "None · Selected" else "None")
+                                    }
+                                    projectOptions.forEach { project ->
+                                        TextButton(
+                                            onClick = { selectedProjectId = project.projectId },
+                                        ) {
+                                            Text(
+                                                if (selectedProjectId == project.projectId) {
+                                                    "${project.name} · Selected"
+                                                } else {
+                                                    project.name
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                                Text(
+                                    "A project can only be attached when this conversation is first created. The binding cannot be changed later.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                             OutlinedTextField(
                                 value = draft,
                                 onValueChange = { draft = it.take(64 * 1024) },
@@ -141,6 +181,7 @@ internal fun MukeiAppShell(backendState: BackendRuntimeHost.State) {
                                         conversationId = newConversation,
                                         branchId = newBranch,
                                         text = text,
+                                        projectId = selectedProjectId,
                                     )
                                     if (result.status == "accepted") {
                                         draft = ""
@@ -148,9 +189,12 @@ internal fun MukeiAppShell(backendState: BackendRuntimeHost.State) {
                                         conversationId = newConversation
                                         branchId = newBranch
                                         initialOperationId = result.operationId
+                                        selectedProjectId = null
                                     } else {
                                         banner = when (result.rejectionReason) {
                                             "backend_unavailable" -> "A ready model is required before sending."
+                                            "policy_denied" -> "That project cannot be attached to this conversation."
+                                            "stale_scope" -> "That project is no longer available."
                                             else -> "Message could not be sent: ${result.rejectionReason ?: "rejected"}"
                                         }
                                     }
