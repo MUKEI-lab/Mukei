@@ -1,6 +1,7 @@
 include!("application_runtime/foundation_types.rs");
 include!("application_runtime/durable.rs");
 include!("application_runtime/foundation_state.rs");
+include!("application_runtime/ephemeral_chat.rs");
 include!("application_runtime/persistence_flush.rs");
 include!("application_runtime/foundation_context.rs");
 include!("application_runtime/foundation_runtime_struct.rs");
