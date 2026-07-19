@@ -52,6 +52,14 @@ impl MukeiRuntime {
                 RejectionReason::InvalidPayload,
             );
         };
+        if let Some(message_id) = command
+            .envelope
+            .scope
+            .as_ref()
+            .and_then(|scope| scope.turn_id.as_deref())
+        {
+            return self.edit_chat_message(command, message_id, &payload.text);
+        }
         self.start_chat_operation(command, payload.text.clone(), false, None)
     }
 
@@ -86,7 +94,13 @@ impl MukeiRuntime {
         };
 
         let user_message = existing_user.unwrap_or_else(|| {
-            ChatMessage::user_with_id(MessageId::new(), branch_id, text.clone())
+            let mut message = ChatMessage::user_with_id(MessageId::new(), branch_id, text.clone());
+            message.parent = self
+                .features
+                .history(conversation_id, branch_id)
+                .last()
+                .map(|value| value.id);
+            message
         });
         let user_message_id = user_message.id;
         if self
@@ -305,5 +319,4 @@ impl MukeiRuntime {
         );
         acknowledgement
     }
-
 }
