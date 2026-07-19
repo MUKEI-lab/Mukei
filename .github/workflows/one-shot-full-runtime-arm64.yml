@@ -1,0 +1,228 @@
+name: one-shot-full-runtime-arm64
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - '.github/workflows/one-shot-full-runtime-arm64.yml'
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: one-shot-full-runtime-arm64
+  cancel-in-progress: false
+
+env:
+  RUST_TOOLCHAIN: '1.86.0'
+  RUSTUP_TOOLCHAIN: '1.86.0'
+  ANDROID_NDK_VERSION: '27.2.12479018'
+  CARGO_NDK_VERSION: '4.1.2'
+
+jobs:
+  build-sign-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Publish pending status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'pending',
+              context: 'full-runtime-arm64',
+              description: 'Building full native ARM64 runtime APK',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: dtolnay/rust-toolchain@1.86.0
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Install pinned native build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libssl-dev perl make
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;${ANDROID_NDK_VERSION}"
+          rustup target add --toolchain "${RUSTUP_TOOLCHAIN}" aarch64-linux-android
+          cargo install cargo-ndk --version "${CARGO_NDK_VERSION}" --locked
+
+      - name: Fetch Rust graph and normalize NumKong for NDK 27
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fetch --manifest-path rust/Cargo.toml
+          registry_root="${CARGO_HOME:-$HOME/.cargo}/registry/src"
+          expected='extern "C" long syscall(long, ...) noexcept;'
+          replacement='extern "C" long syscall(long, ...);'
+          mapfile -t headers < <(find "$registry_root" -type f -path '*/numkong-7.7.0/include/numkong/capabilities.h' -print | sort)
+          test "${#headers[@]}" -eq 1
+          python3 - "${headers[0]}" "$expected" "$replacement" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1]); old=sys.argv[2]; new=sys.argv[3]
+          s=p.read_text()
+          if s.count(old)==1 and s.count(new)==0:
+              p.write_text(s.replace(old,new,1))
+          elif not (s.count(old)==0 and s.count(new)==1):
+              raise SystemExit('Unexpected NumKong declaration state')
+          PY
+
+      - name: Build ARM64 llama capsule and JNI runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ndk="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}"
+          export ANDROID_NDK_HOME="$ndk"
+          export ANDROID_NDK_ROOT="$ndk"
+          output="$GITHUB_WORKSPACE/android/core/native/src/main/jniLibs"
+          rm -rf "$output"
+          mkdir -p "$output"
+
+          cmake -S rust/llama-cpp-prebuilt \
+            -B build/llama-arm64-v8a \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-26 \
+            -DANDROID_STL=c++_static \
+            -DMUKEI_LLAMA_FORCE_REBUILD=ON
+          cmake --build build/llama-arm64-v8a --target mukei_llama_native
+
+          export MUKEI_LLAMA_NATIVE_LIB_DIR="$GITHUB_WORKSPACE/rust/llama-cpp-prebuilt/prebuilt/arm64-v8a"
+          test -s "$MUKEI_LLAMA_NATIVE_LIB_DIR/libmukei_llama_native.so"
+
+          (
+            cd rust
+            cargo ndk -t arm64-v8a -o ../android/core/native/src/main/jniLibs \
+              build -p mukei-android-jni --release \
+              --no-default-features \
+              --features runtime_production,runtime_hardening
+          )
+
+          test -s "$output/arm64-v8a/libmukei_android.so"
+          cp "$MUKEI_LLAMA_NATIVE_LIB_DIR/libmukei_llama_native.so" "$output/arm64-v8a/"
+          cxx_shared="$(find "$ndk/toolchains/llvm/prebuilt" -path '*/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so' -print -quit)"
+          test -s "$cxx_shared"
+          cp "$cxx_shared" "$output/arm64-v8a/libc++_shared.so"
+          test -s "$output/arm64-v8a/libmukei_llama_native.so"
+          test -s "$output/arm64-v8a/libc++_shared.so"
+          find "$output/arm64-v8a" -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+
+      - name: Build release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle -p android :app:lintRelease :app:assembleRelease --stacktrace
+
+      - name: Verify full runtime packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p deliver
+          apk="$(find android/app/build/outputs/apk/release -type f -name '*arm64-v8a*.apk' -print -quit)"
+          test -s "$apk"
+          unzip -l "$apk" | tee deliver/APK-CONTENTS.txt
+          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libmukei_android.so'
+          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libmukei_llama_native.so'
+          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libc++_shared.so'
+          echo "SOURCE_APK=$apk" >> "$GITHUB_ENV"
+
+      - name: Sign and verify installable APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          ZIPALIGN="$(find "$SDK_ROOT/build-tools" -type f -name zipalign | sort -V | tail -1)"
+          test -x "$APKSIGNER"
+          test -x "$ZIPALIGN"
+
+          keytool -genkeypair -noprompt \
+            -keystore "$RUNNER_TEMP/mukei-full-runtime-test.jks" \
+            -storepass mukei-test-pass \
+            -keypass mukei-test-pass \
+            -alias mukei-full-runtime-test \
+            -keyalg RSA -keysize 3072 -validity 3650 \
+            -dname 'CN=Mukei Full Runtime Test,O=MUKEI-lab Test Build,C=US'
+
+          aligned="$RUNNER_TEMP/mukei-full-runtime-arm64-aligned.apk"
+          out="deliver/mukei-full-runtime-arm64-test-signed.apk"
+          "$ZIPALIGN" -p -f 4 "$SOURCE_APK" "$aligned"
+          "$APKSIGNER" sign \
+            --ks "$RUNNER_TEMP/mukei-full-runtime-test.jks" \
+            --ks-key-alias mukei-full-runtime-test \
+            --ks-pass pass:mukei-test-pass \
+            --key-pass pass:mukei-test-pass \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --out "$out" "$aligned"
+          "$APKSIGNER" verify --verbose --print-certs --min-sdk-version 26 "$out" | tee deliver/APKSIGNER-VERIFY.txt
+          sha256sum "$out" | tee deliver/SHA256SUMS
+          cat > deliver/SOURCE.txt <<EOF
+          Source branch: temp/universal-storage-workspace-v0.1
+          Source commit: $GITHUB_SHA
+          Includes: libmukei_android.so, libmukei_llama_native.so, libc++_shared.so
+          Signing: disposable CI test key; NOT a production identity.
+          EOF
+
+      - name: Upload full runtime signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mukei-full-runtime-arm64-test-signed-${{ github.sha }}
+          path: deliver/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish success status
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              context: 'full-runtime-arm64',
+              description: 'Full native ARM64 APK built, packaged and signed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+
+      - name: Publish failure status
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'failure',
+              context: 'full-runtime-arm64',
+              description: 'Full native ARM64 build/sign failed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
