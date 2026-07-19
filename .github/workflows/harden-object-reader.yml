@@ -37,37 +37,39 @@ jobs:
           path = Path("rust/crates/mukei-core/src/storage/object_store.rs")
           text = path.read_text()
 
-          early = """        let parent = final_path
-              .parent()
-              .ok_or(ObjectStoreError::MalformedObject)?;
-          fs::create_dir_all(parent)?;
-          sync_directory(parent)?;
-
-          let version = self.cipher.version();
-          """
-          deferred = """        let parent = final_path
-              .parent()
-              .ok_or(ObjectStoreError::MalformedObject)?;
-
-          let version = self.cipher.version();
-          """
+          early = (
+              "        let parent = final_path\n"
+              "            .parent()\n"
+              "            .ok_or(ObjectStoreError::MalformedObject)?;\n"
+              "        fs::create_dir_all(parent)?;\n"
+              "        sync_directory(parent)?;\n\n"
+              "        let version = self.cipher.version();\n"
+          )
+          deferred = (
+              "        let parent = final_path\n"
+              "            .parent()\n"
+              "            .ok_or(ObjectStoreError::MalformedObject)?;\n\n"
+              "        let version = self.cipher.version();\n"
+          )
           if early in text:
               text = text.replace(early, deferred, 1)
           elif deferred not in text:
               raise SystemExit("object-store parent publication anchor not found")
 
-          guard = """        if ciphertext_size > MAX_ENCODED_OBJECT_BYTES {
-              return Err(ObjectStoreError::ObjectTooLarge);
-          }
-          let encoded = encode_object(
-          """
-          guarded_publication = """        if ciphertext_size > MAX_ENCODED_OBJECT_BYTES {
-              return Err(ObjectStoreError::ObjectTooLarge);
-          }
-          fs::create_dir_all(parent)?;
-          sync_directory(parent)?;
-          let encoded = encode_object(
-          """
+          guard = (
+              "        if ciphertext_size > MAX_ENCODED_OBJECT_BYTES {\n"
+              "            return Err(ObjectStoreError::ObjectTooLarge);\n"
+              "        }\n"
+              "        let encoded = encode_object(\n"
+          )
+          guarded_publication = (
+              "        if ciphertext_size > MAX_ENCODED_OBJECT_BYTES {\n"
+              "            return Err(ObjectStoreError::ObjectTooLarge);\n"
+              "        }\n"
+              "        fs::create_dir_all(parent)?;\n"
+              "        sync_directory(parent)?;\n"
+              "        let encoded = encode_object(\n"
+          )
           if guard in text:
               text = text.replace(guard, guarded_publication, 1)
           elif guarded_publication not in text:
