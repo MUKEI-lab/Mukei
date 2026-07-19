@@ -137,18 +137,26 @@ impl MukeiRuntime {
         command: &ValidatedCommand,
         conversation: &str,
         branch: &str,
-    ) -> (CommandAcknowledgementV2, String, CancellationToken, bool) {
+    ) -> Result<
+        (CommandAcknowledgementV2, String, CancellationToken, bool),
+        CommandAcknowledgementV2,
+    > {
         let temporary = self.ephemeral_chats.is_registered(conversation, branch);
         if !temporary {
             let (acknowledgement, operation_id, token) = self.accept_operation(command);
-            return (acknowledgement, operation_id, token, false);
+            return Ok((acknowledgement, operation_id, token, false));
         }
 
-        let (operation_id, token) = self.ephemeral_chats.create_operation(
+        let Some((operation_id, token)) = self.ephemeral_chats.create_operation(
             conversation,
             branch,
             command.envelope.operation_id.as_deref(),
-        );
+        ) else {
+            return Err(CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::StaleScope,
+            ));
+        };
         self.events.emit(
             &format!("operation:{operation_id}"),
             "operation.accepted",
@@ -156,11 +164,11 @@ impl MukeiRuntime {
             Some(&command.envelope),
             Some(operation_id.clone()),
         );
-        (
+        Ok((
             CommandAcknowledgementV2::accepted(&command.envelope, Some(operation_id.clone())),
             operation_id,
             token,
             true,
-        )
+        ))
     }
 }
