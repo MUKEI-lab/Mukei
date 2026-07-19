@@ -44,6 +44,7 @@ The review matrix:
 | [ADR-005](ADR-005-authoritative-state-and-process-recovery.md) | Authoritative state/recovery after process death | Proposed | Critical before Conversation persistence |
 | [ADR-006](ADR-006-android-navigation-architecture.md) | Android navigation architecture | Proposed | High before Product Shell implementation |
 | [ADR-007](ADR-007-protocol-v2-evolution-and-query-contract.md) | Protocol V2 evolution and bounded query/snapshot contract | Proposed | High before product-domain protocol expansion |
+| [ADR-008](ADR-008-temporary-chat-ephemeral-isolation.md) | Temporary Chat ephemeral persistence/RAG isolation | Proposed | Critical before enabling Temporary Chat |
 
 ## Recommended review order
 
@@ -51,6 +52,8 @@ The review matrix:
 ADR-005 State authority
   ↓
 ADR-007 Protocol/query evolution
+  ↓
+ADR-008 Temporary Chat isolation
   ↓
 ADR-006 Navigation
   ↓
