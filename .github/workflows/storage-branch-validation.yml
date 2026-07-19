@@ -63,25 +63,25 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p ../ci-storage-validation
-          cargo check -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets \
+          cargo check --locked -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets \
             2>&1 | tee ../ci-storage-validation/check.log
       - name: Targeted staged-import tests
         shell: bash
         run: |
           set -o pipefail
-          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite staged_import -- --nocapture \
+          cargo test --locked -p mukei-core --no-default-features --features std,tokio,rusqlite staged_import -- --nocapture \
             2>&1 | tee ../ci-storage-validation/staged-import.log
       - name: Cargo tests
         shell: bash
         run: |
           set -o pipefail
-          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets \
+          cargo test --locked -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets \
             2>&1 | tee ../ci-storage-validation/test.log
       - name: Clippy
         shell: bash
         run: |
           set -o pipefail
-          cargo clippy -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings \
+          cargo clippy --locked -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings \
             2>&1 | tee ../ci-storage-validation/clippy.log
       - name: Upload Cargo diagnostics
         if: always()
@@ -115,7 +115,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p ../ci-storage-migrations
-          cargo test -p mukei-core --no-default-features --features std,tokio,rusqlite \
+          cargo test --locked -p mukei-core --no-default-features --features std,tokio,rusqlite \
             --test universal_storage_embedded_migrations -- --nocapture \
             2>&1 | tee ../ci-storage-migrations/test.log
       - name: Upload migration diagnostics
@@ -178,15 +178,21 @@ jobs:
             const storage = '${{ needs.storage-core.result }}';
             const migrations = '${{ needs.embedded-migrations.result }}';
             const android = '${{ needs.android-ocr.result }}';
-            const success = storage === 'success' && migrations === 'success' && android === 'success';
+            const results = [storage, migrations, android];
+            const success = results.every(result => result === 'success');
+            const cancelled = results.some(result => result === 'cancelled');
             const details = `storage=${storage}, migrations=${migrations}, android=${android}`;
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: context.sha,
-              state: success ? 'success' : 'failure',
+              state: success ? 'success' : cancelled ? 'error' : 'failure',
               context: 'storage-branch-validation',
-              description: success ? 'Storage, Android OCR, Clippy, and migrations passed' : details.slice(0, 140),
+              description: success
+                ? 'Storage, Android OCR, Clippy, and migrations passed'
+                : cancelled
+                  ? `Validation superseded or cancelled: ${details}`.slice(0, 140)
+                  : details.slice(0, 140),
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
-            if (!success) core.setFailed(`Storage validation failed: ${details}`);
+            if (!success && !cancelled) core.setFailed(`Storage validation failed: ${details}`);
