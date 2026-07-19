@@ -110,12 +110,11 @@ impl MukeiRuntime {
         self.async_runtime.block_on(store.save("settings", value))
     }
 
-    fn install_agent_loop(&self, product_config: &MukeiConfig) {
-        let rag_service = self
-            .rag_service
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
+    fn build_agent_loop(
+        &self,
+        product_config: &MukeiConfig,
+        rag_service: Option<Arc<dyn RuntimeRagService>>,
+    ) -> Arc<AgentLoop> {
         let context = ContextBudgetManager::new(
             Arc::new(RuntimeContextBackend {
                 features: Arc::clone(&self.features),
@@ -163,7 +162,25 @@ impl MukeiRuntime {
             Duration::from_secs(product_config.watchdog.max_wall_seconds),
         ));
         let backend: Arc<dyn crate::engine::InferenceBackend> = self.activation.clone();
-        let agent_loop = AgentLoop::new_with_backend(context, executor, watchdog, backend);
+        AgentLoop::new_with_backend(context, executor, watchdog, backend)
+    }
+
+    fn temporary_agent_loop(&self) -> Option<Arc<AgentLoop>> {
+        let config = self
+            .product_config
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()?;
+        Some(self.build_agent_loop(&config, None))
+    }
+
+    fn install_agent_loop(&self, product_config: &MukeiConfig) {
+        let rag_service = self
+            .rag_service
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let agent_loop = self.build_agent_loop(product_config, rag_service);
         *self
             .agent_loop
             .write()
