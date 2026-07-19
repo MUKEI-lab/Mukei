@@ -17,5 +17,6 @@ include!("application_runtime/documents_retry_settings.rs");
 include!("application_runtime/documents_replay.rs");
 include!("application_runtime/documents_snapshot.rs");
 include!("application_runtime/storage_import.rs");
+include!("application_runtime/projects.rs");
 include!("application_runtime/tests.rs");
 include!("application_runtime/storage_import_tests.rs");
