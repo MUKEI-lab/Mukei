@@ -208,6 +208,12 @@ impl MukeiRuntime {
             Ok(value) => value,
             Err(ack) => return ack,
         };
+        if self.ephemeral_chats.was_retired(&conversation, &branch) {
+            return CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::StaleScope,
+            );
+        }
         let Some(user_message) = self.last_user_chat_message(&conversation, &branch) else {
             return CommandAcknowledgementV2::rejected(
                 Some(&command.envelope),
