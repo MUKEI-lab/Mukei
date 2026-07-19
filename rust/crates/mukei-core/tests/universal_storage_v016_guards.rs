@@ -6,7 +6,8 @@ use rusqlite::{params, Connection};
 
 const V014: &str = include_str!("../../../migrations/V014__universal_storage_and_workspaces.sql");
 const V015: &str = include_str!("../../../migrations/V015__workspace_scope_isolation_guards.sql");
-const V016: &str = include_str!("../../../migrations/V016__storage_identity_and_recovery_hardening.sql");
+const V016: &str =
+    include_str!("../../../migrations/V016__storage_identity_and_recovery_hardening.sql");
 
 fn migrated_connection() -> Connection {
     let connection = Connection::open_in_memory().expect("open in-memory SQLite");

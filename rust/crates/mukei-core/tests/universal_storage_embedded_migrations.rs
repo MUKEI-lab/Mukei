@@ -40,9 +40,13 @@ fn embedded_migrations_include_universal_storage_and_forward_hardening() {
         .find(|(version, _, _)| *version == 15)
         .expect("V015 workspace isolation migration must be embedded");
     assert_eq!(isolation_guards.1, "V015__workspace_scope_isolation_guards");
-    assert!(isolation_guards.2.contains("storage_nodes_parent_same_scope_insert"));
+    assert!(isolation_guards
+        .2
+        .contains("storage_nodes_parent_same_scope_insert"));
     assert!(
-        !isolation_guards.2.contains("storage_node_identity_immutable"),
+        !isolation_guards
+            .2
+            .contains("storage_node_identity_immutable"),
         "V015 must remain frozen; post-V015 hardening belongs in V016"
     );
 
@@ -50,10 +54,7 @@ fn embedded_migrations_include_universal_storage_and_forward_hardening() {
         .iter()
         .find(|(version, _, _)| *version == 16)
         .expect("V016 storage hardening migration must be embedded");
-    assert_eq!(
-        hardening.1,
-        "V016__storage_identity_and_recovery_hardening"
-    );
+    assert_eq!(hardening.1, "V016__storage_identity_and_recovery_hardening");
     assert!(hardening.2.contains("storage_node_identity_immutable"));
     assert!(hardening
         .2

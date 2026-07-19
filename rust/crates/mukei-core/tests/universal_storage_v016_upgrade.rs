@@ -6,7 +6,8 @@
 use mukei_core::storage::{migrations::Migrator, DatabasePool, DbError, PooledConnectionExt};
 
 const V015: &str = include_str!("../../../migrations/V015__workspace_scope_isolation_guards.sql");
-const V016: &str = include_str!("../../../migrations/V016__storage_identity_and_recovery_hardening.sql");
+const V016: &str =
+    include_str!("../../../migrations/V016__storage_identity_and_recovery_hardening.sql");
 
 #[test]
 fn canonical_v015_is_frozen_and_hardening_lives_only_in_v016() {
@@ -49,11 +50,10 @@ async fn canonical_v015_database_applies_only_v016_on_next_boot() {
     assert_eq!(applied_through_v15.last().map(|record| record.id), Some(15));
 
     pool.with_conn(|connection| {
-        let max_version: i64 = connection.query_row(
-            "SELECT MAX(version) FROM migrations_applied",
-            [],
-            |row| row.get(0),
-        )?;
+        let max_version: i64 =
+            connection.query_row("SELECT MAX(version) FROM migrations_applied", [], |row| {
+                row.get(0)
+            })?;
         assert_eq!(max_version, 15);
 
         let hardening_trigger_count: i64 = connection.query_row(
@@ -80,11 +80,10 @@ async fn canonical_v015_database_applies_only_v016_on_next_boot() {
     );
 
     pool.with_conn(|connection| {
-        let max_version: i64 = connection.query_row(
-            "SELECT MAX(version) FROM migrations_applied",
-            [],
-            |row| row.get(0),
-        )?;
+        let max_version: i64 =
+            connection.query_row("SELECT MAX(version) FROM migrations_applied", [], |row| {
+                row.get(0)
+            })?;
         assert_eq!(max_version, 16);
 
         let hardening_trigger_count: i64 = connection.query_row(
@@ -95,7 +94,8 @@ async fn canonical_v015_database_applies_only_v016_on_next_boot() {
         )?;
         assert_eq!(hardening_trigger_count, 1);
 
-        let user_version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        let user_version: i64 =
+            connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         assert_eq!(user_version, 16);
         Ok::<_, DbError>(())
     })
