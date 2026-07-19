@@ -3,8 +3,9 @@ impl MukeiRuntime {
     ///
     /// IDs are minted by the runtime rather than supplied by the caller so an
     /// ephemeral session cannot intentionally reuse a durable conversation key.
-    /// This API is intentionally not exposed through Protocol/JNI yet.
-    pub fn begin_temporary_chat(&self) -> Option<(String, String)> {
+    /// This remains crate-private until RAG/session isolation and Protocol/JNI
+    /// exposure are implemented and tested.
+    pub(crate) fn begin_temporary_chat(&self) -> Option<(String, String)> {
         if self.closed.load(Ordering::Acquire) || self.state() != RuntimeState::Ready {
             return None;
         }
@@ -32,7 +33,7 @@ impl MukeiRuntime {
     }
 
     /// End and purge one Temporary Chat session.
-    pub fn end_temporary_chat(&self, conversation: &str, branch: &str) -> bool {
+    pub(crate) fn end_temporary_chat(&self, conversation: &str, branch: &str) -> bool {
         if Uuid::parse_str(conversation).is_err() || Uuid::parse_str(branch).is_err() {
             return false;
         }
@@ -50,7 +51,7 @@ impl MukeiRuntime {
         true
     }
 
-    pub fn temporary_chat_active(&self, conversation: &str, branch: &str) -> bool {
+    pub(crate) fn temporary_chat_active(&self, conversation: &str, branch: &str) -> bool {
         self.ephemeral_chats.is_registered(conversation, branch)
     }
 
