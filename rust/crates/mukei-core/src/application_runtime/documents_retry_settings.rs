@@ -208,14 +208,14 @@ impl MukeiRuntime {
             Ok(value) => value,
             Err(ack) => return ack,
         };
-        let Some(user_message) = self.features.last_user_message(&conversation, &branch) else {
+        let Some(user_message) = self.last_user_chat_message(&conversation, &branch) else {
             return CommandAcknowledgementV2::rejected(
                 Some(&command.envelope),
                 RejectionReason::StaleScope,
             );
         };
         if regenerate {
-            self.features.remove_last_assistant(&conversation, &branch);
+            self.remove_last_assistant_chat_message(&conversation, &branch);
         }
         self.start_chat_operation(
             command,
