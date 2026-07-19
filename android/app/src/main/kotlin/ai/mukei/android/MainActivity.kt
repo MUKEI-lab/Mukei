@@ -10,7 +10,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MukeiTheme {
-                MukeiProductShell(BackendRuntimeHost.state)
+                val backendState = BackendRuntimeHost.state
+                if (backendState is BackendRuntimeHost.State.Ready) {
+                    MukeiReadyProductShell(backendState)
+                } else {
+                    MukeiProductShell(backendState)
+                }
             }
         }
     }

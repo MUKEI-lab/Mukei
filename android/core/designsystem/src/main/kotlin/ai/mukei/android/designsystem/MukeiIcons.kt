@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 enum class MukeiIconKey {
     MENU,
     NEW_CHAT,
+    TEMPORARY_CHAT,
     MORE,
     HOME,
     STORAGE,
@@ -84,6 +85,25 @@ fun MukeiIcon(
                 drawLine(tint, p(0.74f, 0.26f), p(0.82f, 0.34f), strokeWidth, StrokeCap.Round)
                 drawLine(tint, p(0.18f, 0.82f), p(0.18f, 0.90f), strokeWidth, StrokeCap.Round)
                 drawLine(tint, p(0.18f, 0.90f), p(0.63f, 0.90f), strokeWidth, StrokeCap.Round)
+            }
+
+            MukeiIconKey.TEMPORARY_CHAT -> {
+                drawRoundRect(
+                    tint,
+                    topLeft = p(0.12f, 0.16f),
+                    size = Size(w * 0.66f, h * 0.52f),
+                    cornerRadius = CornerRadius(w * 0.14f, h * 0.14f),
+                    style = stroke,
+                )
+                drawLine(tint, p(0.28f, 0.68f), p(0.20f, 0.80f), strokeWidth, StrokeCap.Round)
+                drawCircle(
+                    tint,
+                    radius = w * 0.19f,
+                    center = p(0.70f, 0.68f),
+                    style = stroke,
+                )
+                drawLine(tint, p(0.70f, 0.68f), p(0.70f, 0.56f), strokeWidth, StrokeCap.Round)
+                drawLine(tint, p(0.70f, 0.68f), p(0.79f, 0.72f), strokeWidth, StrokeCap.Round)
             }
 
             MukeiIconKey.MORE -> {
