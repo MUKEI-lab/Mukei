@@ -265,7 +265,8 @@ mod tests {
         let (conversation, branch) = runtime.begin_temporary_chat().expect("temporary chat");
         let (operation_id, _token) = runtime
             .ephemeral_chats
-            .create_operation(&conversation, &branch, None);
+            .create_operation(&conversation, &branch, None)
+            .expect("temporary operation");
         runtime.events.emit(
             &format!("conversation:{conversation}"),
             "chat.token.delta",
