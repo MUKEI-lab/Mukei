@@ -7,6 +7,7 @@
 struct EphemeralChatState {
     conversations: RwLock<HashMap<(String, String), Vec<ChatMessage>>>,
     operations: Mutex<HashMap<String, EphemeralOperation>>,
+    retired: RwLock<HashMap<(String, String), ()>>,
 }
 
 struct EphemeralOperation {
@@ -18,6 +19,14 @@ struct EphemeralOperation {
 impl EphemeralChatState {
     fn begin(&self, conversation_id: &str, branch_id: &str) -> bool {
         let key = (conversation_id.to_owned(), branch_id.to_owned());
+        if self
+            .retired
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains_key(&key)
+        {
+            return false;
+        }
         let mut conversations = self
             .conversations
             .write()
@@ -31,6 +40,13 @@ impl EphemeralChatState {
 
     fn is_registered(&self, conversation_id: &str, branch_id: &str) -> bool {
         self.conversations
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains_key(&(conversation_id.to_owned(), branch_id.to_owned()))
+    }
+
+    fn was_retired(&self, conversation_id: &str, branch_id: &str) -> bool {
+        self.retired
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .contains_key(&(conversation_id.to_owned(), branch_id.to_owned()))
@@ -162,12 +178,20 @@ impl EphemeralChatState {
     }
 
     fn end(&self, conversation_id: &str, branch_id: &str) -> bool {
+        let key = (conversation_id.to_owned(), branch_id.to_owned());
         let removed = self
             .conversations
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(&(conversation_id.to_owned(), branch_id.to_owned()))
+            .remove(&key)
             .is_some();
+        if !removed {
+            return false;
+        }
+        self.retired
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(key, ());
 
         let mut operations = self
             .operations
@@ -185,7 +209,7 @@ impl EphemeralChatState {
                 operation.token.cancel();
             }
         }
-        removed
+        true
     }
 
     fn cancel_all_and_clear(&self) {
@@ -197,6 +221,10 @@ impl EphemeralChatState {
             operation.token.cancel();
         }
         self.conversations
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+        self.retired
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clear();
@@ -236,6 +264,8 @@ mod ephemeral_chat_state_tests {
         );
 
         assert!(state.end(&conversation, &branch));
+        assert!(state.was_retired(&conversation, &branch));
+        assert!(!state.begin(&conversation, &branch));
         assert!(state
             .history_if_registered(conversation_id, branch_id)
             .is_none());
