@@ -20,6 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
@@ -58,6 +59,7 @@ import ai.mukei.android.designsystem.MukeiNewChatIcon
 import ai.mukei.android.designsystem.MukeiRadius
 import ai.mukei.android.designsystem.MukeiSpacing
 import ai.mukei.android.designsystem.MukeiStroke
+import ai.mukei.android.designsystem.MukeiTemporaryChatIcon
 import java.time.LocalTime
 
 enum class TopLevelDestination(
@@ -205,7 +207,9 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var openDrawerRequest by remember { mutableIntStateOf(0) }
     var closeDrawerRequest by remember { mutableIntStateOf(0) }
-    var newChatGeneration by rememberSaveable { mutableIntStateOf(0) }
+    var confirmLeaveTemporary by rememberSaveable { mutableStateOf(false) }
+    val conversation = BackendRuntimeHost.conversationState
+    val temporaryAvailable = BackendRuntimeHost.temporaryChatAvailable
 
     LaunchedEffect(openDrawerRequest) {
         if (openDrawerRequest > 0) drawerState.open()
@@ -214,12 +218,52 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
         if (closeDrawerRequest > 0) drawerState.close()
     }
 
-    BackHandler(enabled = drawerState.isOpen || selected != TopLevelDestination.HOME) {
-        if (drawerState.isOpen) {
-            closeDrawerRequest += 1
-        } else {
-            selectedName = TopLevelDestination.HOME.name
+    fun returnHome() {
+        selectedName = TopLevelDestination.HOME.name
+    }
+
+    fun leaveTemporaryChat() {
+        confirmLeaveTemporary = false
+        BackendRuntimeHost.exitTemporaryChat { ended ->
+            if (ended) returnHome()
         }
+    }
+
+    BackHandler(
+        enabled = drawerState.isOpen ||
+            selected != TopLevelDestination.HOME ||
+            conversation.temporary,
+    ) {
+        when {
+            drawerState.isOpen -> closeDrawerRequest += 1
+            selected != TopLevelDestination.HOME -> returnHome()
+            conversation.temporary -> confirmLeaveTemporary = true
+        }
+    }
+
+    if (confirmLeaveTemporary) {
+        AlertDialog(
+            onDismissRequest = { confirmLeaveTemporary = false },
+            title = { Text("Leave temporary chat?") },
+            text = {
+                Text(
+                    "This conversation will be deleted from this session and won’t appear in Chats.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = ::leaveTemporaryChat) {
+                    Text(
+                        text = "Leave & delete",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmLeaveTemporary = false }) {
+                    Text("Keep chat")
+                }
+            },
+        )
     }
 
     ModalNavigationDrawer(
@@ -241,7 +285,7 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                         destination = TopLevelDestination.HOME,
                         selected = selected,
                         onSelect = {
-                            selectedName = TopLevelDestination.HOME.name
+                            returnHome()
                             closeDrawerRequest += 1
                         },
                     )
@@ -291,9 +335,14 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                         scrolledContainerColor = MaterialTheme.colorScheme.background,
                     ),
                     title = {
-                        if (selected.screenTitle.isNotEmpty()) {
+                        val title = when {
+                            selected.screenTitle.isNotEmpty() -> selected.screenTitle
+                            selected == TopLevelDestination.HOME && conversation.temporary -> "Temporary chat"
+                            else -> ""
+                        }
+                        if (title.isNotEmpty()) {
                             Text(
-                                text = selected.screenTitle,
+                                text = title,
                                 style = MaterialTheme.typography.titleLarge,
                             )
                         }
@@ -314,9 +363,13 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                     actions = {
                         IconButton(
                             onClick = {
-                                selectedName = TopLevelDestination.HOME.name
-                                newChatGeneration += 1
+                                if (conversation.temporary) {
+                                    confirmLeaveTemporary = true
+                                } else if (BackendRuntimeHost.startNewChat()) {
+                                    returnHome()
+                                }
                             },
+                            enabled = !conversation.transitionInProgress,
                             modifier = Modifier.semantics {
                                 contentDescription = "New chat"
                             },
@@ -324,15 +377,31 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                             MukeiNewChatIcon(contentDescription = null)
                         }
                         IconButton(
-                            onClick = {},
-                            enabled = false,
+                            onClick = {
+                                if (conversation.temporary) {
+                                    confirmLeaveTemporary = true
+                                } else {
+                                    BackendRuntimeHost.startTemporaryChat { started ->
+                                        if (started) returnHome()
+                                    }
+                                }
+                            },
+                            enabled = temporaryAvailable && !conversation.transitionInProgress,
                             modifier = Modifier.semantics {
-                                contentDescription = "Options unavailable in this build"
+                                contentDescription = if (conversation.temporary) {
+                                    "Leave temporary chat"
+                                } else {
+                                    "Start temporary chat"
+                                }
                             },
                         ) {
-                            MukeiIcon(
-                                icon = MukeiIconKey.MORE,
+                            MukeiTemporaryChatIcon(
                                 contentDescription = null,
+                                tint = if (conversation.temporary) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                             )
                         }
                     },
@@ -345,11 +414,22 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                     .padding(innerPadding),
             ) {
                 when (selected) {
-                    TopLevelDestination.HOME -> HomeSurface(
-                        readiness = state.readiness,
-                        resetGeneration = newChatGeneration,
-                        openModels = { selectedName = TopLevelDestination.MODELS.name },
-                    )
+                    TopLevelDestination.HOME -> {
+                        if (conversation.messages.isEmpty()) {
+                            HomeSurface(
+                                readiness = state.readiness,
+                                conversation = conversation,
+                                openModels = { selectedName = TopLevelDestination.MODELS.name },
+                            )
+                        } else {
+                            ConversationSurface(
+                                readiness = state.readiness,
+                                conversation = conversation,
+                                openModels = { selectedName = TopLevelDestination.MODELS.name },
+                            )
+                        }
+                    }
+
                     TopLevelDestination.MODELS -> ModelsSurface(state.readiness)
                     else -> ReservedDestinationSurface(selected)
                 }
@@ -392,20 +472,15 @@ private fun DrawerDestinationItem(
 @Composable
 private fun HomeSurface(
     readiness: AppReadiness,
-    resetGeneration: Int,
+    conversation: BackendRuntimeHost.ConversationState,
     openModels: () -> Unit,
 ) {
-    var draft by rememberSaveable { mutableStateOf("") }
-    var selectedCapabilityId by rememberSaveable { mutableStateOf<String?>(null) }
+    var draft by rememberSaveable(conversation.conversationId) { mutableStateOf("") }
+    var selectedCapabilityId by rememberSaveable(conversation.conversationId) {
+        mutableStateOf<String?>(null)
+    }
     val selectedCapability = HomeCapabilities.firstOrNull { it.id == selectedCapabilityId }
     val greeting = remember { homeGreeting(LocalTime.now().hour) }
-
-    LaunchedEffect(resetGeneration) {
-        if (resetGeneration > 0) {
-            draft = ""
-            selectedCapabilityId = null
-        }
-    }
 
     Column(
         modifier = Modifier
@@ -423,7 +498,7 @@ private fun HomeSurface(
         ) {
             Spacer(Modifier.height(MukeiSpacing.LargeSection))
             Text(
-                text = greeting,
+                text = if (conversation.temporary) "Private for this session." else greeting,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -442,38 +517,59 @@ private fun HomeSurface(
                 .fillMaxWidth()
                 .widthIn(max = MukeiLayout.ReadableContentMaxWidth),
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(MukeiSpacing.ExtraSmall),
-            ) {
-                HomeCapabilities.forEach { capability ->
-                    MukeiCapabilityChip(
-                        label = capability.label,
-                        selected = selectedCapabilityId == capability.id,
-                        onClick = {
-                            selectedCapabilityId = if (selectedCapabilityId == capability.id) {
-                                null
-                            } else {
-                                capability.id
-                            }
-                        },
-                    )
+            if (conversation.temporary) {
+                TemporaryChatNotice()
+                Spacer(Modifier.height(MukeiSpacing.Medium))
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(MukeiSpacing.ExtraSmall),
+                ) {
+                    HomeCapabilities.forEach { capability ->
+                        MukeiCapabilityChip(
+                            label = capability.label,
+                            selected = selectedCapabilityId == capability.id,
+                            onClick = {
+                                selectedCapabilityId = if (selectedCapabilityId == capability.id) {
+                                    null
+                                } else {
+                                    capability.id
+                                }
+                            },
+                        )
+                    }
                 }
+                Spacer(Modifier.height(MukeiSpacing.Medium))
             }
-
-            Spacer(Modifier.height(MukeiSpacing.Medium))
 
             MukeiComposer(
                 draft = draft,
                 onDraftChange = { draft = it },
-                placeholder = selectedCapability?.placeholder ?: "Tell Mukei what you want to do…",
+                placeholder = if (conversation.temporary) {
+                    "Ask something for this temporary session…"
+                } else {
+                    selectedCapability?.placeholder ?: "Tell Mukei what you want to do…"
+                },
+                sendEnabled = readiness.inferenceReady && !conversation.busy,
+                temporary = conversation.temporary,
+                onSend = {
+                    val value = draft
+                    if (BackendRuntimeHost.sendMessage(value)) {
+                        draft = ""
+                    }
+                },
             )
 
             if (readiness.inference.status == ReadinessStatus.ACTION_REQUIRED) {
                 Spacer(Modifier.height(MukeiSpacing.Small))
                 ModelSetupNotice(openModels = openModels)
+            }
+
+            conversation.lastErrorCode?.let { code ->
+                Spacer(Modifier.height(MukeiSpacing.Small))
+                InlineChatError(code)
             }
 
             Spacer(Modifier.height(MukeiSpacing.ExtraSmall))
@@ -482,10 +578,168 @@ private fun HomeSurface(
 }
 
 @Composable
+private fun ConversationSurface(
+    readiness: AppReadiness,
+    conversation: BackendRuntimeHost.ConversationState,
+    openModels: () -> Unit,
+) {
+    var draft by rememberSaveable(conversation.conversationId) { mutableStateOf("") }
+    val scrollState = rememberScrollState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = MukeiLayout.LargePhoneTextPadding),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = MukeiLayout.ReadableContentMaxWidth),
+        ) {
+            if (conversation.temporary) {
+                Spacer(Modifier.height(MukeiSpacing.ExtraSmall))
+                TemporaryChatNotice()
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .widthIn(max = MukeiLayout.ReadableContentMaxWidth)
+                .verticalScroll(scrollState),
+            verticalArrangement = Arrangement.spacedBy(MukeiSpacing.Medium),
+        ) {
+            Spacer(Modifier.height(MukeiSpacing.Large))
+            conversation.messages.forEach { message ->
+                ConversationMessageBubble(message)
+            }
+            if (conversation.activeOperationId != null) {
+                Text(
+                    text = "Thinking…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            conversation.lastErrorCode?.let { code -> InlineChatError(code) }
+            Spacer(Modifier.height(MukeiSpacing.Small))
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = MukeiLayout.ReadableContentMaxWidth),
+        ) {
+            MukeiComposer(
+                draft = draft,
+                onDraftChange = { draft = it },
+                placeholder = if (conversation.temporary) {
+                    "Continue this temporary chat…"
+                } else {
+                    "Message Mukei…"
+                },
+                sendEnabled = readiness.inferenceReady && !conversation.busy,
+                temporary = conversation.temporary,
+                onSend = {
+                    val value = draft
+                    if (BackendRuntimeHost.sendMessage(value)) {
+                        draft = ""
+                    }
+                },
+            )
+            if (readiness.inference.status == ReadinessStatus.ACTION_REQUIRED) {
+                Spacer(Modifier.height(MukeiSpacing.Small))
+                ModelSetupNotice(openModels = openModels)
+            }
+            Spacer(Modifier.height(MukeiSpacing.ExtraSmall))
+        }
+    }
+}
+
+@Composable
+private fun ConversationMessageBubble(message: BackendRuntimeHost.ChatMessage) {
+    val user = message.role == BackendRuntimeHost.ChatRole.USER
+    Box(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = if (user) Alignment.CenterEnd else Alignment.CenterStart,
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.88f),
+            shape = MaterialTheme.shapes.large,
+            color = if (user) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surface
+            },
+            border = if (user) null else BorderStroke(
+                width = MukeiStroke.Thin,
+                color = MaterialTheme.colorScheme.outline,
+            ),
+        ) {
+            Text(
+                text = message.text,
+                modifier = Modifier.padding(MukeiSpacing.Medium),
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (user) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun TemporaryChatNotice() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Row(
+            modifier = Modifier.padding(
+                horizontal = MukeiSpacing.Medium,
+                vertical = MukeiSpacing.Small,
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(MukeiSpacing.Small),
+        ) {
+            MukeiTemporaryChatIcon(contentDescription = null)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Temporary chat",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    text = "Not saved. RAG, files and web tools are off.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun InlineChatError(code: String) {
+    Text(
+        text = "Couldn’t complete the last action · $code",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.error,
+    )
+}
+
+@Composable
 private fun MukeiComposer(
     draft: String,
     onDraftChange: (String) -> Unit,
     placeholder: String,
+    sendEnabled: Boolean,
+    temporary: Boolean,
+    onSend: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -531,7 +785,11 @@ private fun MukeiComposer(
                     onClick = {},
                     enabled = false,
                     modifier = Modifier.semantics {
-                        contentDescription = "Attachments unavailable in this build"
+                        contentDescription = if (temporary) {
+                            "Attachments unavailable in Temporary Chat"
+                        } else {
+                            "Attachments unavailable in this build"
+                        }
                     },
                 ) {
                     MukeiIcon(
@@ -542,13 +800,21 @@ private fun MukeiComposer(
                 Spacer(Modifier.weight(1f))
                 Surface(
                     shape = MaterialTheme.shapes.extraLarge,
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    color = if (sendEnabled && draft.isNotBlank()) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
                 ) {
                     IconButton(
-                        onClick = {},
-                        enabled = false,
+                        onClick = onSend,
+                        enabled = sendEnabled && draft.isNotBlank(),
                         modifier = Modifier.semantics {
-                            contentDescription = "Send unavailable until conversation runtime is connected"
+                            contentDescription = if (sendEnabled) {
+                                "Send message"
+                            } else {
+                                "Send unavailable"
+                            }
                         },
                     ) {
                         MukeiIcon(
