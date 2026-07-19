@@ -3,6 +3,11 @@ impl Drop for MukeiRuntime {
         self.closed.store(true, Ordering::Release);
         self.cancellation.cancel();
         self.features.cancel_all();
+        self.ephemeral_chats.cancel_all_and_clear();
+        self.replay
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
     }
 }
 
@@ -85,19 +90,7 @@ mod tests {
         assert_eq!(runtime.state(), RuntimeState::Ready);
     }
 
-    #[test]
-    fn projection_writer_preserves_fifo_order() {
-        let runtime = runtime();
-        let store = Arc::new(DelayedProjectionStore::new());
-        runtime.features.attach_projection_store(store.clone());
-
-        runtime
-            .features
-            .persist_value("operations", json!({"revision": 1}));
-        runtime
-            .features
-            .persist_value("operations", json!({"revision": 2}));
-
+    fn flush_feature_writes(runtime: &MukeiRuntime) {
         let (barrier_sender, barrier_receiver) = tokio::sync::oneshot::channel();
         assert!(runtime
             .features
@@ -111,6 +104,22 @@ mod tests {
             })
             .expect("projection barrier timeout")
             .expect("projection barrier");
+    }
+
+    #[test]
+    fn projection_writer_preserves_fifo_order() {
+        let runtime = runtime();
+        let store = Arc::new(DelayedProjectionStore::new());
+        runtime.features.attach_projection_store(store.clone());
+
+        runtime
+            .features
+            .persist_value("operations", json!({"revision": 1}));
+        runtime
+            .features
+            .persist_value("operations", json!({"revision": 2}));
+
+        flush_feature_writes(&runtime);
 
         let writes = store
             .writes
@@ -149,6 +158,77 @@ mod tests {
     }
 
     #[test]
+    fn temporary_chat_content_never_enters_durable_conversation_projection() {
+        const SECRET: &str = "temporary-secret-must-not-persist";
+        let runtime = runtime();
+        initialize(&runtime);
+        let store = Arc::new(DelayedProjectionStore::new());
+        runtime.features.attach_projection_store(store.clone());
+
+        let (conversation, branch) = runtime.begin_temporary_chat().expect("temporary chat");
+        let conversation_id = ConversationId(Uuid::parse_str(&conversation).expect("conversation"));
+        let branch_id = BranchId(Uuid::parse_str(&branch).expect("branch"));
+        assert!(runtime.append_chat_message(
+            &conversation,
+            &branch,
+            ChatMessage::user_with_id(MessageId::new(), branch_id, SECRET),
+        ));
+        assert_eq!(runtime.chat_history(conversation_id, branch_id).len(), 1);
+
+        // Force a durable conversation projection write. The temporary message must
+        // still be absent because it lives in a structurally separate RAM store.
+        runtime.features.persist_conversations();
+        flush_feature_writes(&runtime);
+        let serialized = serde_json::to_string(
+            &*store
+                .writes
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        )
+        .expect("serialize writes");
+        assert!(!serialized.contains(SECRET));
+
+        assert!(runtime.end_temporary_chat(&conversation, &branch));
+        assert!(!runtime.temporary_chat_active(&conversation, &branch));
+        assert!(runtime.chat_history(conversation_id, branch_id).is_empty());
+    }
+
+    #[test]
+    fn ending_temporary_chat_purges_replay_payload_for_that_conversation() {
+        const SECRET: &str = "temporary-replay-secret";
+        let runtime = runtime();
+        initialize(&runtime);
+        let (conversation, branch) = runtime.begin_temporary_chat().expect("temporary chat");
+
+        let mut envelope = command("chat.send_message", json!({"text": SECRET}));
+        envelope.idempotency_key = Some("temporary-replay-one".into());
+        envelope.scope = Some(CommandScope {
+            conversation_id: Some(conversation.clone()),
+            branch_id: Some(branch.clone()),
+            ..CommandScope::default()
+        });
+        let acknowledgement = runtime.submit(envelope);
+        assert_eq!(
+            acknowledgement.rejection_reason,
+            Some(RejectionReason::BackendUnavailable)
+        );
+        assert!(runtime
+            .replay
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .values()
+            .any(|record| String::from_utf8_lossy(&record.fingerprint).contains(SECRET)));
+
+        assert!(runtime.end_temporary_chat(&conversation, &branch));
+        assert!(!runtime
+            .replay
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .values()
+            .any(|record| String::from_utf8_lossy(&record.fingerprint).contains(SECRET)));
+    }
+
+    #[test]
     fn document_grant_queues_android_platform_request() {
         let runtime = runtime();
         initialize(&runtime);
@@ -170,9 +250,13 @@ mod tests {
     #[test]
     fn shutdown_is_idempotent_and_application_snapshot_remains_available() {
         let runtime = runtime();
+        initialize(&runtime);
+        let (conversation, branch) = runtime.begin_temporary_chat().expect("temporary chat");
+        assert!(runtime.temporary_chat_active(&conversation, &branch));
         runtime.shutdown();
         runtime.shutdown();
         assert_eq!(runtime.state(), RuntimeState::Stopped);
+        assert!(!runtime.temporary_chat_active(&conversation, &branch));
         assert!(runtime
             .snapshot(RuntimeSnapshotDomain::Application)
             .is_ok());
