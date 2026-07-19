@@ -7,6 +7,7 @@
 struct EphemeralChatState {
     conversations: RwLock<HashMap<(String, String), Vec<ChatMessage>>>,
     operations: Mutex<HashMap<String, EphemeralOperation>>,
+    operation_ids: RwLock<HashMap<(String, String), HashSet<String>>>,
     retired: RwLock<HashMap<(String, String), ()>>,
 }
 
@@ -34,7 +35,11 @@ impl EphemeralChatState {
         if conversations.contains_key(&key) {
             return false;
         }
-        conversations.insert(key, Vec::new());
+        conversations.insert(key.clone(), Vec::new());
+        self.operation_ids
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(key, HashSet::new());
         true
     }
 
@@ -154,6 +159,14 @@ impl EphemeralChatState {
                     token: token.clone(),
                 },
             );
+        if let Some(ids) = self
+            .operation_ids
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get_mut(&(conversation_id.to_owned(), branch_id.to_owned()))
+        {
+            ids.insert(operation_id.clone());
+        }
         (operation_id, token)
     }
 
@@ -162,6 +175,8 @@ impl EphemeralChatState {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(operation_id);
+        // Intentionally keep operation_id in the per-session history until end(),
+        // so queued events from already-finished operations can still be scrubbed.
     }
 
     fn cancel_operation(&self, operation_id: &str) -> bool {
@@ -177,7 +192,7 @@ impl EphemeralChatState {
         true
     }
 
-    /// End a session and return operation IDs that were cancelled with it.
+    /// End a session and return every operation ID ever associated with it.
     fn end(&self, conversation_id: &str, branch_id: &str) -> Option<Vec<String>> {
         let key = (conversation_id.to_owned(), branch_id.to_owned());
         let removed = self
@@ -192,24 +207,33 @@ impl EphemeralChatState {
         self.retired
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(key, ());
+            .insert(key.clone(), ());
 
+        let mut all_operation_ids = self
+            .operation_ids
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&key)
+            .unwrap_or_default();
         let mut operations = self
             .operations
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let operation_ids = operations
+        let active_operation_ids = operations
             .iter()
             .filter(|(_, operation)| {
                 operation.conversation_id == conversation_id && operation.branch_id == branch_id
             })
             .map(|(operation_id, _)| operation_id.clone())
             .collect::<Vec<_>>();
-        for operation_id in &operation_ids {
-            if let Some(operation) = operations.remove(operation_id) {
+        for operation_id in active_operation_ids {
+            all_operation_ids.insert(operation_id.clone());
+            if let Some(operation) = operations.remove(&operation_id) {
                 operation.token.cancel();
             }
         }
+        let mut operation_ids = all_operation_ids.into_iter().collect::<Vec<_>>();
+        operation_ids.sort();
         Some(operation_ids)
     }
 
@@ -222,6 +246,10 @@ impl EphemeralChatState {
             operation.token.cancel();
         }
         self.conversations
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+        self.operation_ids
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clear();
@@ -294,5 +322,19 @@ mod ephemeral_chat_state_tests {
         assert!(!state.cancel_operation(&operation_a));
         assert!(state.cancel_operation(&operation_b));
         assert!(token_b.is_cancelled());
+    }
+
+    #[test]
+    fn finished_operation_id_is_retained_until_session_end() {
+        let state = EphemeralChatState::default();
+        let (conversation, branch, _, _) = ids();
+        assert!(state.begin(&conversation, &branch));
+        let (operation_id, _token) = state.create_operation(&conversation, &branch, None);
+        state.finish_operation(&operation_id);
+
+        let ended_operations = state
+            .end(&conversation, &branch)
+            .expect("temporary session");
+        assert_eq!(ended_operations, vec![operation_id]);
     }
 }
