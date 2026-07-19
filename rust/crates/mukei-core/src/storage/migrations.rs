@@ -128,6 +128,11 @@ const EMBEDDED_MIGRATIONS: &[(u32, &str, &str)] = &[
         "V015__workspace_scope_isolation_guards",
         include_str!("../../../../migrations/V015__workspace_scope_isolation_guards.sql"),
     ),
+    (
+        16,
+        "V016__storage_identity_and_recovery_hardening",
+        include_str!("../../../../migrations/V016__storage_identity_and_recovery_hardening.sql"),
+    ),
 ];
 
 const MIGRATION_LOCK_STALE_AFTER_SECS: i64 = 15 * 60;
@@ -671,7 +676,7 @@ mod tests {
     fn embedded_migrations_are_available_without_source_tree_scan() {
         let list = Migrator::embedded().list_available().unwrap();
         let ids: Vec<_> = list.iter().map(|(id, _, _)| *id).collect();
-        assert_eq!(ids, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+        assert_eq!(ids, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
         assert!(list.iter().any(|(_, name, body)| {
             name == "V007__message_status" && body.contains("ALTER TABLE messages")
         }));
