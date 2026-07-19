@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
   statuses: write
 
 env:
@@ -38,44 +38,6 @@ jobs:
               description: 'Storage, Android OCR, Clippy, and migrations running',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
-
-  source-hygiene:
-    name: source hygiene self-fix
-    needs: publish-pending
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: temp/universal-storage-workspace-v0.1
-          fetch-depth: 0
-      - name: Elide needless indexing transaction lifetime
-        shell: python
-        run: |
-          from pathlib import Path
-
-          path = Path("rust/crates/mukei-core/src/rag/indexer.rs")
-          text = path.read_text()
-          old = "impl<'a> Drop for IndexingTransaction<'a> {"
-          new = "impl Drop for IndexingTransaction<'_> {"
-          if old in text:
-              text = text.replace(old, new, 1)
-              path.write_text(text)
-          elif new not in text:
-              raise SystemExit("indexing transaction Drop anchor not found")
-      - name: Commit source hygiene fix when needed
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git diff --quiet; then
-            echo "Source hygiene fix already present."
-            exit 0
-          fi
-          test "$(git diff --name-only)" = "rust/crates/mukei-core/src/rag/indexer.rs"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add rust/crates/mukei-core/src/rag/indexer.rs
-          git commit -m "fix(rag): elide needless indexing transaction lifetime"
-          git push origin HEAD:temp/universal-storage-workspace-v0.1
 
   storage-core:
     name: storage core checks
