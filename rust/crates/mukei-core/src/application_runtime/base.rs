@@ -28,6 +28,7 @@ impl MukeiRuntime {
             events,
             platform: Arc::new(PlatformRequestBroker::default()),
             features: Arc::new(FeatureState::new(runtime_handle)),
+            ephemeral_chats: Arc::new(EphemeralChatState::default()),
             settings: RwLock::new(HashMap::new()),
             replay: Mutex::new(HashMap::new()),
             product_config: RwLock::new(None),

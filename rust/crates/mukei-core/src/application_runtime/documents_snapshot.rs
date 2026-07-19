@@ -64,6 +64,11 @@ impl MukeiRuntime {
         );
         self.cancellation.cancel();
         self.features.cancel_all();
+        self.ephemeral_chats.cancel_all_and_clear();
+        self.replay
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
         self.activation.deactivate();
         if let Err(error) = self.async_runtime.block_on(self.features.flush_projections()) {
             tracing::error!(
