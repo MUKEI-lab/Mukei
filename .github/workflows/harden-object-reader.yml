@@ -1,4 +1,4 @@
-name: Harden encrypted object reader
+name: Temporary Rust blocker remediation
 
 on:
   push:
@@ -12,11 +12,11 @@ permissions:
   contents: write
 
 concurrency:
-  group: harden-object-reader
+  group: temp-rust-blocker-remediation
   cancel-in-progress: false
 
 jobs:
-  patch-object-store:
+  patch-source-blockers:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,69 +29,56 @@ jobs:
           test "$(git branch --show-current)" = "temp/universal-storage-workspace-v0.1"
           test "$(git rev-parse --abbrev-ref HEAD)" != "Kotlin"
 
-      - name: Reject oversized objects before filesystem publication
+      - name: Patch native inference parser and migration feature gate
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path("rust/crates/mukei-core/src/storage/object_store.rs")
-          text = path.read_text()
+          native = Path("rust/crates/mukei-android-jni/src/native_inference.rs")
+          text = native.read_text()
+          before = '''pub(crate) fn implementation_available() -> bool {
+              unsafe { mukei_llama_abi_version() } == EXPECTED_ABI_VERSION
+                  && native_build_id().as_deref() == Some(EXPECTED_BUILD_ID)
+          }
+          '''
+          after = '''pub(crate) fn implementation_available() -> bool {
+              let abi_version = unsafe { mukei_llama_abi_version() };
+              abi_version == EXPECTED_ABI_VERSION
+                  && native_build_id().as_deref() == Some(EXPECTED_BUILD_ID)
+          }
+          '''
+          if before in text:
+              text = text.replace(before, after, 1)
+              native.write_text(text)
+          elif "let abi_version = unsafe { mukei_llama_abi_version() };" not in text:
+              raise SystemExit("native inference ABI anchor not found")
 
-          early = (
-              "        let parent = final_path\n"
-              "            .parent()\n"
-              "            .ok_or(ObjectStoreError::MalformedObject)?;\n"
-              "        fs::create_dir_all(parent)?;\n"
-              "        sync_directory(parent)?;\n\n"
-              "        let version = self.cipher.version();\n"
-          )
-          deferred = (
-              "        let parent = final_path\n"
-              "            .parent()\n"
-              "            .ok_or(ObjectStoreError::MalformedObject)?;\n\n"
-              "        let version = self.cipher.version();\n"
-          )
-          if early in text:
-              text = text.replace(early, deferred, 1)
-          elif deferred not in text:
-              raise SystemExit("object-store parent publication anchor not found")
-
-          guard = (
-              "        if ciphertext_size > MAX_ENCODED_OBJECT_BYTES {\n"
-              "            return Err(ObjectStoreError::ObjectTooLarge);\n"
-              "        }\n"
-              "        let encoded = encode_object(\n"
-          )
-          guarded_publication = (
-              "        if ciphertext_size > MAX_ENCODED_OBJECT_BYTES {\n"
-              "            return Err(ObjectStoreError::ObjectTooLarge);\n"
-              "        }\n"
-              "        fs::create_dir_all(parent)?;\n"
-              "        sync_directory(parent)?;\n"
-              "        let encoded = encode_object(\n"
-          )
-          if guard in text:
-              text = text.replace(guard, guarded_publication, 1)
-          elif guarded_publication not in text:
-              raise SystemExit("object-store size guard anchor not found")
-
-          path.write_text(text)
+          migration_test = Path("rust/crates/mukei-core/tests/universal_storage_embedded_migrations.rs")
+          text = migration_test.read_text()
+          gate = '#![cfg(feature = "rusqlite")]\n\n'
+          if not text.startswith(gate):
+              migration_test.write_text(gate + text)
           PY
 
       - name: Verify patch scope
         run: |
           git diff --check
-          changed="$(git diff --name-only)"
-          test "$changed" = "rust/crates/mukei-core/src/storage/object_store.rs"
+          changed="$(git diff --name-only | sort)"
+          expected="$(printf '%s\n' \
+            rust/crates/mukei-android-jni/src/native_inference.rs \
+            rust/crates/mukei-core/tests/universal_storage_embedded_migrations.rs | sort)"
+          test "$changed" = "$expected"
 
-      - name: Commit source fix
+      - name: Commit source fixes
         run: |
           if git diff --quiet; then
-            echo "Object-store publication ordering already fixed."
+            echo "Rust source blockers already fixed."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add rust/crates/mukei-core/src/storage/object_store.rs
-          git commit -m "fix(storage): reject oversized objects before publication"
+          git add \
+            rust/crates/mukei-android-jni/src/native_inference.rs \
+            rust/crates/mukei-core/tests/universal_storage_embedded_migrations.rs
+          git commit -m "fix(rust): clear workspace parser and feature-gate blockers"
           git push origin HEAD:temp/universal-storage-workspace-v0.1
