@@ -2,13 +2,27 @@ name: full-rust-workspace
 
 on:
   push:
-    branches: [ main, "agent/**", "checkpoint/**" ]
+    branches:
+      - main
+      - Kotlin
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - "rust/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/full-rust-workspace.yml"
   pull_request:
-    branches: [ main ]
+    branches: [ main, Kotlin ]
+    paths:
+      - "rust/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/full-rust-workspace.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: release-gate-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: full-rust-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -17,120 +31,73 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  workspace-check:
-    name: cargo check (workspace, non-Qt)
+  workspace-quality:
+    name: workspace check, test, clippy, fmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust 1.86 with quality components
+        uses: dtolnay/rust-toolchain@1.86.0
+        with:
+          components: rustfmt,clippy
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            rust/target
-          key: ${{ runner.os }}-cargo-workspace-check-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-workspace-check-
-      - name: cargo check --workspace --exclude mukei-bridge
+          workspaces: rust -> target
+      - name: Check formatting
         working-directory: rust
-        run: cargo check --workspace --exclude mukei-bridge
-
-  workspace-test:
-    name: cargo test (workspace, non-Qt)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            rust/target
-          key: ${{ runner.os }}-cargo-workspace-test-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-workspace-test-
-      - name: cargo test --workspace --exclude mukei-bridge
+        run: cargo fmt --all -- --check
+      - name: Check workspace
         working-directory: rust
-        run: cargo test --workspace --exclude mukei-bridge
-
-  workspace-clippy:
-    name: cargo clippy (workspace, non-Qt)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            rust/target
-          key: ${{ runner.os }}-cargo-workspace-clippy-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-workspace-clippy-
-      - name: cargo clippy --workspace --all-targets --exclude mukei-bridge
+        run: cargo check --workspace --all-targets
+      - name: Test workspace
         working-directory: rust
-        run: cargo clippy --workspace --all-targets --exclude mukei-bridge -- -D warnings
+        run: cargo test --workspace --all-targets
+      - name: Clippy workspace
+        working-directory: rust
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-  core-feature-checks:
-    name: core feature check (${{ matrix.features }})
+  core-feature-matrix:
+    name: core features (${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - features: tokio,rusqlite
-            cache_key: tokio-rusqlite
-          - features: tokio,network
-            cache_key: tokio-network
+          - name: storage
+            features: std,tokio,rusqlite
+          - name: network
+            features: std,tokio,network
+          - name: rag
+            features: std,tokio,rusqlite,candle,usearch_hnsw
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - uses: dtolnay/rust-toolchain@1.86.0
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            rust/target
-          key: ${{ runner.os }}-cargo-core-features-${{ matrix.cache_key }}-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-core-features-${{ matrix.cache_key }}-
-      - name: cargo check -p mukei-core --features ${{ matrix.features }}
+          workspaces: rust -> target
+      - name: Check feature tuple
         working-directory: rust
-        run: cargo check -p mukei-core --no-default-features --features ${{ matrix.features }}
+        run: cargo check -p mukei-core --no-default-features --features "${{ matrix.features }}" --all-targets
 
-  ffi-shim:
-    name: ffi shim proof
+  android-jni-contracts:
+    name: Android JNI secure and RAG contracts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - uses: dtolnay/rust-toolchain@1.86.0
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            rust/target
-          key: ${{ runner.os }}-cargo-ffi-shim-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-ffi-shim-
-      - name: cargo check -p mukei-ffi-shim
+          workspaces: rust -> target
+      - name: Test secure runtime boundary
         working-directory: rust
-        run: cargo check -p mukei-ffi-shim
-      - name: cargo test -p mukei-ffi-shim
+        run: >-
+          cargo test -p mukei-android-jni --lib
+          --no-default-features
+          --features secure_runtime,runtime_hardening
+      - name: Check production RAG composition
         working-directory: rust
-        run: cargo test -p mukei-ffi-shim
+        run: >-
+          cargo check -p mukei-android-jni
+          --no-default-features
+          --features secure_runtime,rag_runtime,runtime_hardening
