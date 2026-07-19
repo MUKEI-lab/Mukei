@@ -98,7 +98,8 @@ llama-cpp-rs = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3.10"
-tokio    = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+# `wiremock`'s mock server uses Tokio TCP listeners; keep networking test-only.
+tokio    = { workspace = true, features = ["macros", "rt-multi-thread", "time", "net"] }
 # Architect review GH #18: property-based testing for the sentinel
 # escape (`tools::sentinel::escape_untrusted`) and the fingerprint
 # canonicaliser. `proptest` is also pulled in for the migration-order
