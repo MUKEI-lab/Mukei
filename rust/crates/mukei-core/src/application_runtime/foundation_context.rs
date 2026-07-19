@@ -1,5 +1,6 @@
 struct RuntimeContextBackend {
     features: Arc<FeatureState>,
+    ephemeral_chats: Arc<EphemeralChatState>,
     rag_service: Option<Arc<dyn RuntimeRagService>>,
 }
 
@@ -12,9 +13,11 @@ impl ContextBackend for RuntimeContextBackend {
         active_history: &[ChatMessage],
     ) -> Result<Vec<ChatMessage>, MukeiError> {
         let active_ids = active_history.iter().map(|value| value.id).collect::<Vec<_>>();
-        Ok(self
-            .features
-            .history(conversation, branch)
+        let history = self
+            .ephemeral_chats
+            .history_if_registered(conversation, branch)
+            .unwrap_or_else(|| self.features.history(conversation, branch));
+        Ok(history
             .into_iter()
             .filter(|message| !active_ids.contains(&message.id))
             .collect())
