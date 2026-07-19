@@ -76,7 +76,7 @@ impl FeatureState {
         source_branch: &str,
         through_message_id: MessageId,
         replacement: Option<&str>,
-    ) -> Result<(String, BranchId, ChatMessage), RejectionReason> {
+    ) -> Result<(String, ChatMessage), RejectionReason> {
         let new_branch_id = BranchId::new();
         let new_branch = new_branch_id.0.to_string();
         let cloned = {
@@ -101,7 +101,7 @@ impl FeatureState {
             .last()
             .cloned()
             .ok_or(RejectionReason::StaleScope)?;
-        Ok((new_branch, new_branch_id, target))
+        Ok((new_branch, target))
     }
 }
 
@@ -118,6 +118,7 @@ impl MukeiRuntime {
             )
         })?;
         scope.branch_id = Some(branch_id.to_owned());
+        scope.turn_id = None;
         Ok(forked)
     }
 
@@ -140,21 +141,17 @@ impl MukeiRuntime {
         Ok(())
     }
 
-    fn edit_chat_message(&self, command: &ValidatedCommand) -> CommandAcknowledgementV2 {
-        if let Err(acknowledgement) = self.ensure_ready(command) {
-            return acknowledgement;
-        }
-        let ValidatedCommandPayload::EditMessage(payload) = &command.payload else {
-            return CommandAcknowledgementV2::rejected(
-                Some(&command.envelope),
-                RejectionReason::InvalidPayload,
-            );
-        };
+    fn edit_chat_message(
+        &self,
+        command: &ValidatedCommand,
+        message_id: &str,
+        replacement: &str,
+    ) -> CommandAcknowledgementV2 {
         let (conversation, source_branch, _, _) = match Self::parse_chat_scope(command) {
             Ok(value) => value,
             Err(acknowledgement) => return acknowledgement,
         };
-        let message_id = match Uuid::parse_str(&payload.message_id) {
+        let message_id = match Uuid::parse_str(message_id) {
             Ok(value) => MessageId(value),
             Err(_) => {
                 return CommandAcknowledgementV2::rejected(
@@ -188,11 +185,11 @@ impl MukeiRuntime {
             );
         }
 
-        let (new_branch, _, edited_message) = match self.features.fork_branch_through(
+        let (new_branch, edited_message) = match self.features.fork_branch_through(
             &conversation,
             &source_branch,
             message_id,
-            Some(payload.text.trim()),
+            Some(replacement.trim()),
         ) {
             Ok(value) => value,
             Err(reason) => {
@@ -203,6 +200,7 @@ impl MukeiRuntime {
             Ok(value) => value,
             Err(acknowledgement) => return acknowledgement,
         };
+        let source_message_id = message_id.0.to_string();
 
         if edited_message.role == Role::User {
             let acknowledgement = self.start_chat_operation(
@@ -218,7 +216,7 @@ impl MukeiRuntime {
                     "conversation_id": conversation,
                     "source_branch_id": source_branch,
                     "new_branch_id": new_branch,
-                    "source_message_id": payload.message_id,
+                    "source_message_id": source_message_id,
                     "edited_message_id": edited_message.id.0.to_string(),
                     "reason": "edit",
                 }),
@@ -228,19 +226,18 @@ impl MukeiRuntime {
             acknowledgement
         } else {
             let (acknowledgement, operation_id, _) = self.accept_operation(&forked_command);
-            let result = json!({
-                "conversation_id": conversation,
-                "source_branch_id": source_branch,
-                "new_branch_id": new_branch,
-                "source_message_id": payload.message_id,
-                "edited_message_id": edited_message.id.0.to_string(),
-            });
             self.features.update_operation(
                 &operation_id,
                 OperationStatus::Completed,
                 Some(1.0),
                 None,
-                result.clone(),
+                json!({
+                    "conversation_id": conversation,
+                    "source_branch_id": source_branch,
+                    "new_branch_id": new_branch,
+                    "source_message_id": source_message_id,
+                    "edited_message_id": edited_message.id.0.to_string(),
+                }),
             );
             self.events.emit(
                 &format!("conversation:{conversation}"),
@@ -249,7 +246,7 @@ impl MukeiRuntime {
                     "conversation_id": conversation,
                     "source_branch_id": source_branch,
                     "new_branch_id": new_branch,
-                    "source_message_id": payload.message_id,
+                    "source_message_id": source_message_id,
                     "edited_message_id": edited_message.id.0.to_string(),
                     "reason": "edit",
                 }),
@@ -284,7 +281,7 @@ impl MukeiRuntime {
                 RejectionReason::StaleScope,
             );
         };
-        let (new_branch, _, forked_user) = match self.features.fork_branch_through(
+        let (new_branch, forked_user) = match self.features.fork_branch_through(
             &conversation,
             &source_branch,
             user_message.id,
@@ -350,7 +347,7 @@ mod chat_branching_tests {
         let source_branch = BranchId::new();
         let first = message(Role::User, source_branch, "one", None);
         let second = message(Role::Assistant, source_branch, "two", Some(first.id));
-        let source = vec![first.clone(), second.clone()];
+        let source = vec![first.clone(), second];
         let new_branch = BranchId::new();
 
         let fork = clone_branch_prefix(&source, first.id, new_branch, Some("edited"))
