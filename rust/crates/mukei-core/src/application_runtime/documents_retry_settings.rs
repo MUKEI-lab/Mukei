@@ -201,6 +201,9 @@ impl MukeiRuntime {
     }
 
     fn recover_chat(&self, command: &ValidatedCommand, regenerate: bool) -> CommandAcknowledgementV2 {
+        if regenerate {
+            return self.regenerate_chat_branch(command);
+        }
         if let Err(ack) = self.ensure_ready(command) {
             return ack;
         }
@@ -214,13 +217,10 @@ impl MukeiRuntime {
                 RejectionReason::StaleScope,
             );
         };
-        if regenerate {
-            self.features.remove_last_assistant(&conversation, &branch);
-        }
         self.start_chat_operation(
             command,
             user_message.content.clone(),
-            regenerate,
+            false,
             Some(user_message),
         )
     }
