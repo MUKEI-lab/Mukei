@@ -3,10 +3,9 @@ name: android-release-candidate
 on:
   workflow_dispatch:
   push:
+    branches: [ Kotlin ]
     tags:
       - "android-v*"
-  pull_request:
-    branches: [ Kotlin ]
     paths:
       - ".github/workflows/android-release-candidate.yml"
 
