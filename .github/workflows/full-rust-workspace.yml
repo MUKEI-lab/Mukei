@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: full-rust-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -31,8 +32,26 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  pending-status:
+    name: publish pending full Rust status
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'pending',
+              context: 'full-rust-workspace',
+              description: 'Full Rust workspace validation is running',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+
   workspace-quality:
     name: workspace check, test, clippy, fmt
+    needs: pending-status
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,6 +78,7 @@ jobs:
 
   core-feature-matrix:
     name: core features (${{ matrix.name }})
+    needs: pending-status
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -82,6 +102,7 @@ jobs:
 
   android-jni-contracts:
     name: Android JNI secure and RAG contracts
+    needs: pending-status
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -101,3 +122,32 @@ jobs:
           cargo check -p mukei-android-jni
           --no-default-features
           --features secure_runtime,rag_runtime,runtime_hardening
+
+  final-status:
+    name: publish final full Rust status
+    if: always()
+    needs:
+      - workspace-quality
+      - core-feature-matrix
+      - android-jni-contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          WORKSPACE_RESULT: ${{ needs.workspace-quality.result }}
+          MATRIX_RESULT: ${{ needs.core-feature-matrix.result }}
+          JNI_RESULT: ${{ needs.android-jni-contracts.result }}
+        with:
+          script: |
+            const results = [process.env.WORKSPACE_RESULT, process.env.MATRIX_RESULT, process.env.JNI_RESULT];
+            const success = results.every(result => result === 'success');
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: success ? 'success' : 'failure',
+              context: 'full-rust-workspace',
+              description: success ? 'Full Rust workspace validation passed' : 'Full Rust workspace validation failed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+            if (!success) core.setFailed(`Full Rust validation failed: ${results.join(', ')}`);
