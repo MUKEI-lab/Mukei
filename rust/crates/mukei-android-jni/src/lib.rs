@@ -32,6 +32,8 @@ use runtime_registry::RuntimeRegistry;
 
 const MAX_DRAIN_TIMEOUT_MS: jlong = 30_000;
 const MAX_PLATFORM_RESPONSE_BYTES: usize = 512 * 1024;
+const CAP_TEMPORARY_CHAT_SESSIONS: &str = "temporary_chat_sessions";
+const CAP_TEMPORARY_CHAT_RAG_DISABLED: &str = "temporary_chat_rag_disabled";
 
 static RUNTIMES: Lazy<Mutex<RuntimeRegistry>> =
     Lazy::new(|| Mutex::new(RuntimeRegistry::default()));
@@ -212,9 +214,73 @@ pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_pr
             runtime_session_id: runtime.session_id().to_owned(),
             protocol: runtime
                 .capabilities()
-                .with_transport(CAP_ANDROID_JNI_TRANSPORT),
+                .with_transport(CAP_ANDROID_JNI_TRANSPORT)
+                .with_transport(CAP_TEMPORARY_CHAT_SESSIONS)
+                .with_transport(CAP_TEMPORARY_CHAT_RAG_DISABLED),
             snapshot_schema_version: 2,
         })
+    });
+    to_java_bytes(&mut env, &response)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_beginTemporaryChat(
+    mut env: JNIEnv<'_>,
+    _this: JObject<'_>,
+    handle: jlong,
+) -> jbyteArray {
+    let response = guarded_bytes(|| {
+        let Some(runtime) = runtime_entry(handle) else {
+            return invalid_handle_payload();
+        };
+        let Some((conversation_id, branch_id)) = runtime.begin_temporary_chat() else {
+            return error_payload(
+                "temporary_chat_unavailable",
+                "A Temporary Chat session could not be created in the current runtime state.",
+            );
+        };
+        serialize(&json!({
+            "protocol_version": ProtocolVersion::CURRENT,
+            "runtime_session_id": runtime.session_id(),
+            "temporary": true,
+            "conversation_id": conversation_id,
+            "branch_id": branch_id,
+            "rag_enabled": false,
+        }))
+    });
+    to_java_bytes(&mut env, &response)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_ai_mukei_android_core_nativebridge_NativeBindings_endTemporaryChat(
+    mut env: JNIEnv<'_>,
+    _this: JObject<'_>,
+    handle: jlong,
+    conversation_id: JString<'_>,
+    branch_id: JString<'_>,
+) -> jbyteArray {
+    let response = guarded_bytes(|| {
+        let Some(runtime) = runtime_entry(handle) else {
+            return invalid_handle_payload();
+        };
+        let conversation_id: String = match env.get_string(&conversation_id) {
+            Ok(value) => value.into(),
+            Err(_) => return error_payload("invalid_temporary_chat_scope", "Unreadable conversation id."),
+        };
+        let branch_id: String = match env.get_string(&branch_id) {
+            Ok(value) => value.into(),
+            Err(_) => return error_payload("invalid_temporary_chat_scope", "Unreadable branch id."),
+        };
+        let ended = runtime.end_temporary_chat(conversation_id.trim(), branch_id.trim());
+        serialize(&json!({
+            "protocol_version": ProtocolVersion::CURRENT,
+            "runtime_session_id": runtime.session_id(),
+            "temporary": true,
+            "conversation_id": conversation_id,
+            "branch_id": branch_id,
+            "ended": ended,
+            "rag_enabled": false,
+        }))
     });
     to_java_bytes(&mut env, &response)
 }
