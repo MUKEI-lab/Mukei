@@ -45,159 +45,276 @@ object BackendRuntimeHost {
     }
 
     data class StorageImportSubmission(
-    val status: String,
-    val operationId: String?,
-    val rejectionReason: String?,
-)
-
-fun submitStorageImport(
-    conversationId: String,
-    target: String,
-    displayName: String,
-    mimeType: String,
-): StorageImportSubmission {
-    val activeGateway = gateway.get()
-        ?: return StorageImportSubmission("rejected", null, "backend_unavailable")
-    if (conversationId.isBlank() || target.isBlank() || displayName.isBlank()) {
-        return StorageImportSubmission("rejected", null, "invalid_payload")
-    }
-    return try {
-        val envelope = JSONObject()
-            .put("protocol_version", JSONObject().put("major", 2).put("minor", 1))
-            .put("command_id", UUID.randomUUID().toString())
-            .put("request_id", UUID.randomUUID().toString())
-            .put("command_type", "storage.import_file")
-            .put("submitted_at", Instant.now().toString())
-            .put("correlation_id", UUID.randomUUID().toString())
-            .put("idempotency_key", "storage-import-${UUID.randomUUID()}")
-            .put("scope", JSONObject().put("conversation_id", conversationId))
-            .put(
-                "payload",
-                JSONObject()
-                    .put("target", target)
-                    .put("display_name", displayName)
-                    .put("mime_type", mimeType),
-            )
-        val acknowledgement = JSONObject(
-            String(
-                activeGateway.submitCommand(
-                    envelope.toString().toByteArray(StandardCharsets.UTF_8),
-                ),
-                StandardCharsets.UTF_8,
-            ),
-        )
-        StorageImportSubmission(
-            status = acknowledgement.optString("status", "rejected"),
-            operationId = acknowledgement.optString("operation_id")
-                .takeIf { it.isNotBlank() },
-            rejectionReason = acknowledgement.optString("rejection_reason")
-                .takeIf { it.isNotBlank() },
-        )
-    } catch (failure: Throwable) {
-        StorageImportSubmission("rejected", null, stableFailureCode(failure))
-    }
-}
-
-data class ProjectCommandSubmission(
-    val status: String,
-    val operationId: String?,
-    val rejectionReason: String?,
-)
-
-fun createProject(name: String, description: String): ProjectCommandSubmission =
-    submitProjectCommand(
-        commandType = "project.create",
-        payload = JSONObject().put("name", name).put("description", description),
+        val status: String,
+        val operationId: String?,
+        val rejectionReason: String?,
     )
 
-fun updateProject(
-    projectId: String,
-    name: String,
-    description: String,
-): ProjectCommandSubmission = submitProjectCommand(
-    commandType = "project.update",
-    payload = JSONObject()
-        .put("project_id", projectId)
-        .put("name", name)
-        .put("description", description),
-)
+    fun submitStorageImport(
+        conversationId: String,
+        target: String,
+        displayName: String,
+        mimeType: String,
+    ): StorageImportSubmission {
+        val activeGateway = gateway.get()
+            ?: return StorageImportSubmission("rejected", null, "backend_unavailable")
+        if (conversationId.isBlank() || target.isBlank() || displayName.isBlank()) {
+            return StorageImportSubmission("rejected", null, "invalid_payload")
+        }
+        return try {
+            val envelope = JSONObject()
+                .put("protocol_version", JSONObject().put("major", 2).put("minor", 1))
+                .put("command_id", UUID.randomUUID().toString())
+                .put("request_id", UUID.randomUUID().toString())
+                .put("command_type", "storage.import_file")
+                .put("submitted_at", Instant.now().toString())
+                .put("correlation_id", UUID.randomUUID().toString())
+                .put("idempotency_key", "storage-import-${UUID.randomUUID()}")
+                .put("scope", JSONObject().put("conversation_id", conversationId))
+                .put(
+                    "payload",
+                    JSONObject()
+                        .put("target", target)
+                        .put("display_name", displayName)
+                        .put("mime_type", mimeType),
+                )
+            val acknowledgement = JSONObject(
+                String(
+                    activeGateway.submitCommand(
+                        envelope.toString().toByteArray(StandardCharsets.UTF_8),
+                    ),
+                    StandardCharsets.UTF_8,
+                ),
+            )
+            StorageImportSubmission(
+                status = acknowledgement.optString("status", "rejected"),
+                operationId = acknowledgement.optString("operation_id")
+                    .takeIf { it.isNotBlank() },
+                rejectionReason = acknowledgement.optString("rejection_reason")
+                    .takeIf { it.isNotBlank() },
+            )
+        } catch (failure: Throwable) {
+            StorageImportSubmission("rejected", null, stableFailureCode(failure))
+        }
+    }
 
-fun archiveProject(projectId: String): ProjectCommandSubmission = submitProjectCommand(
-    commandType = "project.archive",
-    payload = JSONObject().put("project_id", projectId),
-)
+    data class ProjectCommandSubmission(
+        val status: String,
+        val operationId: String?,
+        val rejectionReason: String?,
+    )
 
-fun updateProjectInstructions(projectId: String, instructions: String): ProjectCommandSubmission =
-    submitProjectCommand(
+    fun createProject(name: String, description: String): ProjectCommandSubmission =
+        submitProjectCommand(
+            commandType = "project.create",
+            payload = JSONObject().put("name", name).put("description", description),
+        )
+
+    fun updateProject(
+        projectId: String,
+        name: String,
+        description: String,
+    ): ProjectCommandSubmission = submitProjectCommand(
+        commandType = "project.update",
+        payload = JSONObject()
+            .put("project_id", projectId)
+            .put("name", name)
+            .put("description", description),
+    )
+
+    fun archiveProject(projectId: String): ProjectCommandSubmission = submitProjectCommand(
+        commandType = "project.archive",
+        payload = JSONObject().put("project_id", projectId),
+    )
+
+    fun updateProjectInstructions(
+        projectId: String,
+        instructions: String,
+    ): ProjectCommandSubmission = submitProjectCommand(
         commandType = "project.instructions.update",
         payload = JSONObject().put("project_id", projectId).put("instructions", instructions),
     )
 
-fun addProjectMemory(projectId: String, content: String): ProjectCommandSubmission =
-    submitProjectCommand(
-        commandType = "project.memory.add",
-        payload = JSONObject().put("project_id", projectId).put("content", content),
+    fun addProjectMemory(projectId: String, content: String): ProjectCommandSubmission =
+        submitProjectCommand(
+            commandType = "project.memory.add",
+            payload = JSONObject().put("project_id", projectId).put("content", content),
+        )
+
+    fun updateProjectMemory(
+        projectId: String,
+        memoryId: String,
+        content: String,
+    ): ProjectCommandSubmission = submitProjectCommand(
+        commandType = "project.memory.update",
+        payload = JSONObject()
+            .put("project_id", projectId)
+            .put("memory_id", memoryId)
+            .put("content", content),
     )
 
-fun updateProjectMemory(
-    projectId: String,
-    memoryId: String,
-    content: String,
-): ProjectCommandSubmission = submitProjectCommand(
-    commandType = "project.memory.update",
-    payload = JSONObject()
-        .put("project_id", projectId)
-        .put("memory_id", memoryId)
-        .put("content", content),
-)
+    fun deleteProjectMemory(projectId: String, memoryId: String): ProjectCommandSubmission =
+        submitProjectCommand(
+            commandType = "project.memory.delete",
+            payload = JSONObject().put("project_id", projectId).put("memory_id", memoryId),
+        )
 
-fun deleteProjectMemory(projectId: String, memoryId: String): ProjectCommandSubmission =
-    submitProjectCommand(
-        commandType = "project.memory.delete",
-        payload = JSONObject().put("project_id", projectId).put("memory_id", memoryId),
-    )
-
-private fun submitProjectCommand(
-    commandType: String,
-    payload: JSONObject,
-): ProjectCommandSubmission {
-    val activeGateway = gateway.get()
-        ?: return ProjectCommandSubmission("rejected", null, "backend_unavailable")
-    return try {
-        val envelope = JSONObject()
-            .put("protocol_version", JSONObject().put("major", 2).put("minor", 3))
-            .put("command_id", UUID.randomUUID().toString())
-            .put("request_id", UUID.randomUUID().toString())
-            .put("command_type", commandType)
-            .put("submitted_at", Instant.now().toString())
-            .put("correlation_id", UUID.randomUUID().toString())
-            .put("idempotency_key", "project-${UUID.randomUUID()}")
-            .put("payload", payload)
-        val acknowledgement = JSONObject(
-            String(
-                activeGateway.submitCommand(
-                    envelope.toString().toByteArray(StandardCharsets.UTF_8),
+    private fun submitProjectCommand(
+        commandType: String,
+        payload: JSONObject,
+    ): ProjectCommandSubmission {
+        val activeGateway = gateway.get()
+            ?: return ProjectCommandSubmission("rejected", null, "backend_unavailable")
+        return try {
+            val envelope = JSONObject()
+                .put("protocol_version", JSONObject().put("major", 2).put("minor", 3))
+                .put("command_id", UUID.randomUUID().toString())
+                .put("request_id", UUID.randomUUID().toString())
+                .put("command_type", commandType)
+                .put("submitted_at", Instant.now().toString())
+                .put("correlation_id", UUID.randomUUID().toString())
+                .put("idempotency_key", "project-${UUID.randomUUID()}")
+                .put("payload", payload)
+            val acknowledgement = JSONObject(
+                String(
+                    activeGateway.submitCommand(
+                        envelope.toString().toByteArray(StandardCharsets.UTF_8),
+                    ),
+                    StandardCharsets.UTF_8,
                 ),
-                StandardCharsets.UTF_8,
-            ),
-        )
-        ProjectCommandSubmission(
-            status = acknowledgement.optString("status", "rejected"),
-            operationId = acknowledgement.optString("operation_id").takeIf { it.isNotBlank() },
-            rejectionReason = acknowledgement.optString("rejection_reason").takeIf { it.isNotBlank() },
-        )
-    } catch (failure: Throwable) {
-        ProjectCommandSubmission("rejected", null, stableFailureCode(failure))
+            )
+            ProjectCommandSubmission(
+                status = acknowledgement.optString("status", "rejected"),
+                operationId = acknowledgement.optString("operation_id").takeIf { it.isNotBlank() },
+                rejectionReason = acknowledgement.optString("rejection_reason")
+                    .takeIf { it.isNotBlank() },
+            )
+        } catch (failure: Throwable) {
+            ProjectCommandSubmission("rejected", null, stableFailureCode(failure))
+        }
     }
-}
 
-fun requestRuntimeSnapshot(domain: String): String? {
-    if (domain !in setOf("application", "settings", "protocol", "operations", "projects")) return null
-    val activeGateway = gateway.get() ?: return null
-    return runCatching {
-        String(activeGateway.requestSnapshot(domain), StandardCharsets.UTF_8)
-    }.getOrNull()
-}
+    data class ChatCommandSubmission(
+        val status: String,
+        val operationId: String?,
+        val rejectionReason: String?,
+    )
+
+    fun sendChatMessage(
+        conversationId: String,
+        branchId: String,
+        text: String,
+    ): ChatCommandSubmission = submitChatCommand(
+        commandType = "chat.send_message",
+        conversationId = conversationId,
+        branchId = branchId,
+        payload = JSONObject().put("text", text),
+        idempotent = true,
+    )
+
+    fun editChatMessage(
+        conversationId: String,
+        branchId: String,
+        messageId: String,
+        text: String,
+    ): ChatCommandSubmission = submitChatCommand(
+        commandType = "chat.send_message",
+        conversationId = conversationId,
+        branchId = branchId,
+        turnId = messageId,
+        payload = JSONObject().put("text", text),
+        idempotent = true,
+    )
+
+    fun regenerateChat(
+        conversationId: String,
+        branchId: String,
+    ): ChatCommandSubmission = submitChatCommand(
+        commandType = "recovery.regenerate",
+        conversationId = conversationId,
+        branchId = branchId,
+        payload = JSONObject(),
+        idempotent = true,
+    )
+
+    fun stopChatGeneration(
+        conversationId: String,
+        branchId: String,
+        operationId: String,
+    ): ChatCommandSubmission = submitChatCommand(
+        commandType = "chat.stop_generation",
+        conversationId = conversationId,
+        branchId = branchId,
+        payload = JSONObject(),
+        operationId = operationId,
+        idempotent = false,
+    )
+
+    private fun submitChatCommand(
+        commandType: String,
+        conversationId: String,
+        branchId: String,
+        payload: JSONObject,
+        operationId: String? = null,
+        turnId: String? = null,
+        idempotent: Boolean,
+    ): ChatCommandSubmission {
+        val activeGateway = gateway.get()
+            ?: return ChatCommandSubmission("rejected", null, "backend_unavailable")
+        if (conversationId.isBlank() || branchId.isBlank()) {
+            return ChatCommandSubmission("rejected", null, "stale_scope")
+        }
+        return try {
+            val scope = JSONObject()
+                .put("conversation_id", conversationId)
+                .put("branch_id", branchId)
+            if (!turnId.isNullOrBlank()) scope.put("turn_id", turnId)
+            val envelope = JSONObject()
+                .put("protocol_version", JSONObject().put("major", 2).put("minor", 3))
+                .put("command_id", UUID.randomUUID().toString())
+                .put("request_id", UUID.randomUUID().toString())
+                .put("command_type", commandType)
+                .put("submitted_at", Instant.now().toString())
+                .put("correlation_id", UUID.randomUUID().toString())
+                .put("scope", scope)
+                .put("payload", payload)
+            if (operationId != null) envelope.put("operation_id", operationId)
+            if (idempotent) envelope.put("idempotency_key", "chat-${UUID.randomUUID()}")
+            val acknowledgement = JSONObject(
+                String(
+                    activeGateway.submitCommand(
+                        envelope.toString().toByteArray(StandardCharsets.UTF_8),
+                    ),
+                    StandardCharsets.UTF_8,
+                ),
+            )
+            ChatCommandSubmission(
+                status = acknowledgement.optString("status", "rejected"),
+                operationId = acknowledgement.optString("operation_id").takeIf { it.isNotBlank() },
+                rejectionReason = acknowledgement.optString("rejection_reason")
+                    .takeIf { it.isNotBlank() },
+            )
+        } catch (failure: Throwable) {
+            ChatCommandSubmission("rejected", null, stableFailureCode(failure))
+        }
+    }
+
+    fun requestRuntimeSnapshot(domain: String): String? {
+        val nativeDomain = if (domain == "conversations") "operations" else domain
+        if (nativeDomain !in setOf("application", "settings", "protocol", "operations", "projects")) {
+            return null
+        }
+        val activeGateway = gateway.get() ?: return null
+        return runCatching {
+            val raw = String(activeGateway.requestSnapshot(nativeDomain), StandardCharsets.UTF_8)
+            if (domain != "conversations") return@runCatching raw
+            val envelope = JSONObject(raw)
+            val payload = envelope.optJSONObject("payload") ?: JSONObject()
+            val branches = payload.optJSONArray("conversation_branches")
+            envelope.put("payload", JSONObject().put("branches", branches))
+            envelope.toString()
+        }.getOrNull()
+    }
 
     private val started = AtomicBoolean(false)
     private val running = AtomicBoolean(false)
