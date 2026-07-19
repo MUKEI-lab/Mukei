@@ -188,6 +188,8 @@ struct EventBus {
     sender: SyncSender<EventEnvelopeV2>,
     receiver: Mutex<Receiver<EventEnvelopeV2>>,
     queue_lock: Mutex<()>,
+    suppressed_streams: Mutex<HashSet<String>>,
+    suppressed_operations: Mutex<HashSet<String>>,
     sequences: Mutex<HashMap<String, u64>>,
     queued: AtomicUsize,
     dropped: AtomicU64,
@@ -200,6 +202,8 @@ impl EventBus {
             sender,
             receiver: Mutex::new(receiver),
             queue_lock: Mutex::new(()),
+            suppressed_streams: Mutex::new(HashSet::new()),
+            suppressed_operations: Mutex::new(HashSet::new()),
             sequences: Mutex::new(HashMap::new()),
             queued: AtomicUsize::new(0),
             dropped: AtomicU64::new(0),
@@ -248,11 +252,29 @@ impl EventBus {
         command: Option<&CommandEnvelopeV2>,
         operation_id: Option<String>,
     ) {
-        let event = self.build_event(stream_id, event_type, payload, command, operation_id);
         let _queue = self
             .queue_lock
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let stream_suppressed = self
+            .suppressed_streams
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(stream_id);
+        let operation_suppressed = operation_id
+            .as_ref()
+            .map(|operation_id| {
+                self.suppressed_operations
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .contains(operation_id)
+            })
+            .unwrap_or(false);
+        if stream_suppressed || operation_suppressed {
+            return;
+        }
+
+        let event = self.build_event(stream_id, event_type, payload, command, operation_id);
         match self.sender.try_send(event) {
             Ok(()) => {
                 self.queued.fetch_add(1, Ordering::Release);
@@ -264,8 +286,8 @@ impl EventBus {
     }
 
     /// Purge queued events scoped to a Temporary Chat while preserving unrelated
-    /// events in original order. Emission is serialized during drain/requeue so
-    /// retained events cannot be displaced by concurrent senders.
+    /// events in original order. The same streams/operation IDs are tombstoned so
+    /// producers that raced with session shutdown cannot enqueue content afterwards.
     fn purge_temporary_chat(&self, conversation_id: &str, operation_ids: &[String]) -> usize {
         let conversation_stream = format!("conversation:{conversation_id}");
         let operation_set = operation_ids.iter().cloned().collect::<HashSet<_>>();
@@ -278,6 +300,19 @@ impl EventBus {
             .queue_lock
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        {
+            let mut suppressed_streams = self
+                .suppressed_streams
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            suppressed_streams.insert(conversation_stream.clone());
+            suppressed_streams.extend(operation_streams.iter().cloned());
+        }
+        self.suppressed_operations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .extend(operation_set.iter().cloned());
+
         let receiver = self
             .receiver
             .lock()
