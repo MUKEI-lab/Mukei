@@ -119,6 +119,7 @@ impl MukeiRuntime {
         let context = ContextBudgetManager::new(
             Arc::new(RuntimeContextBackend {
                 features: Arc::clone(&self.features),
+                ephemeral_chats: Arc::clone(&self.ephemeral_chats),
                 rag_service,
             }),
             Arc::new(RuntimeTokenCounter),
