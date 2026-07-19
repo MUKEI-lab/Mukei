@@ -105,4 +105,5 @@ tokio    = { workspace = true, features = ["macros", "rt-multi-thread", "time"] 
 # (GH #41) and idempotency (GH #35) tests in later batches.
 proptest = "1.5"
 loom     = "0.7"
-wiremock = "0.6"
+# 0.6.5 uses let-chains that require a newer compiler than the pinned Rust 1.86 toolchain.
+wiremock = "=0.6.4"
