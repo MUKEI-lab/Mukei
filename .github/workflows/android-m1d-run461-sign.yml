@@ -1,0 +1,116 @@
+name: android-m1d-run461-sign
+
+on:
+  pull_request:
+    branches: [Kotlin]
+    paths:
+      - '.github/workflows/android-m1d-run461-sign.yml'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  sign-test-apks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Download immutable green M1D run 461 release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: android-release-hardening-8de966013a4f3cba684a20b0075346f336ff1b97
+          path: input
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: MUKEI-lab/Mukei
+          run-id: 29675316253
+
+      - name: Locate official Android APK signing tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$SDK_ROOT"
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          ZIPALIGN="$(find "$SDK_ROOT/build-tools" -type f -name zipalign | sort -V | tail -1)"
+          test -x "$APKSIGNER"
+          test -x "$ZIPALIGN"
+          echo "APKSIGNER=$APKSIGNER" >> "$GITHUB_ENV"
+          echo "ZIPALIGN=$ZIPALIGN" >> "$GITHUB_ENV"
+
+      - name: Verify downloaded release inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARM="$(find input -type f -name 'app-arm64-v8a-release-unsigned.apk' -print -quit)"
+          X86="$(find input -type f -name 'app-x86_64-release-unsigned.apk' -print -quit)"
+          test -f "$ARM"
+          test -f "$X86"
+          python3 - "$ARM" "$X86" <<'PY'
+          import sys, zipfile
+          expected = {
+              'arm64-v8a': ['libmukei_android.so','libmukei_llama_native.so','libc++_shared.so'],
+              'x86_64': ['libmukei_android.so','libmukei_llama_native.so','libc++_shared.so'],
+          }
+          for apk in sys.argv[1:]:
+              abi = 'arm64-v8a' if 'arm64-v8a' in apk else 'x86_64'
+              with zipfile.ZipFile(apk) as z:
+                  names=set(z.namelist())
+                  for lib in expected[abi]:
+                      p=f'lib/{abi}/{lib}'
+                      assert p in names, f'{p} missing from {apk}'
+          PY
+
+      - name: Generate disposable test keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          keytool -genkeypair -noprompt \
+            -keystore "$RUNNER_TEMP/mukei-test.jks" \
+            -storepass mukei-test-pass \
+            -keypass mukei-test-pass \
+            -alias mukei-test \
+            -keyalg RSA -keysize 3072 -validity 3650 \
+            -dname 'CN=Mukei Test,O=MUKEI-lab,C=US'
+
+      - name: Align, sign and verify APKs with official apksigner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p signed
+          for ABI in arm64-v8a x86_64; do
+            SRC="$(find input -type f -name "app-${ABI}-release-unsigned.apk" -print -quit)"
+            ALIGNED="$RUNNER_TEMP/app-${ABI}-aligned.apk"
+            OUT="signed/app-${ABI}-release-m1d-run461-official-test-signed.apk"
+            "$ZIPALIGN" -p -f 4 "$SRC" "$ALIGNED"
+            "$APKSIGNER" sign \
+              --ks "$RUNNER_TEMP/mukei-test.jks" \
+              --ks-key-alias mukei-test \
+              --ks-pass pass:mukei-test-pass \
+              --key-pass pass:mukei-test-pass \
+              --v1-signing-enabled true \
+              --v2-signing-enabled true \
+              --v3-signing-enabled true \
+              --out "$OUT" "$ALIGNED"
+            "$APKSIGNER" verify --verbose --print-certs --min-sdk-version 26 "$OUT" | tee "signed/${ABI}-APKSIGNER-VERIFY.txt"
+          done
+          (cd signed && sha256sum *.apk > SHA256SUMS)
+          cat > signed/SOURCE.txt <<'EOF'
+          Source PR: #97
+          Source head: 40c640127484c60ff8adf26ae23d84bb0a4d6b02
+          Source CI run: 29675316253 (run #461)
+          Source artifact: android-release-hardening-8de966013a4f3cba684a20b0075346f336ff1b97
+          Signing: disposable test key generated in CI; official Android SDK zipalign + apksigner
+          EOF
+
+      - name: Upload officially verified M1D run 461 APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: mukei-m1d-run461-official-test-signed-${{ github.sha }}
+          path: signed/
+          retention-days: 7
+          if-no-files-found: error
