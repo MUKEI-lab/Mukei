@@ -54,6 +54,7 @@ import ai.mukei.android.designsystem.MukeiIcon
 import ai.mukei.android.designsystem.MukeiIconKey
 import ai.mukei.android.designsystem.MukeiLayout
 import ai.mukei.android.designsystem.MukeiMark
+import ai.mukei.android.designsystem.MukeiNewChatIcon
 import ai.mukei.android.designsystem.MukeiRadius
 import ai.mukei.android.designsystem.MukeiSpacing
 import ai.mukei.android.designsystem.MukeiStroke
@@ -320,10 +321,7 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                                 contentDescription = "New chat"
                             },
                         ) {
-                            MukeiIcon(
-                                icon = MukeiIconKey.NEW_CHAT,
-                                contentDescription = null,
-                            )
+                            MukeiNewChatIcon(contentDescription = null)
                         }
                         IconButton(
                             onClick = {},
@@ -444,11 +442,6 @@ private fun HomeSurface(
                 .fillMaxWidth()
                 .widthIn(max = MukeiLayout.ReadableContentMaxWidth),
         ) {
-            if (readiness.inference.status == ReadinessStatus.ACTION_REQUIRED) {
-                ModelSetupNotice(openModels = openModels)
-                Spacer(Modifier.height(MukeiSpacing.Medium))
-            }
-
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -476,8 +469,12 @@ private fun HomeSurface(
                 draft = draft,
                 onDraftChange = { draft = it },
                 placeholder = selectedCapability?.placeholder ?: "Tell Mukei what you want to do…",
-                inferenceStatus = readiness.inference.status,
             )
+
+            if (readiness.inference.status == ReadinessStatus.ACTION_REQUIRED) {
+                Spacer(Modifier.height(MukeiSpacing.Small))
+                ModelSetupNotice(openModels = openModels)
+            }
 
             Spacer(Modifier.height(MukeiSpacing.ExtraSmall))
         }
@@ -489,7 +486,6 @@ private fun MukeiComposer(
     draft: String,
     onDraftChange: (String) -> Unit,
     placeholder: String,
-    inferenceStatus: ReadinessStatus,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -506,15 +502,13 @@ private fun MukeiComposer(
             BasicTextField(
                 value = draft,
                 onValueChange = onDraftChange,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = MukeiLayout.ComposerTextMinHeight),
+                modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.bodyLarge.copy(
                     color = MaterialTheme.colorScheme.onSurface,
                 ),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                minLines = 3,
-                maxLines = 8,
+                minLines = 2,
+                maxLines = 6,
                 decorationBox = { innerTextField ->
                     Box(modifier = Modifier.fillMaxWidth()) {
                         if (draft.isEmpty()) {
@@ -528,7 +522,7 @@ private fun MukeiComposer(
                     }
                 },
             )
-            Spacer(Modifier.height(MukeiSpacing.Small))
+            Spacer(Modifier.height(MukeiSpacing.ExtraSmall))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -543,13 +537,6 @@ private fun MukeiComposer(
                     MukeiIcon(
                         icon = MukeiIconKey.ATTACH,
                         contentDescription = null,
-                    )
-                }
-                if (inferenceStatus == ReadinessStatus.ACTION_REQUIRED) {
-                    Text(
-                        text = "Model needed",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Spacer(Modifier.weight(1f))
@@ -624,41 +611,27 @@ private fun ModelSetupNotice(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
+        shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
         Row(
-            modifier = Modifier.padding(MukeiSpacing.Medium),
+            modifier = Modifier.padding(
+                horizontal = MukeiSpacing.Medium,
+                vertical = MukeiSpacing.ExtraSmall,
+            ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(MukeiSpacing.Small),
         ) {
-            Surface(
-                modifier = Modifier.heightIn(min = MukeiLayout.CompactStatusIconContainer),
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.surface,
-            ) {
-                Box(
-                    modifier = Modifier.padding(MukeiSpacing.ExtraSmall),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    MukeiIcon(
-                        icon = MukeiIconKey.MODELS,
-                        contentDescription = null,
-                    )
-                }
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Add a model to start chatting",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Spacer(Modifier.height(MukeiSpacing.Micro))
-                Text(
-                    text = "Your secure workspace is ready. Conversation inference still needs model artifacts.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            MukeiIcon(
+                icon = MukeiIconKey.MODELS,
+                contentDescription = null,
+            )
+            Text(
+                text = "Model required for replies",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             TextButton(onClick = openModels) {
                 Text("Models")
             }
