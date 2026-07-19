@@ -67,6 +67,12 @@ impl MukeiRuntime {
                 Ok(value) => value,
                 Err(ack) => return ack,
             };
+        if self.ephemeral_chats.was_retired(&conversation, &branch) {
+            return CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::StaleScope,
+            );
+        }
         if !self.activation.readiness_snapshot().active_backend_ready {
             return CommandAcknowledgementV2::rejected(
                 Some(&command.envelope),
@@ -311,6 +317,12 @@ impl MukeiRuntime {
             Ok(value) => value,
             Err(ack) => return ack,
         };
+        if self.ephemeral_chats.was_retired(&conversation, &branch) {
+            return CommandAcknowledgementV2::rejected(
+                Some(&command.envelope),
+                RejectionReason::StaleScope,
+            );
+        }
         let (acknowledgement, operation_id, _, temporary) =
             self.accept_chat_operation(command, &conversation, &branch);
         let removed = self.clear_chat_conversation(&conversation, &branch);
