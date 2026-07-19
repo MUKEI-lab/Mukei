@@ -85,9 +85,19 @@ impl MukeiRuntime {
     }
 
     fn chat_history(&self, conversation: ConversationId, branch: BranchId) -> Vec<ChatMessage> {
-        self.ephemeral_chats
-            .history_if_registered(conversation, branch)
-            .unwrap_or_else(|| self.features.history(conversation, branch))
+        let conversation_key = conversation.0.to_string();
+        let branch_key = branch.0.to_string();
+        match self
+            .ephemeral_chats
+            .session_state(&conversation_key, &branch_key)
+        {
+            EphemeralSessionState::Active => self
+                .ephemeral_chats
+                .history_if_registered(conversation, branch)
+                .unwrap_or_default(),
+            EphemeralSessionState::Retired => Vec::new(),
+            EphemeralSessionState::Absent => self.features.history(conversation, branch),
+        }
     }
 
     fn append_chat_message(
@@ -96,39 +106,52 @@ impl MukeiRuntime {
         branch: &str,
         message: ChatMessage,
     ) -> bool {
-        if self.ephemeral_chats.is_registered(conversation, branch) {
-            self.ephemeral_chats
-                .append_message(conversation, branch, message)
-        } else {
-            self.features.append_message(conversation, branch, message);
-            true
+        match self.ephemeral_chats.session_state(conversation, branch) {
+            EphemeralSessionState::Active => self
+                .ephemeral_chats
+                .append_message(conversation, branch, message),
+            EphemeralSessionState::Retired => false,
+            EphemeralSessionState::Absent => {
+                self.features.append_message(conversation, branch, message);
+                true
+            }
         }
     }
 
     fn clear_chat_conversation(&self, conversation: &str, branch: &str) -> usize {
-        if self.ephemeral_chats.is_registered(conversation, branch) {
-            self.ephemeral_chats
+        match self.ephemeral_chats.session_state(conversation, branch) {
+            EphemeralSessionState::Active => self
+                .ephemeral_chats
                 .clear_conversation(conversation, branch)
-                .unwrap_or(0)
-        } else {
-            self.features.clear_conversation(conversation, branch)
+                .unwrap_or(0),
+            EphemeralSessionState::Retired => 0,
+            EphemeralSessionState::Absent => {
+                self.features.clear_conversation(conversation, branch)
+            }
         }
     }
 
     fn last_user_chat_message(&self, conversation: &str, branch: &str) -> Option<ChatMessage> {
-        if self.ephemeral_chats.is_registered(conversation, branch) {
-            self.ephemeral_chats.last_user_message(conversation, branch)
-        } else {
-            self.features.last_user_message(conversation, branch)
+        match self.ephemeral_chats.session_state(conversation, branch) {
+            EphemeralSessionState::Active => {
+                self.ephemeral_chats.last_user_message(conversation, branch)
+            }
+            EphemeralSessionState::Retired => None,
+            EphemeralSessionState::Absent => {
+                self.features.last_user_message(conversation, branch)
+            }
         }
     }
 
     fn remove_last_assistant_chat_message(&self, conversation: &str, branch: &str) -> bool {
-        if self.ephemeral_chats.is_registered(conversation, branch) {
-            self.ephemeral_chats
-                .remove_last_assistant(conversation, branch)
-        } else {
-            self.features.remove_last_assistant(conversation, branch)
+        match self.ephemeral_chats.session_state(conversation, branch) {
+            EphemeralSessionState::Active => self
+                .ephemeral_chats
+                .remove_last_assistant(conversation, branch),
+            EphemeralSessionState::Retired => false,
+            EphemeralSessionState::Absent => {
+                self.features.remove_last_assistant(conversation, branch)
+            }
         }
     }
 
@@ -141,34 +164,43 @@ impl MukeiRuntime {
         (CommandAcknowledgementV2, String, CancellationToken, bool),
         CommandAcknowledgementV2,
     > {
-        let temporary = self.ephemeral_chats.is_registered(conversation, branch);
-        if !temporary {
-            let (acknowledgement, operation_id, token) = self.accept_operation(command);
-            return Ok((acknowledgement, operation_id, token, false));
-        }
-
-        let Some((operation_id, token)) = self.ephemeral_chats.create_operation(
-            conversation,
-            branch,
-            command.envelope.operation_id.as_deref(),
-        ) else {
-            return Err(CommandAcknowledgementV2::rejected(
+        match self.ephemeral_chats.session_state(conversation, branch) {
+            EphemeralSessionState::Retired => Err(CommandAcknowledgementV2::rejected(
                 Some(&command.envelope),
                 RejectionReason::StaleScope,
-            ));
-        };
-        self.events.emit(
-            &format!("operation:{operation_id}"),
-            "operation.accepted",
-            json!({"state": "accepted", "temporary": true}),
-            Some(&command.envelope),
-            Some(operation_id.clone()),
-        );
-        Ok((
-            CommandAcknowledgementV2::accepted(&command.envelope, Some(operation_id.clone())),
-            operation_id,
-            token,
-            true,
-        ))
+            )),
+            EphemeralSessionState::Absent => {
+                let (acknowledgement, operation_id, token) = self.accept_operation(command);
+                Ok((acknowledgement, operation_id, token, false))
+            }
+            EphemeralSessionState::Active => {
+                let Some((operation_id, token)) = self.ephemeral_chats.create_operation(
+                    conversation,
+                    branch,
+                    command.envelope.operation_id.as_deref(),
+                ) else {
+                    return Err(CommandAcknowledgementV2::rejected(
+                        Some(&command.envelope),
+                        RejectionReason::StaleScope,
+                    ));
+                };
+                self.events.emit(
+                    &format!("operation:{operation_id}"),
+                    "operation.accepted",
+                    json!({"state": "accepted", "temporary": true}),
+                    Some(&command.envelope),
+                    Some(operation_id.clone()),
+                );
+                Ok((
+                    CommandAcknowledgementV2::accepted(
+                        &command.envelope,
+                        Some(operation_id.clone()),
+                    ),
+                    operation_id,
+                    token,
+                    true,
+                ))
+            }
+        }
     }
 }
