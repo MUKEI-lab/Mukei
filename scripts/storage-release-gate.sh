@@ -25,18 +25,18 @@ printf '==> rustfmt\n'
 cargo fmt --all -- --check
 
 printf '==> Embedded migration contract\n'
-cargo test -p mukei-core --features rusqlite --test embedded_migrations
+cargo test --locked -p mukei-core --features rusqlite --test embedded_migrations
 
 printf '==> Canonical V015 -> V016 forward upgrade\n'
-cargo test -p mukei-core --features rusqlite --test universal_storage_v016_forward_upgrade
+cargo test --locked -p mukei-core --features rusqlite --test universal_storage_v016_forward_upgrade
 
 printf '==> V016 adversarial invariant guards\n'
-cargo test -p mukei-core --features rusqlite --test universal_storage_v016_guards
+cargo test --locked -p mukei-core --features rusqlite --test universal_storage_v016_guards
 
 printf '==> Full mukei-core storage-capable test suite\n'
-cargo test -p mukei-core --features rusqlite
+cargo test --locked -p mukei-core --features rusqlite
 
 printf '==> Clippy with warnings denied\n'
-cargo clippy -p mukei-core --features rusqlite --all-targets -- -D warnings
+cargo clippy --locked -p mukei-core --features rusqlite --all-targets -- -D warnings
 
 printf '==> Release gate runner passed\n'
