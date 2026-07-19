@@ -1,0 +1,106 @@
+name: one-shot-fix-native-compile
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - '.github/workflows/one-shot-fix-native-compile.yml'
+
+permissions:
+  contents: write
+  statuses: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish pending status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'pending', context: 'native-compile-repair', description: 'Applying exact Rust native compile repairs', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+      - name: Apply exact compiler-directed fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          rag = Path('rust/crates/mukei-android-jni/src/native_rag.rs')
+          text = rag.read_text()
+
+          old_import = '''use mukei_core::rag::{
+              CandleMiniLmEmbedder, ChunkResolver, Chunker, Embedder, IndexMetadata, ResolvedChunk,
+              RetrievalRequest, RetrievalScope, Retriever, StoreHeader, StructuredRetriever, VectorStore,
+              ALL_MINILM_L6_V2_MANIFEST, STORE_FORMAT_VERSION,
+          };'''
+          new_import = '''use mukei_core::rag::chunker::Chunker;
+          use mukei_core::rag::{
+              CandleMiniLmEmbedder, ChunkResolver, Embedder, IndexMetadata, ResolvedChunk,
+              RetrievalRequest, RetrievalScope, Retriever, StoreHeader, VectorStore,
+              ALL_MINILM_L6_V2_MANIFEST, STORE_FORMAT_VERSION,
+          };'''
+          if text.count(old_import) != 1:
+              raise SystemExit(f'native_rag import drift: expected 1 match, got {text.count(old_import)}')
+          text = text.replace(old_import, new_import, 1)
+
+          old_lifetime = '''                    statement
+                              .query_map([&document_id_owned], |row| row.get::<_, String>(0))?
+                              .filter_map(|row| row.ok().and_then(|value| value.parse::<u64>().ok()))
+                              .collect::<Vec<_>>()'''
+          new_lifetime = '''                    let rows = statement
+                              .query_map([&document_id_owned], |row| row.get::<_, String>(0))?;
+                          rows.filter_map(|row| row.ok().and_then(|value| value.parse::<u64>().ok()))
+                              .collect::<Vec<_>>()'''
+          if text.count(old_lifetime) != 1:
+              raise SystemExit(f'native_rag lifetime drift: expected 1 match, got {text.count(old_lifetime)}')
+          text = text.replace(old_lifetime, new_lifetime, 1)
+          rag.write_text(text)
+
+          secure = Path('rust/crates/mukei-android-jni/src/secure_runtime_jni.rs')
+          text = secure.read_text()
+          old_services = 'super::super::runtime_services(&config)'
+          if text.count(old_services) != 1:
+              raise SystemExit(f'runtime_services path drift: expected 1 match, got {text.count(old_services)}')
+          text = text.replace(old_services, 'crate::runtime_services(&config)', 1)
+          old_runtimes = 'super::super::RUNTIMES'
+          if text.count(old_runtimes) != 2:
+              raise SystemExit(f'RUNTIMES path drift: expected 2 matches, got {text.count(old_runtimes)}')
+          text = text.replace(old_runtimes, 'crate::RUNTIMES')
+          secure.write_text(text)
+          PY
+
+          mapfile -t changed < <(git diff --name-only | sort)
+          printf '%s\n' "${changed[@]}"
+          test "${#changed[@]}" -eq 2
+          test "${changed[0]}" = 'rust/crates/mukei-android-jni/src/native_rag.rs'
+          test "${changed[1]}" = 'rust/crates/mukei-android-jni/src/secure_runtime_jni.rs'
+      - name: Format and commit repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.86.0 --profile minimal
+          cargo +1.86.0 fmt --manifest-path rust/Cargo.toml -- rust/crates/mukei-android-jni/src/native_rag.rs rust/crates/mukei-android-jni/src/secure_runtime_jni.rs || cargo +1.86.0 fmt --manifest-path rust/Cargo.toml --all
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add rust/crates/mukei-android-jni/src/native_rag.rs rust/crates/mukei-android-jni/src/secure_runtime_jni.rs
+          git diff --cached --name-only
+          git commit -m 'fix(android): repair hardened native runtime compile'
+          git push origin HEAD:temp/universal-storage-workspace-v0.1
+      - name: Publish success status
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'success', context: 'native-compile-repair', description: 'Native compiler-directed repairs committed', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
+      - name: Publish failure status
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'failure', context: 'native-compile-repair', description: 'Native compile repair failed closed', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
