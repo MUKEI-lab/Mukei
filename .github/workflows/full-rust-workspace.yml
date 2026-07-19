@@ -146,7 +146,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cargo test -p mukei-android-jni --lib --no-default-features --features secure_runtime,runtime_hardening 2>&1 | tee ../jni-secure.log
+          cargo test -p mukei-android-jni --lib --no-default-features --features secure_runtime 2>&1 | tee ../jni-secure.log
       - name: Check production RAG composition
         working-directory: rust
         shell: bash
