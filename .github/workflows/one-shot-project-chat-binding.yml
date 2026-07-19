@@ -5,8 +5,13 @@ on:
     branches:
       - temp/universal-storage-workspace-v0.1
 
+concurrency:
+  group: one-shot-project-chat-binding
+  cancel-in-progress: true
+
 permissions:
   contents: write
+  statuses: write
 
 jobs:
   wire-project-chat:
@@ -14,6 +19,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Publish pending status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'pending',
+              context: 'project-chat-binding-wiring',
+              description: 'Wiring immutable project chat context',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
       - uses: actions/checkout@v4
         with:
           ref: temp/universal-storage-workspace-v0.1
@@ -63,3 +81,31 @@ jobs:
             android/app/src/main/kotlin/ai/mukei/android/ChatConversationSurface.kt
           git commit -m 'Wire immutable project chat context'
           git push origin HEAD:temp/universal-storage-workspace-v0.1
+      - name: Publish success status
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              context: 'project-chat-binding-wiring',
+              description: 'Project chat binding wiring passed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+      - name: Publish failure status
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'failure',
+              context: 'project-chat-binding-wiring',
+              description: 'Project chat binding wiring failed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
