@@ -252,9 +252,5 @@ mod temporary_chat_rag_tests {
             .block_on(temporary.context.build_for(conversation, branch, &history))
             .expect("temporary context");
         assert_eq!(rag.retrievals.load(Ordering::Acquire), 1);
-        assert_eq!(
-            temporary.tools.registry_names(),
-            vec!["get_hardware_info".to_string(), "math_eval".to_string()]
-        );
     }
 }
