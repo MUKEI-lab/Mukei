@@ -7,12 +7,13 @@ A candidate is releasable only when every automated hard gate is green on the **
 
 ## 1. Automated hard gates
 
-### A. `storage-release-gate / release-gate`
+### A. `storage-release-gate`
 
-Run `.github/workflows/storage-release-gate.yml` on the exact candidate SHA. It must pass all of the following:
+Run `.github/workflows/storage-release-gate.yml` on the exact candidate SHA. The workflow publishes the stable commit-status context `storage-release-gate`, which must be green. It must pass all of the following:
 
 - canonical V015 bytes are frozen at Git blob `9804b7f325ac49c86fe0799f3f8d0bddc4cac57f`;
 - V016 is present and declares `PRAGMA user_version = 16`;
+- Cargo dependency resolution is locked to the committed `Cargo.lock`;
 - `cargo fmt --all -- --check`;
 - embedded migrations are contiguous and include V016;
 - canonical V015 database upgrades by applying V016 only;
@@ -36,7 +37,26 @@ The exact same candidate SHA must also have these existing repository checks gre
 
 These remain required because they cover surfaces outside the focused storage release runner, including broader workspace and Android/JNI validation configured by the repository CI.
 
-## 2. Migration safety gate
+## 2. Promotion topology gate
+
+This temporary branch is a long-lived divergent implementation branch, not automatically a safe ancestry-merge candidate for the current production Android branch.
+
+Before release, choose and record exactly one promotion mode:
+
+1. **Branch-native candidate** — release/test this branch as its own immutable candidate; or
+2. **Production integration candidate** — start from the intended current production base and selectively port the reviewed storage commits/files, then rerun every release gate on the resulting integration SHA.
+
+For production integration:
+
+- recalculate ahead/behind state immediately before promotion;
+- do not treat a green temp-branch SHA as evidence for a different selectively ported SHA;
+- do not ancestry-merge the entire temp branch solely to acquire Universal Storage;
+- resolve production-base conflicts explicitly, especially runtime/JNI, migration registry, Cargo lock/toolchain, and Android build/CI files;
+- rerun `storage-release-gate`, `storage-branch-validation`, and `full-rust-workspace` on the final integration SHA.
+
+Any unreviewed base drift or gate evidence copied from a different SHA is an automatic **NO-GO**.
+
+## 3. Migration safety gate
 
 Before release:
 
@@ -49,7 +69,7 @@ Before release:
 
 Any historical migration-byte change is an automatic **NO-GO**.
 
-## 3. Storage integrity gate
+## 4. Storage integrity gate
 
 The candidate must preserve these invariants:
 
@@ -63,7 +83,7 @@ The candidate must preserve these invariants:
 - terminal journal evidence cannot be rewritten;
 - corrupted/deduplicated objects fail closed rather than being silently accepted.
 
-## 4. Crash/recovery acceptance
+## 5. Crash/recovery acceptance
 
 Run targeted fault/restart scenarios against the candidate build:
 
@@ -83,7 +103,7 @@ Acceptance criteria:
 - deterministic recovery queue behavior;
 - orphaned temporary/staging material is recoverable or cleanable without exposing it as committed user data.
 
-## 5. Android/device boundary
+## 6. Android/device boundary
 
 Before promoting the storage foundation into a production Android release:
 
@@ -96,12 +116,13 @@ Before promoting the storage foundation into a production Android release:
 
 A compile-only Android result is not sufficient for release acceptance.
 
-## 6. Release evidence packet
+## 7. Release evidence packet
 
 Record, for one immutable candidate SHA:
 
 - source commit SHA;
-- `storage-release-gate / release-gate` run URL/result;
+- promotion mode and intended production base SHA, if applicable;
+- `storage-release-gate` run URL/result;
 - `storage-branch-validation` run URL/result;
 - `full-rust-workspace` run URL/result;
 - Android release-hardening run/artifact identifier;
@@ -110,9 +131,9 @@ Record, for one immutable candidate SHA:
 - crash/recovery acceptance result;
 - known limitations and explicit deferred risks.
 
-## 7. GO / NO-GO rule
+## 8. GO / NO-GO rule
 
-**GO** only when all hard automated gates are green on the same SHA, migration history is immutable, upgrade/recovery acceptance passes, and required device evidence is attached.
+**GO** only when all hard automated gates are green on the same SHA, migration history is immutable, upgrade/recovery acceptance passes, promotion topology is reviewed, and required device evidence is attached.
 
 **NO-GO** for any of the following:
 
@@ -121,4 +142,5 @@ Record, for one immutable candidate SHA:
 - migration requiring database reset/reinstall;
 - integrity/isolation regression;
 - recovery that can duplicate, rebind, or expose partially committed data;
+- unreviewed production-base drift or ancestry-merge shortcut;
 - release artifact not traceable to the accepted source SHA.
