@@ -1,0 +1,218 @@
+name: one-shot-projects-mvp
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - '.github/workflows/one-shot-projects-mvp.yml'
+
+permissions:
+  contents: write
+  statuses: write
+
+jobs:
+  wire-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Publish pending status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'pending',
+              context: 'projects-mvp-wire',
+              description: 'Wiring encrypted Projects MVP',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@1.86.0
+
+      - name: Wire Project domain
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one anchor, found {count}: {old[:80]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # Protocol minor and Project command registry/payloads/snapshot domain.
+          protocol = 'rust/crates/mukei-core/src/ui_protocol.rs'
+          replace_once(protocol, 'pub const PROTOCOL_MINOR: u16 = 1;', 'pub const PROTOCOL_MINOR: u16 = 2;')
+          replace_once(protocol,
+          '''    /// Import a selected Android document into the active chat workspace.\n    StorageImportFile,\n    /// Persist one product setting.\n    SettingsUpdate,''',
+          '''    /// Import a selected Android document into the active chat workspace.\n    StorageImportFile,\n    /// Create a durable encrypted project record.\n    ProjectCreate,\n    /// Update an active project record.\n    ProjectUpdate,\n    /// Archive a project without deleting its durable identity.\n    ProjectArchive,\n    /// Persist one product setting.\n    SettingsUpdate,''')
+          replace_once(protocol,
+          '''            "storage.import_file" => Some(Self::StorageImportFile),\n            "settings.update" => Some(Self::SettingsUpdate),''',
+          '''            "storage.import_file" => Some(Self::StorageImportFile),\n            "project.create" => Some(Self::ProjectCreate),\n            "project.update" => Some(Self::ProjectUpdate),\n            "project.archive" => Some(Self::ProjectArchive),\n            "settings.update" => Some(Self::SettingsUpdate),''')
+          replace_once(protocol,
+          '''            Self::StorageImportFile => "storage.import_file",\n            Self::SettingsUpdate => "settings.update",''',
+          '''            Self::StorageImportFile => "storage.import_file",\n            Self::ProjectCreate => "project.create",\n            Self::ProjectUpdate => "project.update",\n            Self::ProjectArchive => "project.archive",\n            Self::SettingsUpdate => "settings.update",''')
+          replace_once(protocol,
+          '''                | Self::StorageImportFile\n                | Self::RecoveryResume''',
+          '''                | Self::StorageImportFile\n                | Self::ProjectCreate\n                | Self::ProjectUpdate\n                | Self::ProjectArchive\n                | Self::RecoveryResume''')
+          replace_once(protocol,
+          '''/// Product setting mutation payload.\n#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]\npub struct SettingUpdatePayload {''',
+          '''/// New durable project payload.\n#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\npub struct ProjectCreatePayload {\n    pub name: String,\n    #[serde(default)]\n    pub description: String,\n}\n\n/// Mutable project metadata payload.\n#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\npub struct ProjectUpdatePayload {\n    pub project_id: String,\n    pub name: String,\n    #[serde(default)]\n    pub description: String,\n}\n\n/// Payload containing one project identity.\n#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\npub struct ProjectPayload {\n    pub project_id: String,\n}\n\n/// Product setting mutation payload.\n#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]\npub struct SettingUpdatePayload {''')
+          replace_once(protocol,
+          '''    /// Selected document destined for encrypted workspace storage.\n    StorageImport(StorageImportPayload),\n    /// Setting mutation.\n    SettingUpdate(SettingUpdatePayload),''',
+          '''    /// Selected document destined for encrypted workspace storage.\n    StorageImport(StorageImportPayload),\n    /// New project metadata.\n    ProjectCreate(ProjectCreatePayload),\n    /// Updated project metadata.\n    ProjectUpdate(ProjectUpdatePayload),\n    /// Existing project identity.\n    Project(ProjectPayload),\n    /// Setting mutation.\n    SettingUpdate(SettingUpdatePayload),''')
+          replace_once(protocol,
+          '''    /// Operation and replay registry summary.\n    Operations,\n}''',
+          '''    /// Operation and replay registry summary.\n    Operations,\n    /// Durable encrypted project records.\n    Projects,\n}''')
+          replace_once(protocol,
+          '''            "operations" => Some(Self::Operations),\n            _ => None,''',
+          '''            "operations" => Some(Self::Operations),\n            "projects" => Some(Self::Projects),\n            _ => None,''')
+          replace_once(protocol,
+          '''            CommandType::DocumentGrant\n            | CommandType::AppInitialize\n            | CommandType::DownloadCancel\n            | CommandType::SettingsUpdate,''',
+          '''            CommandType::DocumentGrant\n            | CommandType::AppInitialize\n            | CommandType::DownloadCancel\n            | CommandType::ProjectCreate\n            | CommandType::ProjectUpdate\n            | CommandType::ProjectArchive\n            | CommandType::SettingsUpdate,''')
+          replace_once(protocol,
+          '''        CommandType::SettingsUpdate => {\n            let value: SettingUpdatePayload = serde_json::from_value(envelope.payload.clone())''',
+          '''        CommandType::ProjectCreate => {\n            let value: ProjectCreatePayload = serde_json::from_value(envelope.payload.clone())\n                .map_err(|_| RejectionReason::InvalidPayload)?;\n            if !non_empty_bounded(&value.name, 128)\n                || value.name.chars().any(char::is_control)\n                || value.description.len() > 4 * 1024\n                || value.description.chars().any(|character| character == '\\0')\n            {\n                return Err(RejectionReason::InvalidPayload);\n            }\n            ValidatedCommandPayload::ProjectCreate(value)\n        }\n        CommandType::ProjectUpdate => {\n            let value: ProjectUpdatePayload = serde_json::from_value(envelope.payload.clone())\n                .map_err(|_| RejectionReason::InvalidPayload)?;\n            if !valid_protocol_id(&value.project_id, MAX_PROTOCOL_ID_LEN)\n                || !non_empty_bounded(&value.name, 128)\n                || value.name.chars().any(char::is_control)\n                || value.description.len() > 4 * 1024\n                || value.description.chars().any(|character| character == '\\0')\n            {\n                return Err(RejectionReason::InvalidPayload);\n            }\n            ValidatedCommandPayload::ProjectUpdate(value)\n        }\n        CommandType::ProjectArchive => {\n            let value: ProjectPayload = serde_json::from_value(envelope.payload.clone())\n                .map_err(|_| RejectionReason::InvalidPayload)?;\n            if !valid_protocol_id(&value.project_id, MAX_PROTOCOL_ID_LEN) {\n                return Err(RejectionReason::InvalidPayload);\n            }\n            ValidatedCommandPayload::Project(value)\n        }\n        CommandType::SettingsUpdate => {\n            let value: SettingUpdatePayload = serde_json::from_value(envelope.payload.clone())''')
+
+          # Runtime snapshot domain.
+          types = 'rust/crates/mukei-core/src/application_runtime/foundation_types.rs'
+          replace_once(types,
+          '''    Protocol,\n    Operations,\n}''',
+          '''    Protocol,\n    Operations,\n    Projects,\n}''')
+          replace_once(types,
+          '''            "operations" => Some(Self::Operations),\n            _ => None,''',
+          '''            "operations" => Some(Self::Operations),\n            "projects" => Some(Self::Projects),\n            _ => None,''')
+
+          # Project projection state and encrypted hydration.
+          state = 'rust/crates/mukei-core/src/application_runtime/foundation_state.rs'
+          replace_once(state,
+          '''struct ConversationProjection {\n    conversation_id: String,\n    branch_id: String,\n    messages: Vec<ChatMessage>,\n}\n\nenum PersistenceCommand {''',
+          '''struct ConversationProjection {\n    conversation_id: String,\n    branch_id: String,\n    messages: Vec<ChatMessage>,\n}\n\n#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]\n#[serde(rename_all = "snake_case")]\nenum ProjectStatus {\n    Active,\n    Archived,\n}\n\n#[derive(Clone, Debug, Serialize, Deserialize)]\nstruct ProjectProjection {\n    project_id: String,\n    name: String,\n    description: String,\n    status: ProjectStatus,\n    created_at: DateTime<Utc>,\n    updated_at: DateTime<Utc>,\n}\n\nenum PersistenceCommand {''')
+          replace_once(state,
+          '''    documents: RwLock<HashMap<String, DocumentProjection>>,\n    projection_store:''',
+          '''    documents: RwLock<HashMap<String, DocumentProjection>>,\n    projects: RwLock<HashMap<String, ProjectProjection>>,\n    projection_store:''')
+          replace_once(state,
+          '''            documents: RwLock::new(HashMap::new()),\n            projection_store:''',
+          '''            documents: RwLock::new(HashMap::new()),\n            projects: RwLock::new(HashMap::new()),\n            projection_store:''')
+          replace_once(state,
+          '''        if let Some(value) = store.load("conversations").await? {\n            let records: Vec<ConversationProjection> =\n                serde_json::from_value(value).map_err(|_| MukeiError::DatabaseCorruption)?;\n            *self\n                .conversations\n                .write()\n                .unwrap_or_else(|poisoned| poisoned.into_inner()) = records\n                .into_iter()\n                .map(|record| ((record.conversation_id, record.branch_id), record.messages))\n                .collect();\n        }\n        self.persist_operations();''',
+          '''        if let Some(value) = store.load("conversations").await? {\n            let records: Vec<ConversationProjection> =\n                serde_json::from_value(value).map_err(|_| MukeiError::DatabaseCorruption)?;\n            *self\n                .conversations\n                .write()\n                .unwrap_or_else(|poisoned| poisoned.into_inner()) = records\n                .into_iter()\n                .map(|record| ((record.conversation_id, record.branch_id), record.messages))\n                .collect();\n        }\n        if let Some(value) = store.load("projects").await? {\n            let records: Vec<ProjectProjection> =\n                serde_json::from_value(value).map_err(|_| MukeiError::DatabaseCorruption)?;\n            *self\n                .projects\n                .write()\n                .unwrap_or_else(|poisoned| poisoned.into_inner()) = records\n                .into_iter()\n                .map(|record| (record.project_id.clone(), record))\n                .collect();\n        }\n        self.persist_operations();''')
+
+          # Deterministic shutdown flush includes projects.
+          flush = 'rust/crates/mukei-core/src/application_runtime/persistence_flush.rs'
+          replace_once(flush,
+          '''            let conversations = self\n                .conversations''',
+          '''            let projects = self\n                .projects\n                .read()\n                .unwrap_or_else(|p| p.into_inner())\n                .values()\n                .cloned()\n                .collect::<Vec<_>>();\n            let conversations = self\n                .conversations''')
+          replace_once(flush,
+          '''                (\n                    "conversations",\n                    serde_json::to_value(conversations)\n                        .map_err(|error| MukeiError::Internal(error.to_string()))?,\n                ),\n            ];''',
+          '''                (\n                    "conversations",\n                    serde_json::to_value(conversations)\n                        .map_err(|error| MukeiError::Internal(error.to_string()))?,\n                ),\n                (\n                    "projects",\n                    serde_json::to_value(projects)\n                        .map_err(|error| MukeiError::Internal(error.to_string()))?,\n                ),\n            ];''')
+
+          # Capabilities, routing, snapshot.
+          base = 'rust/crates/mukei-core/src/application_runtime/base.rs'
+          replace_once(base,
+          '''            CommandType::DocumentRevoke,\n            CommandType::SettingsUpdate,''',
+          '''            CommandType::DocumentRevoke,\n            CommandType::ProjectCreate,\n            CommandType::ProjectUpdate,\n            CommandType::ProjectArchive,\n            CommandType::SettingsUpdate,''')
+
+          router = 'rust/crates/mukei-core/src/application_runtime/foundation_context.rs'
+          replace_once(router,
+          '''            CommandType::StorageImportFile => runtime.import_storage_file(command),\n            CommandType::SettingsUpdate => runtime.update_setting(command),''',
+          '''            CommandType::StorageImportFile => runtime.import_storage_file(command),\n            CommandType::ProjectCreate => runtime.create_project(command),\n            CommandType::ProjectUpdate => runtime.update_project(command),\n            CommandType::ProjectArchive => runtime.archive_project(command),\n            CommandType::SettingsUpdate => runtime.update_setting(command),''')
+
+          snap = 'rust/crates/mukei-core/src/application_runtime/documents_snapshot.rs'
+          replace_once(snap,
+          '''            RuntimeSnapshotDomain::Operations => {\n                self.features.snapshot(self.platform.snapshot())\n            }\n        };''',
+          '''            RuntimeSnapshotDomain::Operations => {\n                self.features.snapshot(self.platform.snapshot())\n            }\n            RuntimeSnapshotDomain::Projects => self.features.projects_snapshot(),\n        };''')
+
+          # JNI snapshot bridge.
+          jni = 'rust/crates/mukei-android-jni/src/lib.rs'
+          replace_once(jni,
+          '''        SnapshotDomainV2::Operations => RuntimeSnapshotDomain::Operations,\n    }''',
+          '''        SnapshotDomainV2::Operations => RuntimeSnapshotDomain::Operations,\n        SnapshotDomainV2::Projects => RuntimeSnapshotDomain::Projects,\n    }''')
+
+          # Android bridge: typed Project commands and snapshot allowance.
+          host = 'android/app/src/main/kotlin/ai/mukei/android/BackendRuntimeHost.kt'
+          replace_once(host,
+          '''fun requestRuntimeSnapshot(domain: String): String? {\n    if (domain !in setOf("application", "settings", "protocol", "operations")) return null''',
+          '''data class ProjectCommandSubmission(\n    val status: String,\n    val operationId: String?,\n    val rejectionReason: String?,\n)\n\nfun createProject(name: String, description: String): ProjectCommandSubmission =\n    submitProjectCommand(\n        commandType = "project.create",\n        payload = JSONObject().put("name", name).put("description", description),\n    )\n\nfun updateProject(\n    projectId: String,\n    name: String,\n    description: String,\n): ProjectCommandSubmission = submitProjectCommand(\n    commandType = "project.update",\n    payload = JSONObject()\n        .put("project_id", projectId)\n        .put("name", name)\n        .put("description", description),\n)\n\nfun archiveProject(projectId: String): ProjectCommandSubmission = submitProjectCommand(\n    commandType = "project.archive",\n    payload = JSONObject().put("project_id", projectId),\n)\n\nprivate fun submitProjectCommand(\n    commandType: String,\n    payload: JSONObject,\n): ProjectCommandSubmission {\n    val activeGateway = gateway.get()\n        ?: return ProjectCommandSubmission("rejected", null, "backend_unavailable")\n    return try {\n        val envelope = JSONObject()\n            .put("protocol_version", JSONObject().put("major", 2).put("minor", 2))\n            .put("command_id", UUID.randomUUID().toString())\n            .put("request_id", UUID.randomUUID().toString())\n            .put("command_type", commandType)\n            .put("submitted_at", Instant.now().toString())\n            .put("correlation_id", UUID.randomUUID().toString())\n            .put("idempotency_key", "project-${UUID.randomUUID()}")\n            .put("payload", payload)\n        val acknowledgement = JSONObject(\n            String(\n                activeGateway.submitCommand(\n                    envelope.toString().toByteArray(StandardCharsets.UTF_8),\n                ),\n                StandardCharsets.UTF_8,\n            ),\n        )\n        ProjectCommandSubmission(\n            status = acknowledgement.optString("status", "rejected"),\n            operationId = acknowledgement.optString("operation_id").takeIf { it.isNotBlank() },\n            rejectionReason = acknowledgement.optString("rejection_reason").takeIf { it.isNotBlank() },\n        )\n    } catch (failure: Throwable) {\n        ProjectCommandSubmission("rejected", null, stableFailureCode(failure))\n    }\n}\n\nfun requestRuntimeSnapshot(domain: String): String? {\n    if (domain !in setOf("application", "settings", "protocol", "operations", "projects")) return null''')
+
+          # Route Projects destination to the real surface.
+          shell = 'android/app/src/main/kotlin/ai/mukei/android/MukeiProductShell.kt'
+          replace_once(shell,
+          '''                    TopLevelDestination.STORAGE -> StorageSurface()\n                    TopLevelDestination.MODELS -> ModelsSurface(state.readiness)''',
+          '''                    TopLevelDestination.STORAGE -> StorageSurface()\n                    TopLevelDestination.PROJECTS -> ProjectsSurface()\n                    TopLevelDestination.MODELS -> ModelsSurface(state.readiness)''')
+          PY
+
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff --check
+          git diff --stat
+
+      - name: Test Project runtime changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path rust/Cargo.toml -p mukei-core --lib
+          cargo check --manifest-path rust/Cargo.toml -p mukei-android-jni --no-default-features --features secure_runtime,rag_runtime,runtime_hardening
+
+      - name: Commit Project MVP
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'mukei-projects-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add \
+            rust/crates/mukei-core/src/ui_protocol.rs \
+            rust/crates/mukei-core/src/application_runtime/foundation_types.rs \
+            rust/crates/mukei-core/src/application_runtime/foundation_state.rs \
+            rust/crates/mukei-core/src/application_runtime/persistence_flush.rs \
+            rust/crates/mukei-core/src/application_runtime/base.rs \
+            rust/crates/mukei-core/src/application_runtime/foundation_context.rs \
+            rust/crates/mukei-core/src/application_runtime/documents_snapshot.rs \
+            rust/crates/mukei-core/src/application_runtime/projects.rs \
+            rust/crates/mukei-android-jni/src/lib.rs \
+            android/app/src/main/kotlin/ai/mukei/android/BackendRuntimeHost.kt \
+            android/app/src/main/kotlin/ai/mukei/android/MukeiProductShell.kt \
+            android/app/src/main/kotlin/ai/mukei/android/ProjectsSurface.kt
+          git commit -m 'Add encrypted Projects MVP runtime and UI'
+          git push origin HEAD:temp/universal-storage-workspace-v0.1
+
+      - name: Publish success status
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              context: 'projects-mvp-wire',
+              description: 'Encrypted Projects MVP wired and Rust-tested',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+
+      - name: Publish failure status
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'failure',
+              context: 'projects-mvp-wire',
+              description: 'Projects MVP wiring failed closed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
