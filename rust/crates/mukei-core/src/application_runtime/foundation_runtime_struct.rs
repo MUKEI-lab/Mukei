@@ -15,6 +15,7 @@ pub struct MukeiRuntime {
     activation: Arc<ModelActivationService>,
     backend_factory: Option<Arc<dyn InferenceBackendFactory>>,
     agent_loop: RwLock<Option<Arc<AgentLoop>>>,
+    temporary_agent_loop: RwLock<Option<Arc<AgentLoop>>>,
     projection_store: RwLock<Option<Arc<dyn RuntimeProjectionStore>>>,
     rag_service: RwLock<Option<Arc<dyn RuntimeRagService>>>,
     remote_tool_secrets: Mutex<Option<RemoteToolSecrets>>,
