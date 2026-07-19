@@ -346,6 +346,9 @@ pub struct InitializePayload {
 pub struct SendMessagePayload {
     /// User-authored text.
     pub text: String,
+    /// Optional active project to bind when creating a brand-new conversation.
+    #[serde(default)]
+    pub project_id: Option<String>,
 }
 
 /// Payload containing one model identity.
@@ -968,7 +971,12 @@ pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand,
         CommandType::ChatSendMessage => {
             let value: SendMessagePayload = serde_json::from_value(envelope.payload.clone())
                 .map_err(|_| RejectionReason::InvalidPayload)?;
-            if !non_empty_bounded(&value.text, 64 * 1024) {
+            if !non_empty_bounded(&value.text, 64 * 1024)
+                || value
+                    .project_id
+                    .as_deref()
+                    .is_some_and(|project_id| !valid_protocol_id(project_id, MAX_PROTOCOL_ID_LEN))
+            {
                 return Err(RejectionReason::InvalidPayload);
             }
             ValidatedCommandPayload::SendMessage(value)

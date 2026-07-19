@@ -18,6 +18,7 @@ pub enum ExternalDataSource {
     WebSearch,
     File,
     Rag,
+    ProjectMemory,
     ToolError,
     Hardware,
     Math,
@@ -30,6 +31,7 @@ impl ExternalDataSource {
             Self::WebSearch => "web_search",
             Self::File => "file",
             Self::Rag => "rag",
+            Self::ProjectMemory => "project_memory",
             Self::ToolError => "tool_error",
             Self::Hardware => "hardware",
             Self::Math => "math",
@@ -139,5 +141,6 @@ mod tests {
         assert_eq!(ExternalDataSource::WebSearch.as_str(), "web_search");
         assert_eq!(ExternalDataSource::ToolError.as_str(), "tool_error");
         assert_eq!(ExternalDataSource::Rag.as_str(), "rag");
+        assert_eq!(ExternalDataSource::ProjectMemory.as_str(), "project_memory");
     }
 }

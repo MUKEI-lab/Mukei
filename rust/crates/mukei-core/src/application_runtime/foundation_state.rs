@@ -68,6 +68,8 @@ struct DocumentProjection {
 struct ConversationProjection {
     conversation_id: String,
     branch_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    project_id: Option<String>,
     messages: Vec<ChatMessage>,
 }
 
@@ -119,6 +121,7 @@ struct FeatureState {
     operations: RwLock<HashMap<String, OperationRecord>>,
     operation_tokens: Mutex<HashMap<String, CancellationToken>>,
     conversations: RwLock<HashMap<(String, String), Vec<ChatMessage>>>,
+    conversation_projects: RwLock<HashMap<String, String>>,
     models: RwLock<HashMap<String, ModelProjection>>,
     documents: RwLock<HashMap<String, DocumentProjection>>,
     projects: RwLock<HashMap<String, ProjectProjection>>,
@@ -169,6 +172,7 @@ impl FeatureState {
             operations: RwLock::new(HashMap::new()),
             operation_tokens: Mutex::new(HashMap::new()),
             conversations: RwLock::new(HashMap::new()),
+            conversation_projects: RwLock::new(HashMap::new()),
             models: RwLock::new(HashMap::new()),
             documents: RwLock::new(HashMap::new()),
             projects: RwLock::new(HashMap::new()),
@@ -235,13 +239,35 @@ impl FeatureState {
         if let Some(value) = store.load("conversations").await? {
             let records: Vec<ConversationProjection> =
                 serde_json::from_value(value).map_err(|_| MukeiError::DatabaseCorruption)?;
+            let mut binding_states: HashMap<String, Option<String>> = HashMap::new();
+            let mut conversations = HashMap::new();
+            for record in records {
+                if let Some(existing) = binding_states.get(&record.conversation_id) {
+                    if existing != &record.project_id {
+                        return Err(MukeiError::DatabaseCorruption);
+                    }
+                } else {
+                    binding_states
+                        .insert(record.conversation_id.clone(), record.project_id.clone());
+                }
+                conversations.insert(
+                    (record.conversation_id, record.branch_id),
+                    record.messages,
+                );
+            }
+            *self
+                .conversation_projects
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = binding_states
+                .into_iter()
+                .filter_map(|(conversation_id, project_id)| {
+                    project_id.map(|project_id| (conversation_id, project_id))
+                })
+                .collect();
             *self
                 .conversations
                 .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = records
-                .into_iter()
-                .map(|record| ((record.conversation_id, record.branch_id), record.messages))
-                .collect();
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = conversations;
         }
         if let Some(value) = store.load("projects").await? {
             let records: Vec<ProjectProjection> =
@@ -332,6 +358,11 @@ impl FeatureState {
             .persistence_enqueue
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let bindings = self
+            .conversation_projects
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         let records = self
             .conversations
             .read()
@@ -341,6 +372,7 @@ impl FeatureState {
                 |((conversation_id, branch_id), messages)| ConversationProjection {
                     conversation_id: conversation_id.clone(),
                     branch_id: branch_id.clone(),
+                    project_id: bindings.get(conversation_id).cloned(),
                     messages: messages.clone(),
                 },
             )

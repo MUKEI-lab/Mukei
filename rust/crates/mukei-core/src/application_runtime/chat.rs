@@ -58,7 +58,28 @@ impl MukeiRuntime {
             .as_ref()
             .and_then(|scope| scope.turn_id.as_deref())
         {
+            if payload.project_id.is_some() {
+                return CommandAcknowledgementV2::rejected(
+                    Some(&command.envelope),
+                    RejectionReason::InvalidPayload,
+                );
+            }
             return self.edit_chat_message(command, message_id, &payload.text);
+        }
+        if let Some(project_id) = payload.project_id.as_deref() {
+            if let Err(acknowledgement) = self.ensure_inference_ready_for_branching(command) {
+                return acknowledgement;
+            }
+            let (conversation, _, _, _) = match Self::parse_chat_scope(command) {
+                Ok(value) => value,
+                Err(acknowledgement) => return acknowledgement,
+            };
+            if let Err(reason) = self
+                .features
+                .bind_conversation_project(&conversation, project_id)
+            {
+                return CommandAcknowledgementV2::rejected(Some(&command.envelope), reason);
+            }
         }
         self.start_chat_operation(command, payload.text.clone(), false, None)
     }
@@ -93,6 +114,16 @@ impl MukeiRuntime {
             );
         };
 
+        let project_context = match self
+            .features
+            .project_context_message(&conversation, branch_id)
+        {
+            Ok(value) => value,
+            Err(reason) => {
+                return CommandAcknowledgementV2::rejected(Some(&command.envelope), reason)
+            }
+        };
+
         let user_message = existing_user.unwrap_or_else(|| {
             let mut message = ChatMessage::user_with_id(MessageId::new(), branch_id, text.clone());
             message.parent = self
@@ -112,6 +143,11 @@ impl MukeiRuntime {
             self.features
                 .append_message(&conversation, &branch, user_message.clone());
         }
+        let mut seed_history = Vec::with_capacity(2);
+        if let Some(project_context) = project_context {
+            seed_history.push(project_context);
+        }
+        seed_history.push(user_message.clone());
         let (acknowledgement, operation_id, operation_token) = self.accept_operation(command);
         let events = Arc::clone(&self.events);
         let features = Arc::clone(&self.features);
@@ -151,15 +187,14 @@ impl MukeiRuntime {
                     _ = watcher_done_task.cancelled() => {},
                 }
             });
-            let request = AgentRunRequest::new(
-                text,
+            let run = agent_loop.run_seeded(
+                seed_history,
                 conversation_id,
                 branch_id,
-                user_message_id,
                 combined_cancel,
                 token_sender,
+                None,
             );
-            let run = agent_loop.run(request);
             tokio::pin!(run);
             let outcome = loop {
                 tokio::select! {

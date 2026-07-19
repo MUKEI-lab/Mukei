@@ -46,6 +46,7 @@ private data class ChatMessageCard(
 private data class ChatBranchCard(
     val conversationId: String,
     val branchId: String,
+    val projectId: String?,
     val messages: List<ChatMessageCard>,
 ) {
     val lastTimestamp: String
@@ -58,6 +59,7 @@ private data class ChatSummary(
     val title: String,
     val preview: String,
     val branchCount: Int,
+    val projectId: String?,
     val lastTimestamp: String,
 )
 
@@ -87,6 +89,7 @@ internal fun ChatsSurface(
     }
 
     val summaries = remember(branches) { summarizeChats(branches) }
+    val projectNames = loadChatProjectNames()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -118,6 +121,14 @@ internal fun ChatsSurface(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(Modifier.height(MukeiSpacing.Small))
+                        chat.projectId?.let { projectId ->
+                            Text(
+                                "Project · ${projectNames[projectId] ?: "Bound project"}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Spacer(Modifier.height(MukeiSpacing.ExtraSmall))
+                        }
                         Text(
                             "${chat.branchCount} branch${if (chat.branchCount == 1) "" else "es"}",
                             style = MaterialTheme.typography.labelMedium,
@@ -209,6 +220,7 @@ internal fun ChatConversationSurface(
         ?: orderedBranches.lastOrNull()
     val activeIndex = orderedBranches.indexOfFirst { it.branchId == activeBranch?.branchId }
     val messages = activeBranch?.messages.orEmpty()
+    val activeProjectName = activeBranch?.projectId?.let { loadChatProjectNames()[it] }
     val lastAssistantId = messages.lastOrNull { it.role == "assistant" }?.messageId
     val canGenerate = readiness.inference.status == ReadinessStatus.READY
 
@@ -219,6 +231,19 @@ internal fun ChatConversationSurface(
             .padding(MukeiLayout.LargePhoneTextPadding),
         verticalArrangement = Arrangement.spacedBy(MukeiSpacing.Medium),
     ) {
+        activeBranch?.projectId?.let {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+            ) {
+                Text(
+                    "Project context · ${activeProjectName ?: "Bound project"}",
+                    modifier = Modifier.padding(MukeiSpacing.Medium),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        }
         if (orderedBranches.size > 1 && activeIndex >= 0) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -468,7 +493,14 @@ private fun loadChatBranches(conversationId: String? = null): List<ChatBranchCar
                         )
                     }
                 }
-                add(ChatBranchCard(currentConversationId, branchId, messages))
+                add(
+                    ChatBranchCard(
+                        conversationId = currentConversationId,
+                        branchId = branchId,
+                        projectId = branch.optString("project_id").takeIf(String::isNotBlank),
+                        messages = messages,
+                    ),
+                )
             }
         }
     }.getOrDefault(emptyList())
@@ -488,10 +520,38 @@ private fun summarizeChats(branches: List<ChatBranchCard>): List<ChatSummary> = 
             title = firstUser.ifBlank { "Conversation" }.lineSequence().first().take(72),
             preview = last.ifBlank { firstUser }.replace('\n', ' ').take(160),
             branchCount = values.size,
+            projectId = latest.projectId,
             lastTimestamp = latest.lastTimestamp,
         )
     }
     .sortedByDescending { it.lastTimestamp }
+
+
+internal data class ChatProjectOption(
+    val projectId: String,
+    val name: String,
+)
+
+internal fun loadActiveChatProjects(): List<ChatProjectOption> {
+    val raw = BackendRuntimeHost.requestRuntimeSnapshot("projects") ?: return emptyList()
+    return runCatching {
+        val payload = JSONObject(raw).optJSONObject("payload") ?: JSONObject()
+        val projects = payload.optJSONArray("projects") ?: JSONArray()
+        buildList {
+            for (index in 0 until projects.length()) {
+                val project = projects.optJSONObject(index) ?: continue
+                if (project.optString("status") != "active") continue
+                val projectId = project.optString("project_id")
+                val name = project.optString("name")
+                if (projectId.isBlank() || name.isBlank()) continue
+                add(ChatProjectOption(projectId, name))
+            }
+        }
+    }.getOrDefault(emptyList())
+}
+
+private fun loadChatProjectNames(): Map<String, String> = loadActiveChatProjects()
+    .associate { it.projectId to it.name }
 
 private fun chatFailure(code: String): String = when (code) {
     "backend_unavailable" -> "A ready model is required for this action."

@@ -204,13 +204,18 @@ object BackendRuntimeHost {
         conversationId: String,
         branchId: String,
         text: String,
-    ): ChatCommandSubmission = submitChatCommand(
-        commandType = "chat.send_message",
-        conversationId = conversationId,
-        branchId = branchId,
-        payload = JSONObject().put("text", text),
-        idempotent = true,
-    )
+        projectId: String? = null,
+    ): ChatCommandSubmission {
+        val payload = JSONObject().put("text", text)
+        if (!projectId.isNullOrBlank()) payload.put("project_id", projectId)
+        return submitChatCommand(
+            commandType = "chat.send_message",
+            conversationId = conversationId,
+            branchId = branchId,
+            payload = payload,
+            idempotent = true,
+        )
+    }
 
     fun editChatMessage(
         conversationId: String,

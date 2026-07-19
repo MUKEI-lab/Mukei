@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use crate::agent::context::{ContextBackend, TokenCount};
 use crate::agent::{
-    AgentLoop, AgentRunRequest, ContextBudgetManager, FailureTracker, ToolExecutionPolicy,
+    AgentLoop, ContextBudgetManager, FailureTracker, ToolExecutionPolicy,
     ToolExecutor, Watchdog, WatchdogHandle,
 };
 use crate::config::MukeiConfig;

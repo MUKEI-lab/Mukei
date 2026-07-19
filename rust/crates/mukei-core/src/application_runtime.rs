@@ -6,6 +6,7 @@ include!("application_runtime/foundation_context.rs");
 include!("application_runtime/foundation_runtime_struct.rs");
 include!("application_runtime/services.rs");
 include!("application_runtime/base.rs");
+include!("application_runtime/project_chat.rs");
 include!("application_runtime/chat.rs");
 include!("application_runtime/chat_branching.rs");
 include!("application_runtime/chat_snapshot.rs");

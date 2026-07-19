@@ -49,6 +49,11 @@ fn clone_branch_prefix(
 
 impl FeatureState {
     fn conversations_snapshot(&self) -> Value {
+        let bindings = self
+            .conversation_projects
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         let mut branches = self
             .conversations
             .read()
@@ -58,6 +63,7 @@ impl FeatureState {
                 |((conversation_id, branch_id), messages)| ConversationProjection {
                     conversation_id: conversation_id.clone(),
                     branch_id: branch_id.clone(),
+                    project_id: bindings.get(conversation_id).cloned(),
                     messages: messages.clone(),
                 },
             )

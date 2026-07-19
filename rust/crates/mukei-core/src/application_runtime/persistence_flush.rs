@@ -41,6 +41,11 @@ impl FeatureState {
                 .values()
                 .cloned()
                 .collect::<Vec<_>>();
+            let conversation_projects = self
+                .conversation_projects
+                .read()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
             let conversations = self
                 .conversations
                 .read()
@@ -50,6 +55,7 @@ impl FeatureState {
                     |((conversation_id, branch_id), messages)| ConversationProjection {
                         conversation_id: conversation_id.clone(),
                         branch_id: branch_id.clone(),
+                        project_id: conversation_projects.get(conversation_id).cloned(),
                         messages: messages.clone(),
                     },
                 )
