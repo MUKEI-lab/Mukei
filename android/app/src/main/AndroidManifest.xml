@@ -9,7 +9,6 @@
     <application
         android:name=".MukeiApplication"
         android:allowBackup="false"
-        android:extractNativeLibs="false"
         android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:label="Mukei"
