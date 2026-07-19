@@ -11,6 +11,7 @@ import ai.mukei.android.core.nativebridge.RustNativeGateway
 import ai.mukei.android.core.nativebridge.SecureRuntimeFactory
 import ai.mukei.android.protocol.AcknowledgementStatus
 import ai.mukei.android.protocol.CommandEnvelopeV2
+import ai.mukei.android.protocol.CommandScope
 import ai.mukei.android.protocol.EventEnvelopeV2
 import ai.mukei.android.protocol.EventSequenceTracker
 import ai.mukei.android.protocol.ProtocolJsonCodec
@@ -65,6 +66,7 @@ object BackendRuntimeHost {
     private val bootstrapActive = AtomicBoolean(false)
     private val running = AtomicBoolean(false)
     private val activeWorkers = AtomicInteger(0)
+    private val activeCommandCalls = AtomicInteger(0)
     private val terminalFailure = AtomicReference<String?>(null)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val bootstrapExecutor = Executors.newSingleThreadExecutor { runnable ->
@@ -76,6 +78,9 @@ object BackendRuntimeHost {
     private val eventExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "mukei-event-dispatcher").apply { isDaemon = true }
     }
+    private val commandExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "mukei-chat-command").apply { isDaemon = true }
+    }
     private val gateway = AtomicReference<RustNativeGateway?>(null)
     private val eventListeners = CopyOnWriteArraySet<EventBatchListener>()
     private val eventSequenceTracker = EventSequenceTracker()
@@ -84,6 +89,9 @@ object BackendRuntimeHost {
         private set
 
     var eventStatus: EventStatus by mutableStateOf(EventStatus())
+        private set
+
+    var chatState: ChatUiState by mutableStateOf(ChatUiState())
         private set
 
     fun addEventListener(listener: EventBatchListener): Closeable {
@@ -103,6 +111,7 @@ object BackendRuntimeHost {
         terminalFailure.set(null)
         eventSequenceTracker.reset()
         resetEventStatus()
+        resetChatState()
         publish(State.Starting)
 
         val appContext = context.applicationContext
@@ -171,8 +180,6 @@ object BackendRuntimeHost {
                         eventSequenceTracker.reset()
                         started.set(false)
                         val failure = terminalFailure.get()
-                        // Keep bootstrapActive true until native cleanup and the restart gate
-                        // are complete so shutdown/start cannot overlap this teardown window.
                         bootstrapActive.set(false)
                         publish(if (failure == null) State.Stopped else State.Failed(failure))
                     } else {
@@ -196,13 +203,244 @@ object BackendRuntimeHost {
             return
         }
 
-        // Never close a gateway concurrently with the bootstrap thread. A bootstrap
-        // observes running=false and performs its own cleanup in its finally block.
-        if (!bootstrapActive.get() && activeWorkers.get() == 0) {
-            gateway.getAndSet(null)?.runCatching { close() }
-            eventSequenceTracker.reset()
-            started.set(false)
-            publish(State.Stopped)
+        // Never close a gateway concurrently with bootstrap, long-poll workers, or one
+        // of the bounded begin/end/submit JNI calls owned by commandExecutor.
+        if (!bootstrapActive.get()) {
+            gateway.get()?.let(::finishGatewayIfIdle)
+        }
+    }
+
+    /** Start a blank durable chat. A Temporary Chat is purged before the switch completes. */
+    fun startNewNormalChat() = onMain {
+        if (chatState.transitionInProgress) return@onMain
+        val current = chatState.session
+        if (current?.temporary == true) {
+            endTemporaryChatThen { chatState = ChatUiState() }
+            return@onMain
+        }
+        if (chatState.generationInProgress) {
+            chatState = chatState.copy(errorCode = "generation_in_progress")
+            return@onMain
+        }
+        chatState = ChatUiState()
+    }
+
+    /** Begin a runtime-minted Temporary Chat. RAG, files and web tools are unavailable. */
+    fun beginTemporaryChat() = onMain {
+        if (chatState.transitionInProgress || chatState.generationInProgress) {
+            chatState = chatState.copy(errorCode = "chat_transition_busy")
+            return@onMain
+        }
+        if (chatState.temporary) return@onMain
+
+        val ready = state as? State.Ready
+        if (ready == null || !ready.readiness.inferenceReady) {
+            chatState = chatState.copy(errorCode = "inference_not_ready")
+            return@onMain
+        }
+        val capabilities = ready.runtimeContract.protocol.capabilities.toSet()
+        if (CAP_TEMPORARY_CHAT_SESSIONS !in capabilities ||
+            CAP_TEMPORARY_CHAT_RAG_DISABLED !in capabilities
+        ) {
+            chatState = chatState.copy(errorCode = "temporary_chat_unavailable")
+            return@onMain
+        }
+        val activeGateway = gateway.get()
+        if (activeGateway == null || !isActive(activeGateway)) {
+            chatState = chatState.copy(errorCode = "backend_runtime_unavailable")
+            return@onMain
+        }
+
+        chatState = chatState.copy(transitionInProgress = true, errorCode = null)
+        executeGatewayCall(activeGateway) {
+            val result = activeGateway.beginTemporaryChat()
+            mainHandler.post {
+                if (gateway.get() !== activeGateway || !running.get()) return@post
+                chatState = ChatUiState(
+                    session = ActiveChatScope(
+                        conversationId = result.conversationId,
+                        branchId = result.branchId,
+                        kind = ChatSessionKind.TEMPORARY,
+                    ),
+                )
+            }
+        }
+    }
+
+    /**
+     * Purge Temporary Chat before an external navigation transition. The continuation runs
+     * only after native end confirms the process-local session was removed.
+     */
+    fun leaveTemporaryChat(onComplete: () -> Unit) = onMain {
+        if (chatState.transitionInProgress) return@onMain
+        if (!chatState.temporary) {
+            onComplete()
+            return@onMain
+        }
+        endTemporaryChatThen(onComplete)
+    }
+
+    /** Submit one message through Protocol V2 using the active durable/temporary scope. */
+    fun submitChatMessage(rawText: String) = onMain {
+        val text = rawText.trim()
+        if (text.isEmpty()) return@onMain
+        if (text.toByteArray(StandardCharsets.UTF_8).size > MAX_CHAT_TEXT_BYTES) {
+            chatState = chatState.copy(errorCode = "chat_message_too_large")
+            return@onMain
+        }
+        if (chatState.generationInProgress || chatState.transitionInProgress) {
+            chatState = chatState.copy(errorCode = "generation_in_progress")
+            return@onMain
+        }
+        val ready = state as? State.Ready
+        if (ready == null || !ready.readiness.inferenceReady) {
+            chatState = chatState.copy(errorCode = "inference_not_ready")
+            return@onMain
+        }
+        val activeGateway = gateway.get()
+        if (activeGateway == null || !isActive(activeGateway)) {
+            chatState = chatState.copy(errorCode = "backend_runtime_unavailable")
+            return@onMain
+        }
+
+        val session = chatState.session ?: ActiveChatScope(
+            conversationId = UUID.randomUUID().toString(),
+            branchId = UUID.randomUUID().toString(),
+            kind = ChatSessionKind.NORMAL,
+        )
+        val correlationId = UUID.randomUUID().toString()
+        val userMessageId = "user:$correlationId"
+        val command = CommandEnvelopeV2(
+            protocolVersion = ProtocolVersion.CURRENT,
+            commandId = UUID.randomUUID().toString(),
+            requestId = UUID.randomUUID().toString(),
+            commandType = "chat.send_message",
+            submittedAt = Instant.now(),
+            correlationId = correlationId,
+            idempotencyKey = UUID.randomUUID().toString(),
+            scope = CommandScope(
+                conversationId = session.conversationId,
+                branchId = session.branchId,
+            ),
+            payloadJson = JSONObject().put("text", text).toString(),
+        )
+        chatState = chatState.copy(
+            session = session,
+            messages = chatState.messages + ChatUiMessage(
+                id = userMessageId,
+                role = ChatMessageRole.USER,
+                text = text,
+            ),
+            generationInProgress = true,
+            activeCorrelationId = correlationId,
+            activeOperationId = null,
+            errorCode = null,
+        )
+
+        executeGatewayCall(activeGateway) {
+            val acknowledgement = ProtocolJsonCodec.decodeAcknowledgement(
+                activeGateway.submitCommand(ProtocolJsonCodec.encodeCommand(command)),
+            )
+            mainHandler.post {
+                if (gateway.get() !== activeGateway || chatState.activeCorrelationId != correlationId) {
+                    return@post
+                }
+                if (acknowledgement.status == AcknowledgementStatus.ACCEPTED &&
+                    !acknowledgement.operationId.isNullOrBlank()
+                ) {
+                    chatState = chatState.copy(activeOperationId = acknowledgement.operationId)
+                } else {
+                    chatState = chatState.copy(
+                        messages = chatState.messages.filterNot { it.id == userMessageId },
+                        generationInProgress = false,
+                        activeCorrelationId = null,
+                        activeOperationId = null,
+                        errorCode = acknowledgement.rejectionReason ?: "chat_command_rejected",
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearChatError() = onMain {
+        if (chatState.errorCode != null) chatState = chatState.copy(errorCode = null)
+    }
+
+    private fun endTemporaryChatThen(onComplete: () -> Unit) {
+        val session = chatState.session
+        if (session?.temporary != true) {
+            onComplete()
+            return
+        }
+        val activeGateway = gateway.get()
+        if (activeGateway == null || !isActive(activeGateway)) {
+            chatState = chatState.copy(errorCode = "backend_runtime_unavailable")
+            return
+        }
+        chatState = chatState.copy(transitionInProgress = true, errorCode = null)
+        executeGatewayCall(activeGateway) {
+            val result = activeGateway.endTemporaryChat(session.conversationId, session.branchId)
+            mainHandler.post {
+                if (gateway.get() !== activeGateway) return@post
+                val current = chatState.session
+                if (result.ended && current?.conversationId == session.conversationId &&
+                    current.branchId == session.branchId
+                ) {
+                    chatState = ChatUiState()
+                    onComplete()
+                } else if (current?.conversationId == session.conversationId) {
+                    chatState = chatState.copy(
+                        transitionInProgress = false,
+                        errorCode = "temporary_chat_end_failed",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun executeGatewayCall(
+        activeGateway: RustNativeGateway,
+        call: () -> Unit,
+    ) {
+        activeCommandCalls.incrementAndGet()
+        try {
+            commandExecutor.execute {
+                try {
+                    if (isActive(activeGateway)) call()
+                } catch (failure: Throwable) {
+                    val code = stableFailureCode(failure)
+                    mainHandler.post {
+                        if (gateway.get() === activeGateway) {
+                            val correlation = chatState.activeCorrelationId
+                            chatState = chatState.copy(
+                                messages = if (correlation == null) {
+                                    chatState.messages
+                                } else {
+                                    chatState.messages.filterNot { it.id == "user:$correlation" }
+                                },
+                                generationInProgress = false,
+                                transitionInProgress = false,
+                                activeCorrelationId = null,
+                                activeOperationId = null,
+                                errorCode = code,
+                            )
+                        }
+                    }
+                } finally {
+                    activeCommandCalls.decrementAndGet()
+                    finishGatewayIfIdle(activeGateway)
+                }
+            }
+        } catch (failure: Throwable) {
+            activeCommandCalls.decrementAndGet()
+            mainHandler.post {
+                chatState = chatState.copy(
+                    generationInProgress = false,
+                    transitionInProgress = false,
+                    errorCode = stableFailureCode(failure),
+                )
+            }
+            finishGatewayIfIdle(activeGateway)
         }
     }
 
@@ -258,15 +496,24 @@ object BackendRuntimeHost {
                 running.set(false)
             }
         } finally {
-            if (activeWorkers.decrementAndGet() == 0) {
-                gateway.compareAndSet(activeGateway, null)
-                activeGateway.runCatching { close() }
-                eventSequenceTracker.reset()
-                started.set(false)
-                val failure = terminalFailure.get()
-                publish(if (failure == null) State.Stopped else State.Failed(failure))
-            }
+            activeWorkers.decrementAndGet()
+            finishGatewayIfIdle(activeGateway)
         }
+    }
+
+    private fun finishGatewayIfIdle(activeGateway: RustNativeGateway) {
+        if (running.get() || bootstrapActive.get()) return
+        if (activeWorkers.get() != 0 || activeCommandCalls.get() != 0) return
+        if (!gateway.compareAndSet(activeGateway, null)) return
+
+        activeGateway.runCatching { close() }
+        eventSequenceTracker.reset()
+        started.set(false)
+        val failure = terminalFailure.get()
+        mainHandler.post {
+            chatState = ChatUiState(errorCode = failure)
+        }
+        publish(if (failure == null) State.Stopped else State.Failed(failure))
     }
 
     private fun isActive(activeGateway: RustNativeGateway): Boolean =
@@ -302,6 +549,11 @@ object BackendRuntimeHost {
                 runtimeSessionChanges = eventStatus.runtimeSessionChanges +
                     if (batch.runtimeSessionChanged) 1 else 0,
             )
+            chatState = if (batch.runtimeSessionChanged) {
+                ChatUiState(errorCode = "runtime_session_changed")
+            } else {
+                ChatEventReducer.reduce(chatState, batch.events)
+            }
             eventListeners.forEach { listener ->
                 runCatching { listener.onEvents(batch) }
             }
@@ -326,6 +578,18 @@ object BackendRuntimeHost {
         mainHandler.post { eventStatus = EventStatus() }
     }
 
+    private fun resetChatState() {
+        mainHandler.post { chatState = ChatUiState() }
+    }
+
+    private inline fun onMain(crossinline action: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            action()
+        } else {
+            mainHandler.post { action() }
+        }
+    }
+
     private fun stableFailureCode(failure: Throwable): String {
         val value = failure.message.orEmpty().trim()
         return value.takeIf {
@@ -339,6 +603,9 @@ object BackendRuntimeHost {
         mainHandler.post { state = value }
     }
 
+    private const val CAP_TEMPORARY_CHAT_SESSIONS = "temporary_chat_sessions"
+    private const val CAP_TEMPORARY_CHAT_RAG_DISABLED = "temporary_chat_rag_disabled"
+    private const val MAX_CHAT_TEXT_BYTES = 32 * 1024
     private const val PLATFORM_BATCH_SIZE = 8
     private const val PLATFORM_LONG_POLL_MILLISECONDS = 1_000L
     private const val EVENT_BATCH_SIZE = 64
