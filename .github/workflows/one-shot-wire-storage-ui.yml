@@ -43,17 +43,8 @@ jobs:
 
           host = Path('android/app/src/main/kotlin/ai/mukei/android/BackendRuntimeHost.kt')
           text = host.read_text(encoding='utf-8')
-          anchor = '''    fun interface EventBatchListener {
-              fun onEvents(batch: RuntimeEventBatch)
-          }
-
-          private val started = AtomicBoolean(false)
-          '''
-          replacement = '''    fun interface EventBatchListener {
-              fun onEvents(batch: RuntimeEventBatch)
-          }
-
-          data class StorageImportSubmission(
+          host_anchor = '    private val started = AtomicBoolean(false)\n'
+          host_insert = '''    data class StorageImportSubmission(
               val status: String,
               val operationId: String?,
               val rejectionReason: String?,
@@ -115,24 +106,27 @@ jobs:
               }.getOrNull()
           }
 
-          private val started = AtomicBoolean(false)
           '''
-          if text.count(anchor) != 1:
-              raise SystemExit(f'BackendRuntimeHost anchor count={text.count(anchor)}')
-          host.write_text(text.replace(anchor, replacement, 1), encoding='utf-8')
+          if 'data class StorageImportSubmission(' not in text:
+              count = text.count(host_anchor)
+              if count != 1:
+                  raise SystemExit(f'BackendRuntimeHost semantic anchor count={count}')
+              text = text.replace(host_anchor, host_insert + host_anchor, 1)
+              host.write_text(text, encoding='utf-8')
 
           shell = Path('android/app/src/main/kotlin/ai/mukei/android/MukeiProductShell.kt')
           text = shell.read_text(encoding='utf-8')
-          anchor = '''                    TopLevelDestination.MODELS -> ModelsSurface(state.readiness)
-                      else -> ReservedDestinationSurface(selected)
-          '''
-          replacement = '''                    TopLevelDestination.STORAGE -> StorageSurface()
-                      TopLevelDestination.MODELS -> ModelsSurface(state.readiness)
-                      else -> ReservedDestinationSurface(selected)
-          '''
-          if text.count(anchor) != 1:
-              raise SystemExit(f'MukeiProductShell anchor count={text.count(anchor)}')
-          shell.write_text(text.replace(anchor, replacement, 1), encoding='utf-8')
+          route = '                    TopLevelDestination.MODELS -> ModelsSurface(state.readiness)\n'
+          if 'TopLevelDestination.STORAGE -> StorageSurface()' not in text:
+              count = text.count(route)
+              if count != 1:
+                  raise SystemExit(f'MukeiProductShell Models route count={count}')
+              text = text.replace(
+                  route,
+                  '                    TopLevelDestination.STORAGE -> StorageSurface()\n' + route,
+                  1,
+              )
+              shell.write_text(text, encoding='utf-8')
           PY
 
           git diff --check
@@ -148,8 +142,12 @@ jobs:
           git add \
             android/app/src/main/kotlin/ai/mukei/android/BackendRuntimeHost.kt \
             android/app/src/main/kotlin/ai/mukei/android/MukeiProductShell.kt
-          git commit -m 'Connect encrypted storage import UI'
-          git push origin HEAD:temp/universal-storage-workspace-v0.1
+          if git diff --cached --quiet; then
+            echo 'Storage UI wiring already present.'
+          else
+            git commit -m 'Connect encrypted storage import UI'
+            git push origin HEAD:temp/universal-storage-workspace-v0.1
+          fi
 
       - name: Publish success status
         if: success()
