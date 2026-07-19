@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 enum class MukeiIconKey {
     MENU,
     NEW_CHAT,
+    TEMPORARY_CHAT,
     MORE,
     HOME,
     STORAGE,
@@ -84,6 +85,22 @@ fun MukeiIcon(
                 drawLine(tint, p(0.74f, 0.26f), p(0.82f, 0.34f), strokeWidth, StrokeCap.Round)
                 drawLine(tint, p(0.18f, 0.82f), p(0.18f, 0.90f), strokeWidth, StrokeCap.Round)
                 drawLine(tint, p(0.18f, 0.90f), p(0.63f, 0.90f), strokeWidth, StrokeCap.Round)
+            }
+
+            MukeiIconKey.TEMPORARY_CHAT -> {
+                // Conversation bubble plus a small clock: clearly denotes a transient chat
+                // without borrowing an incognito/disguise metaphor.
+                drawRoundRect(
+                    tint,
+                    topLeft = p(0.13f, 0.18f),
+                    size = Size(w * 0.62f, h * 0.49f),
+                    cornerRadius = CornerRadius(w * 0.13f, h * 0.13f),
+                    style = stroke,
+                )
+                drawLine(tint, p(0.28f, 0.67f), p(0.20f, 0.78f), strokeWidth, StrokeCap.Round)
+                drawCircle(tint, radius = w * 0.20f, center = p(0.69f, 0.68f), style = stroke)
+                drawLine(tint, p(0.69f, 0.68f), p(0.69f, 0.56f), strokeWidth, StrokeCap.Round)
+                drawLine(tint, p(0.69f, 0.68f), p(0.77f, 0.73f), strokeWidth, StrokeCap.Round)
             }
 
             MukeiIconKey.MORE -> {
