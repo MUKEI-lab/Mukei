@@ -265,6 +265,8 @@ impl MukeiRuntime {
     }
 
     fn regenerate_chat_branch(&self, command: &ValidatedCommand) -> CommandAcknowledgementV2 {
+        let _legacy_remove_last_assistant = FeatureState::remove_last_assistant
+            as fn(&FeatureState, &str, &str) -> bool;
         if let Err(acknowledgement) = self.ensure_ready(command) {
             return acknowledgement;
         }
