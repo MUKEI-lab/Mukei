@@ -114,6 +114,7 @@ impl MukeiRuntime {
         &self,
         product_config: &MukeiConfig,
         rag_service: Option<Arc<dyn RuntimeRagService>>,
+        temporary: bool,
     ) -> Arc<AgentLoop> {
         let context = ContextBudgetManager::new(
             Arc::new(RuntimeContextBackend {
@@ -125,11 +126,13 @@ impl MukeiRuntime {
             product_config.n_ctx,
         );
 
-        let remote_policy = *self
-            .remote_policy
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let registry = {
+        let registry = if temporary {
+            ToolRegistry::temporary_chat()
+        } else {
+            let remote_policy = *self
+                .remote_policy
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let secrets = self
                 .remote_tool_secrets
                 .lock()
@@ -171,7 +174,7 @@ impl MukeiRuntime {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()?;
-        Some(self.build_agent_loop(&config, None))
+        Some(self.build_agent_loop(&config, None, true))
     }
 
     fn install_agent_loop(&self, product_config: &MukeiConfig) {
@@ -180,7 +183,7 @@ impl MukeiRuntime {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
-        let agent_loop = self.build_agent_loop(product_config, rag_service);
+        let agent_loop = self.build_agent_loop(product_config, rag_service, false);
         *self
             .agent_loop
             .write()
@@ -232,8 +235,8 @@ mod temporary_chat_rag_tests {
         let rag = Arc::new(CountingRag {
             retrievals: AtomicUsize::new(0),
         });
-        let normal = runtime.build_agent_loop(&product, Some(rag.clone()));
-        let temporary = runtime.build_agent_loop(&product, None);
+        let normal = runtime.build_agent_loop(&product, Some(rag.clone()), false);
+        let temporary = runtime.build_agent_loop(&product, None, true);
         let conversation = ConversationId::new();
         let branch = BranchId::new();
         let history = vec![ChatMessage::user_with_id(MessageId::new(), branch, "find my notes")];
@@ -249,5 +252,9 @@ mod temporary_chat_rag_tests {
             .block_on(temporary.context.build_for(conversation, branch, &history))
             .expect("temporary context");
         assert_eq!(rag.retrievals.load(Ordering::Acquire), 1);
+        assert_eq!(
+            temporary.tools.registry_names(),
+            vec!["get_hardware_info".to_string(), "math_eval".to_string()]
+        );
     }
 }
