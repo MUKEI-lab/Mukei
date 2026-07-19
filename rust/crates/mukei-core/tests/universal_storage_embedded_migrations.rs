@@ -1,3 +1,5 @@
+#![cfg(feature = "rusqlite")]
+
 //! Regression coverage for the packaged/mobile migration source.
 //!
 //! Universal Storage is unusable in release builds unless the append-only
