@@ -14,6 +14,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  RUST_TOOLCHAIN: "1.86.0"
+  RUSTUP_TOOLCHAIN: "1.86.0"
   ANDROID_NDK_VERSION: "27.2.12479018"
   CARGO_NDK_VERSION: "4.1.2"
 
@@ -32,6 +34,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.4.1"
+
       - name: Install pinned Android native build tools
         shell: bash
         run: |
@@ -40,40 +43,23 @@ jobs:
           sudo apt-get install -y cmake ninja-build perl make
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;${ANDROID_NDK_VERSION}"
+          rustup target list --toolchain "${RUSTUP_TOOLCHAIN}" --installed | grep -Fx 'aarch64-linux-android'
+          rustup target list --toolchain "${RUSTUP_TOOLCHAIN}" --installed | grep -Fx 'x86_64-linux-android'
           cargo install cargo-ndk --version "${CARGO_NDK_VERSION}" --locked
-      - name: Build pinned native capsules and JNI runtime
+
+      - name: Build hardened native capsules and JNI runtime
         shell: bash
         run: |
           set -euo pipefail
-          ndk="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}"
-          test -d "$ndk"
-          output="$GITHUB_WORKSPACE/android/core/native/src/main/jniLibs"
-          rm -rf "$output"
-          mkdir -p "$output"
-          for abi in arm64-v8a x86_64; do
-            cmake -S rust/llama-cpp-prebuilt \
-              -B "build/llama-$abi" \
-              -G Ninja \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
-              -DANDROID_ABI="$abi" \
-              -DANDROID_PLATFORM=android-26 \
-              -DANDROID_STL=c++_static \
-              -DMUKEI_LLAMA_FORCE_REBUILD=ON
-            cmake --build "build/llama-$abi" --target mukei_llama_native
-            export MUKEI_LLAMA_NATIVE_LIB_DIR="$GITHUB_WORKSPACE/rust/llama-cpp-prebuilt/prebuilt/$abi"
-            (
-              cd rust
-              cargo ndk -t "$abi" -o ../android/core/native/src/main/jniLibs \
-                build -p mukei-android-jni --release \
-                --no-default-features \
-                --features runtime_production,runtime_hardening
-            )
-            cp "$MUKEI_LLAMA_NATIVE_LIB_DIR/libmukei_llama_native.so" "$output/$abi/"
-          done
+          bash scripts/android/ci_release_native.sh
+
       - name: Build unsigned R8-shrunk ABI APKs
-        run: gradle -p android :app:lintRelease :app:assembleRelease --stacktrace
-      - name: Verify release contents and produce checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle -p android :app:lintRelease :app:assembleRelease --stacktrace
+
+      - name: Verify unsigned release contents
         shell: bash
         run: |
           set -euo pipefail
@@ -82,20 +68,100 @@ jobs:
           test "${#apks[@]}" -eq 2
           arm_apk="$(printf '%s\n' "${apks[@]}" | grep 'arm64-v8a')"
           x86_apk="$(printf '%s\n' "${apks[@]}" | grep 'x86_64')"
+
           unzip -l "$arm_apk" | grep -q 'lib/arm64-v8a/libmukei_android.so'
           unzip -l "$arm_apk" | grep -q 'lib/arm64-v8a/libmukei_llama_native.so'
+          unzip -l "$arm_apk" | grep -q 'lib/arm64-v8a/libc++_shared.so'
           unzip -l "$x86_apk" | grep -q 'lib/x86_64/libmukei_android.so'
           unzip -l "$x86_apk" | grep -q 'lib/x86_64/libmukei_llama_native.so'
-          printf '%s\0' "${apks[@]}" | sort -z | xargs -0 sha256sum > "$output/SHA256SUMS"
-          test -s "$output/SHA256SUMS"
+          unzip -l "$x86_apk" | grep -q 'lib/x86_64/libc++_shared.so'
           test -s android/app/build/outputs/mapping/release/mapping.txt
+
+      - name: Sign and verify test APKs with Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          test -n "$build_tools"
+          zipalign="$build_tools/zipalign"
+          apksigner="$build_tools/apksigner"
+          test -x "$zipalign"
+          test -x "$apksigner"
+
+          unsigned_dir="android/app/build/outputs/apk/release"
+          signed_dir="android/app/build/outputs/apk/test-signed"
+          mkdir -p "$signed_dir"
+
+          keystore="$RUNNER_TEMP/mukei-test-signing.jks"
+          password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          keytool -genkeypair -noprompt \
+            -keystore "$keystore" \
+            -storepass "$password" \
+            -keypass "$password" \
+            -alias mukei-test \
+            -keyalg RSA \
+            -keysize 3072 \
+            -validity 3650 \
+            -dname "CN=Mukei Test Build,O=MUKEI-lab"
+
+          cat > "$signed_dir/SIGNING-INFO.txt" <<'EOF'
+          These APKs are signed with an ephemeral CI-generated test certificate.
+          The private key is not retained or uploaded.
+          A build signed by a different certificate cannot update an existing installation with the same application ID.
+          Official Android apksigner verification output follows.
+          EOF
+
+          mapfile -t unsigned_apks < <(find "$unsigned_dir" -maxdepth 1 -type f -name '*-unsigned.apk' | sort)
+          test "${#unsigned_apks[@]}" -eq 2
+
+          for apk in "${unsigned_apks[@]}"; do
+            base="$(basename "$apk")"
+            stem="${base%-unsigned.apk}"
+            aligned="$RUNNER_TEMP/${stem}-aligned.apk"
+            signed="$signed_dir/${stem}-test-signed.apk"
+
+            "$zipalign" -P 16 -f -v 4 "$apk" "$aligned"
+            "$zipalign" -c -P 16 -v 4 "$aligned"
+
+            "$apksigner" sign \
+              --ks "$keystore" \
+              --ks-key-alias mukei-test \
+              --ks-pass "pass:$password" \
+              --key-pass "pass:$password" \
+              --v1-signing-enabled true \
+              --v2-signing-enabled true \
+              --v3-signing-enabled true \
+              --v4-signing-enabled false \
+              --out "$signed" \
+              "$aligned"
+
+            {
+              printf '\n=== %s ===\n' "$(basename "$signed")"
+              "$apksigner" verify \
+                --verbose \
+                --print-certs \
+                --min-sdk-version 26 \
+                "$signed"
+            } | tee -a "$signed_dir/SIGNING-INFO.txt"
+
+            "$zipalign" -c -P 16 -v 4 "$signed"
+          done
+
+          mapfile -t signed_apks < <(find "$signed_dir" -maxdepth 1 -type f -name '*-test-signed.apk' | sort)
+          test "${#signed_apks[@]}" -eq 2
+          printf '%s\0' "${signed_apks[@]}" | sort -z | xargs -0 sha256sum > "$signed_dir/SHA256SUMS"
+          test -s "$signed_dir/SHA256SUMS"
+          test -s "$signed_dir/SIGNING-INFO.txt"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: mukei-android-release-candidate-${{ github.ref_name }}-${{ github.sha }}
+          name: mukei-android-test-signed-${{ github.ref_name }}-${{ github.sha }}
           if-no-files-found: error
           retention-days: 30
           path: |
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/apk/release/SHA256SUMS
+            android/app/build/outputs/apk/test-signed/*.apk
+            android/app/build/outputs/apk/test-signed/SHA256SUMS
+            android/app/build/outputs/apk/test-signed/SIGNING-INFO.txt
             android/app/build/outputs/mapping/release/mapping.txt
             android/app/build/reports/lint-results-release.html
