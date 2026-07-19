@@ -1,4 +1,5 @@
 name: one-shot-secure-rag-arm64
+# Rebuild trigger: encrypted Storage MVP UI wired on temp branch.
 
 on:
   push:
@@ -128,7 +129,7 @@ jobs:
           ZIPALIGN="$(find "$SDK_ROOT/build-tools" -type f -name zipalign | sort -V | tail -1)"
           keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/mukei-secure-rag-test.jks" -storepass mukei-test-pass -keypass mukei-test-pass -alias mukei-secure-rag-test -keyalg RSA -keysize 3072 -validity 3650 -dname 'CN=Mukei Secure RAG Test,O=MUKEI-lab Test Build,C=US'
           aligned="$RUNNER_TEMP/mukei-secure-rag-arm64-aligned.apk"
-          out="deliver/mukei-secure-rag-arm64-test-signed.apk"
+          out="deliver/mukei-storage-mvp-arm64-test-signed.apk"
           "$ZIPALIGN" -p -f 4 "$SOURCE_APK" "$aligned"
           "$APKSIGNER" sign --ks "$RUNNER_TEMP/mukei-secure-rag-test.jks" --ks-key-alias mukei-secure-rag-test --ks-pass pass:mukei-test-pass --key-pass pass:mukei-test-pass --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --out "$out" "$aligned"
           "$APKSIGNER" verify --verbose --print-certs --min-sdk-version 26 "$out" | tee deliver/APKSIGNER-VERIFY.txt
@@ -136,6 +137,7 @@ jobs:
           cat > deliver/SOURCE.txt <<EOF
           Source branch: temp/universal-storage-workspace-v0.1
           Source commit: $GITHUB_SHA
+          Functionality: encrypted Storage MVP import/list UI
           Runtime features: secure_runtime,rag_runtime,runtime_hardening
           Native LLM inference capsule: not bundled in this recovery build.
           Signing: disposable CI test key; NOT a production identity.
@@ -143,7 +145,7 @@ jobs:
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: mukei-secure-rag-arm64-test-signed-${{ github.sha }}
+          name: mukei-storage-mvp-arm64-test-signed-${{ github.sha }}
           path: deliver/
           if-no-files-found: error
           retention-days: 7
@@ -152,10 +154,10 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'success', context: 'secure-rag-arm64', description: 'Hardened secure/RAG ARM64 APK built and signed', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'success', context: 'secure-rag-arm64', description: 'Storage MVP ARM64 APK built and signed', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
       - name: Publish failure status
         if: failure()
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'failure', context: 'secure-rag-arm64', description: 'Hardened secure/RAG ARM64 build failed', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
+            await github.rest.repos.createCommitStatus({owner: context.repo.owner, repo: context.repo.repo, sha: context.sha, state: 'failure', context: 'secure-rag-arm64', description: 'Storage MVP ARM64 build failed', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
