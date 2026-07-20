@@ -256,21 +256,16 @@ object BackendRuntimeHost {
             commandExecutor.execute {
                 val result = runCatching {
                     val session = activeGateway.beginTemporaryChat()
-                    val contractMatches =
-                        session.runtimeSessionId == ready.runtimeContract.runtimeSessionId &&
-                            !session.ragEnabled
-                    if (!contractMatches) {
+                    if (!BackendRuntimePolicies.temporaryStartMatches(
+                            session = session,
+                            expectedRuntimeSessionId = ready.runtimeContract.runtimeSessionId,
+                        )
+                    ) {
                         val ended = activeGateway.endTemporaryChat(
                             session.conversationId,
                             session.branchId,
                         )
-                        val cleanupMatches =
-                            ended.ended &&
-                                ended.runtimeSessionId == session.runtimeSessionId &&
-                                ended.conversationId == session.conversationId &&
-                                ended.branchId == session.branchId &&
-                                !ended.ragEnabled
-                        if (!cleanupMatches) {
+                        if (!BackendRuntimePolicies.temporaryCleanupMatches(ended, session)) {
                             throw IllegalStateException("temporary_chat_cleanup_failed")
                         }
                         throw IllegalStateException("temporary_chat_contract_mismatch")
@@ -343,13 +338,13 @@ object BackendRuntimeHost {
 
                     result.fold(
                         onSuccess = { ended ->
-                            val contractMatches =
-                                ended.ended &&
-                                    ended.runtimeSessionId == ready.runtimeContract.runtimeSessionId &&
-                                    ended.conversationId == current.conversationId &&
-                                    ended.branchId == current.branchId &&
-                                    !ended.ragEnabled
-                            if (contractMatches) {
+                            if (BackendRuntimePolicies.temporaryEndMatches(
+                                    ended = ended,
+                                    expectedRuntimeSessionId = ready.runtimeContract.runtimeSessionId,
+                                    conversationId = current.conversationId,
+                                    branchId = current.branchId,
+                                )
+                            ) {
                                 conversationState = newDurableConversation()
                                 onEnded(true)
                             } else {
@@ -447,21 +442,19 @@ object BackendRuntimeHost {
                             if (acknowledgement.status != AcknowledgementStatus.ACCEPTED ||
                                 acknowledgement.operationId != operationId
                             ) {
-                                conversationState = latest.copy(
-                                    messages = latest.messages.filterNot { it.id == userMessage.id },
-                                    activeOperationId = null,
-                                    streamingAssistant = "",
-                                    lastErrorCode = acknowledgement.rejectionReason
+                                conversationState = BackendRuntimePolicies.rollbackRejectedSubmission(
+                                    state = latest,
+                                    optimisticMessageId = userMessage.id,
+                                    errorCode = acknowledgement.rejectionReason
                                         ?: "chat_submission_rejected",
                                 )
                             }
                         },
                         onFailure = { failure ->
-                            conversationState = latest.copy(
-                                messages = latest.messages.filterNot { it.id == userMessage.id },
-                                activeOperationId = null,
-                                streamingAssistant = "",
-                                lastErrorCode = stableFailureCode(failure),
+                            conversationState = BackendRuntimePolicies.rollbackRejectedSubmission(
+                                state = latest,
+                                optimisticMessageId = userMessage.id,
+                                errorCode = stableFailureCode(failure),
                             )
                         },
                     )
