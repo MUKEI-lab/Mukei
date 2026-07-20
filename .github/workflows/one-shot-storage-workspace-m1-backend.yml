@@ -42,6 +42,7 @@ jobs:
           set -euo pipefail
           python3 .github/scripts/normalize_storage_workspace_m1_backend.py 2>&1 | tee storage-workspace-m1-backend.log
           python3 .github/scripts/patch_storage_workspace_m1_backend.py 2>&1 | tee -a storage-workspace-m1-backend.log
+          python3 .github/scripts/fix_storage_workspace_m1_backend_compile.py 2>&1 | tee -a storage-workspace-m1-backend.log
           cargo fmt --manifest-path rust/Cargo.toml --all 2>&1 | tee -a storage-workspace-m1-backend.log
           git diff --check 2>&1 | tee -a storage-workspace-m1-backend.log
       - name: Core check tests and clippy
@@ -81,6 +82,7 @@ jobs:
             rust/crates/mukei-core/src/application_runtime/documents_snapshot.rs \
             rust/crates/mukei-core/src/application_runtime/foundation_context.rs \
             rust/crates/mukei-core/src/application_runtime/storage_import.rs \
+            rust/crates/mukei-core/src/application_runtime/storage_import_tests.rs \
             rust/crates/mukei-core/src/ui_protocol.rs \
             rust/crates/mukei-android-jni/src/secure_runtime_jni.rs
           git commit -m 'Wire Universal Storage workspace runtime'
