@@ -40,6 +40,16 @@ jobs:
       - name: Format attachment source and assert scope
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('rust/crates/mukei-core/tests/conversation_storage_attachments.rs')
+          text = path.read_text()
+          old = '    SqlStorageWorkspaceService, StorageNodeId, StorageWorkspacePort, SystemDirectoryRole,\n    UniversalStorageRepository,\n'
+          new = '    SqlStorageWorkspaceService, StorageNodeId, StorageWorkspacePort, UniversalStorageRepository,\n'
+          if text.count(old) != 1:
+              raise SystemExit(f'unused import anchor count: {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
           cargo fmt --manifest-path rust/Cargo.toml --all
           git diff --check
           unexpected="$(git diff --name-only | grep -v -E '^(rust/crates/mukei-core/src/storage/conversation_attachments.rs|rust/crates/mukei-core/tests/conversation_storage_attachments.rs)$' || true)"
