@@ -40,7 +40,8 @@ jobs:
       - name: Apply guarded backend patch
         run: |
           set -euo pipefail
-          python3 .github/scripts/patch_storage_workspace_m1_backend.py 2>&1 | tee storage-workspace-m1-backend.log
+          python3 .github/scripts/normalize_storage_workspace_m1_backend.py 2>&1 | tee storage-workspace-m1-backend.log
+          python3 .github/scripts/patch_storage_workspace_m1_backend.py 2>&1 | tee -a storage-workspace-m1-backend.log
           cargo fmt --manifest-path rust/Cargo.toml --all 2>&1 | tee -a storage-workspace-m1-backend.log
           git diff --check 2>&1 | tee -a storage-workspace-m1-backend.log
       - name: Core check tests and clippy
