@@ -254,7 +254,29 @@ object BackendRuntimeHost {
 
         return try {
             commandExecutor.execute {
-                val result = runCatching { activeGateway.beginTemporaryChat() }
+                val result = runCatching {
+                    val session = activeGateway.beginTemporaryChat()
+                    val contractMatches =
+                        session.runtimeSessionId == ready.runtimeContract.runtimeSessionId &&
+                            !session.ragEnabled
+                    if (!contractMatches) {
+                        val ended = activeGateway.endTemporaryChat(
+                            session.conversationId,
+                            session.branchId,
+                        )
+                        val cleanupMatches =
+                            ended.ended &&
+                                ended.runtimeSessionId == session.runtimeSessionId &&
+                                ended.conversationId == session.conversationId &&
+                                ended.branchId == session.branchId &&
+                                !ended.ragEnabled
+                        if (!cleanupMatches) {
+                            throw IllegalStateException("temporary_chat_cleanup_failed")
+                        }
+                        throw IllegalStateException("temporary_chat_contract_mismatch")
+                    }
+                    session
+                }
                 mainHandler.post {
                     val latest = conversationState
                     if (latest.conversationId != current.conversationId ||
@@ -265,24 +287,13 @@ object BackendRuntimeHost {
 
                     result.fold(
                         onSuccess = { session ->
-                            val contractMatches =
-                                session.runtimeSessionId == ready.runtimeContract.runtimeSessionId &&
-                                    !session.ragEnabled
-                            if (!contractMatches) {
-                                conversationState = current.copy(
-                                    transitionInProgress = false,
-                                    lastErrorCode = "temporary_chat_contract_mismatch",
-                                )
-                                onReady(false)
-                            } else {
-                                conversationState = ConversationState(
-                                    conversationId = session.conversationId,
-                                    branchId = session.branchId,
-                                    temporary = true,
-                                    ragEnabled = false,
-                                )
-                                onReady(true)
-                            }
+                            conversationState = ConversationState(
+                                conversationId = session.conversationId,
+                                branchId = session.branchId,
+                                temporary = true,
+                                ragEnabled = false,
+                            )
+                            onReady(true)
                         },
                         onFailure = { failure ->
                             conversationState = current.copy(
@@ -333,7 +344,8 @@ object BackendRuntimeHost {
                     result.fold(
                         onSuccess = { ended ->
                             val contractMatches =
-                                ended.runtimeSessionId == ready.runtimeContract.runtimeSessionId &&
+                                ended.ended &&
+                                    ended.runtimeSessionId == ready.runtimeContract.runtimeSessionId &&
                                     ended.conversationId == current.conversationId &&
                                     ended.branchId == current.branchId &&
                                     !ended.ragEnabled
@@ -436,6 +448,7 @@ object BackendRuntimeHost {
                                 acknowledgement.operationId != operationId
                             ) {
                                 conversationState = latest.copy(
+                                    messages = latest.messages.filterNot { it.id == userMessage.id },
                                     activeOperationId = null,
                                     streamingAssistant = "",
                                     lastErrorCode = acknowledgement.rejectionReason
@@ -445,6 +458,7 @@ object BackendRuntimeHost {
                         },
                         onFailure = { failure ->
                             conversationState = latest.copy(
+                                messages = latest.messages.filterNot { it.id == userMessage.id },
                                 activeOperationId = null,
                                 streamingAssistant = "",
                                 lastErrorCode = stableFailureCode(failure),
