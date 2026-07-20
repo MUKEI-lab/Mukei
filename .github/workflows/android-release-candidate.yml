@@ -26,6 +26,8 @@ env:
 jobs:
   release-candidate:
     runs-on: ubuntu-latest
+    outputs:
+      signing_mode: ${{ steps.signing.outputs.mode }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -81,8 +83,86 @@ jobs:
           unzip -l "$x86_apk" | grep -q 'lib/x86_64/libc++_shared.so'
           test -s android/app/build/outputs/mapping/release/mapping.txt
 
-      - name: Sign and verify test APKs with Android build tools
+      - name: Prepare signing identity
+        id: signing
         shell: bash
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.MUKEI_ANDROID_RELEASE_KEYSTORE_B64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.MUKEI_ANDROID_RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.MUKEI_ANDROID_RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.MUKEI_ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          keystore="$RUNNER_TEMP/mukei-signing.jks"
+          store_password_file="$RUNNER_TEMP/mukei-signing-store-password"
+          key_password_file="$RUNNER_TEMP/mukei-signing-key-password"
+          alias_file="$RUNNER_TEMP/mukei-signing-alias"
+
+          is_release_tag=false
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == android-v* ]]; then
+            is_release_tag=true
+          fi
+
+          if [[ "$is_release_tag" == true ]]; then
+            missing=()
+            [[ -n "${RELEASE_KEYSTORE_B64:-}" ]] || missing+=(MUKEI_ANDROID_RELEASE_KEYSTORE_B64)
+            [[ -n "${RELEASE_STORE_PASSWORD:-}" ]] || missing+=(MUKEI_ANDROID_RELEASE_STORE_PASSWORD)
+            [[ -n "${RELEASE_KEY_ALIAS:-}" ]] || missing+=(MUKEI_ANDROID_RELEASE_KEY_ALIAS)
+            [[ -n "${RELEASE_KEY_PASSWORD:-}" ]] || missing+=(MUKEI_ANDROID_RELEASE_KEY_PASSWORD)
+            if (( ${#missing[@]} > 0 )); then
+              printf '::error::Release tag %s requires persistent Android signing secrets. Missing: %s\n' \
+                "$GITHUB_REF_NAME" "${missing[*]}"
+              exit 1
+            fi
+
+            printf '%s' "$RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore"
+            test -s "$keystore"
+            printf '%s' "$RELEASE_STORE_PASSWORD" > "$store_password_file"
+            printf '%s' "$RELEASE_KEY_PASSWORD" > "$key_password_file"
+            printf '%s' "$RELEASE_KEY_ALIAS" > "$alias_file"
+            chmod 600 "$keystore" "$store_password_file" "$key_password_file" "$alias_file"
+
+            keytool -list \
+              -keystore "$keystore" \
+              -storepass "$RELEASE_STORE_PASSWORD" \
+              -alias "$RELEASE_KEY_ALIAS" >/dev/null
+
+            signed_dir="android/app/build/outputs/apk/release-signed"
+            artifact_name="mukei-android-release-signed-${GITHUB_REF_NAME}-${GITHUB_SHA}"
+            mode="release"
+          else
+            password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+            alias="mukei-test"
+            keytool -genkeypair -noprompt \
+              -keystore "$keystore" \
+              -storepass "$password" \
+              -keypass "$password" \
+              -alias "$alias" \
+              -keyalg RSA \
+              -keysize 3072 \
+              -validity 3650 \
+              -dname "CN=Mukei Test Build,O=MUKEI-lab"
+            printf '%s' "$password" > "$store_password_file"
+            printf '%s' "$password" > "$key_password_file"
+            printf '%s' "$alias" > "$alias_file"
+            chmod 600 "$keystore" "$store_password_file" "$key_password_file" "$alias_file"
+
+            signed_dir="android/app/build/outputs/apk/test-signed"
+            artifact_name="mukei-android-test-signed-${GITHUB_REF_NAME}-${GITHUB_SHA}"
+            mode="test"
+          fi
+
+          mkdir -p "$signed_dir"
+          printf 'mode=%s\n' "$mode" >> "$GITHUB_OUTPUT"
+          printf 'signed_dir=%s\n' "$signed_dir" >> "$GITHUB_OUTPUT"
+          printf 'artifact_name=%s\n' "$artifact_name" >> "$GITHUB_OUTPUT"
+
+      - name: Sign and verify APKs with Android build tools
+        shell: bash
+        env:
+          SIGNING_MODE: ${{ steps.signing.outputs.mode }}
+          SIGNED_DIR: ${{ steps.signing.outputs.signed_dir }}
         run: |
           set -euo pipefail
 
@@ -94,27 +174,30 @@ jobs:
           test -x "$apksigner"
 
           unsigned_dir="android/app/build/outputs/apk/release"
-          signed_dir="android/app/build/outputs/apk/test-signed"
-          mkdir -p "$signed_dir"
+          keystore="$RUNNER_TEMP/mukei-signing.jks"
+          store_password="$(cat "$RUNNER_TEMP/mukei-signing-store-password")"
+          key_password="$(cat "$RUNNER_TEMP/mukei-signing-key-password")"
+          alias="$(cat "$RUNNER_TEMP/mukei-signing-alias")"
+          mkdir -p "$SIGNED_DIR"
 
-          keystore="$RUNNER_TEMP/mukei-test-signing.jks"
-          password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-          keytool -genkeypair -noprompt \
-            -keystore "$keystore" \
-            -storepass "$password" \
-            -keypass "$password" \
-            -alias mukei-test \
-            -keyalg RSA \
-            -keysize 3072 \
-            -validity 3650 \
-            -dname "CN=Mukei Test Build,O=MUKEI-lab"
-
-          cat > "$signed_dir/SIGNING-INFO.txt" <<'EOF'
+          if [[ "$SIGNING_MODE" == "release" ]]; then
+            cat > "$SIGNED_DIR/SIGNING-INFO.txt" <<'EOF'
+          These APKs are signed with the persistent Mukei Android release/update certificate supplied through GitHub Actions secrets.
+          The keystore is materialized only in runner-temporary storage and is never uploaded as an artifact.
+          Preserve the external source keystore and credentials: future updates for this application ID must use the same signing identity.
+          Official Android apksigner verification output follows.
+          EOF
+            suffix="release-signed"
+          else
+            cat > "$SIGNED_DIR/SIGNING-INFO.txt" <<'EOF'
           These APKs are signed with an ephemeral CI-generated test certificate.
           The private key is not retained or uploaded.
           A build signed by a different certificate cannot update an existing installation with the same application ID.
+          This signing mode is forbidden for android-v* release tags.
           Official Android apksigner verification output follows.
           EOF
+            suffix="test-signed"
+          fi
 
           mapfile -t unsigned_apks < <(find "$unsigned_dir" -maxdepth 1 -type f -name '*-unsigned.apk' | sort)
           test "${#unsigned_apks[@]}" -eq 2
@@ -123,16 +206,16 @@ jobs:
             base="$(basename "$apk")"
             stem="${base%-unsigned.apk}"
             aligned="$RUNNER_TEMP/${stem}-aligned.apk"
-            signed="$signed_dir/${stem}-test-signed.apk"
+            signed="$SIGNED_DIR/${stem}-${suffix}.apk"
 
             "$zipalign" -P 16 -f -v 4 "$apk" "$aligned"
             "$zipalign" -c -P 16 -v 4 "$aligned"
 
             "$apksigner" sign \
               --ks "$keystore" \
-              --ks-key-alias mukei-test \
-              --ks-pass "pass:$password" \
-              --key-pass "pass:$password" \
+              --ks-key-alias "$alias" \
+              --ks-pass "pass:$store_password" \
+              --key-pass "pass:$key_password" \
               --v1-signing-enabled true \
               --v2-signing-enabled true \
               --v3-signing-enabled true \
@@ -147,28 +230,38 @@ jobs:
                 --print-certs \
                 --min-sdk-version 26 \
                 "$signed"
-            } | tee -a "$signed_dir/SIGNING-INFO.txt"
+            } | tee -a "$SIGNED_DIR/SIGNING-INFO.txt"
 
             "$zipalign" -c -P 16 -v 4 "$signed"
           done
 
-          mapfile -t signed_apks < <(find "$signed_dir" -maxdepth 1 -type f -name '*-test-signed.apk' | sort)
+          mapfile -t signed_apks < <(find "$SIGNED_DIR" -maxdepth 1 -type f -name "*-${suffix}.apk" | sort)
           test "${#signed_apks[@]}" -eq 2
-          printf '%s\0' "${signed_apks[@]}" | sort -z | xargs -0 sha256sum > "$signed_dir/SHA256SUMS"
-          test -s "$signed_dir/SHA256SUMS"
-          test -s "$signed_dir/SIGNING-INFO.txt"
+          printf '%s\0' "${signed_apks[@]}" | sort -z | xargs -0 sha256sum > "$SIGNED_DIR/SHA256SUMS"
+          test -s "$SIGNED_DIR/SHA256SUMS"
+          test -s "$SIGNED_DIR/SIGNING-INFO.txt"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mukei-android-test-signed-${{ github.ref_name }}-${{ github.sha }}
+          name: ${{ steps.signing.outputs.artifact_name }}
           if-no-files-found: error
           retention-days: 30
           path: |
-            android/app/build/outputs/apk/test-signed/*.apk
-            android/app/build/outputs/apk/test-signed/SHA256SUMS
-            android/app/build/outputs/apk/test-signed/SIGNING-INFO.txt
+            ${{ steps.signing.outputs.signed_dir }}/*.apk
+            ${{ steps.signing.outputs.signed_dir }}/SHA256SUMS
+            ${{ steps.signing.outputs.signed_dir }}/SIGNING-INFO.txt
             android/app/build/outputs/mapping/release/mapping.txt
             android/app/build/reports/lint-results-release.html
+
+      - name: Remove signing material
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          rm -f \
+            "$RUNNER_TEMP/mukei-signing.jks" \
+            "$RUNNER_TEMP/mukei-signing-store-password" \
+            "$RUNNER_TEMP/mukei-signing-key-password" \
+            "$RUNNER_TEMP/mukei-signing-alias"
 
   report-status:
     if: ${{ always() }}
@@ -180,6 +273,8 @@ jobs:
         with:
           script: |
             const succeeded = '${{ needs.release-candidate.result }}' === 'success';
+            const signingMode = '${{ needs.release-candidate.outputs.signing_mode }}';
+            const signedLabel = signingMode === 'release' ? 'Release-signed' : 'Test-signed';
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -187,7 +282,7 @@ jobs:
               state: succeeded ? 'success' : 'failure',
               context: 'android-release-candidate',
               description: succeeded
-                ? 'Signed APK candidate built and verified'
+                ? `${signedLabel} APK candidate built and verified`
                 : 'Signed APK candidate build failed',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
