@@ -66,5 +66,10 @@ replace_once(
 }
 ''',
 )
+replace_once(
+    'rust/crates/mukei-core/src/storage/workspace_service.rs',
+    '        || trimmed.as_bytes().len() > MAX_DIRECTORY_NAME_BYTES\n',
+    '        || trimmed.len() > MAX_DIRECTORY_NAME_BYTES\n',
+)
 
 print('storage workspace M1 compile follow-up patch applied')
