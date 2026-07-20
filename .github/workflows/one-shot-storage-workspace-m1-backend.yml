@@ -75,6 +75,7 @@ jobs:
           git add \
             rust/crates/mukei-core/src/storage/mod.rs \
             rust/crates/mukei-core/src/storage/staged_import.rs \
+            rust/crates/mukei-core/src/storage/workspace_service.rs \
             rust/crates/mukei-core/src/application_runtime.rs \
             rust/crates/mukei-core/src/application_runtime/foundation_types.rs \
             rust/crates/mukei-core/src/application_runtime/foundation_runtime_struct.rs \
