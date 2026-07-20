@@ -1,0 +1,86 @@
+name: one-shot-conversation-storage-attachments-tests
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - .github/conversation-storage-attachments-tests-trigger.txt
+
+concurrency:
+  group: conversation-storage-attachments-tests
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  statuses: write
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Publish pending status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d '{"state":"pending","context":"conversation-storage-attachments-tests","target_url":"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}","description":"Formatting and testing conversation attachments"}'
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.86.0'
+          components: rustfmt
+      - name: Format attachment source and assert scope
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff --check
+          unexpected="$(git diff --name-only | grep -v -E '^(rust/crates/mukei-core/src/storage/conversation_attachments.rs|rust/crates/mukei-core/tests/conversation_storage_attachments.rs)$' || true)"
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected rustfmt changes:"
+            echo "$unexpected"
+            exit 1
+          fi
+      - name: Run targeted attachment regressions
+        env:
+          RUSTFLAGS: -D warnings
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path rust/Cargo.toml -p mukei-core --no-default-features --features std,tokio,rusqlite --test conversation_storage_attachments -- --nocapture
+      - name: Commit formatted validated sources
+        run: |
+          set -euo pipefail
+          git config user.name 'mukei-storage-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add \
+            rust/crates/mukei-core/src/storage/conversation_attachments.rs \
+            rust/crates/mukei-core/tests/conversation_storage_attachments.rs
+          git commit -m 'Test conversation Storage attachment isolation'
+          git push origin HEAD:temp/universal-storage-workspace-v0.1
+      - name: Publish success status
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d '{"state":"success","context":"conversation-storage-attachments-tests","target_url":"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}","description":"Conversation attachment regressions passed"}'
+      - name: Publish failure status
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d '{"state":"failure","context":"conversation-storage-attachments-tests","target_url":"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}","description":"Conversation attachment regressions failed"}'
