@@ -1,1 +1,1 @@
-conversation-storage-attachments-tests-v1
+conversation-storage-attachments-tests-v2
