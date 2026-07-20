@@ -67,7 +67,16 @@ jobs:
           cargo test --locked --manifest-path rust/Cargo.toml -p mukei-core --no-default-features --features std,tokio,rusqlite project_chat_tests -- --nocapture
           cargo clippy --locked --manifest-path rust/Cargo.toml -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings
       - name: Android compile
-        run: gradle -p android :app:compileDebugKotlin --stacktrace
+        run: |
+          set -o pipefail
+          gradle -p android :app:compileDebugKotlin --stacktrace 2>&1 | tee actual-conversation-android.log
+      - name: Upload Android diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: actual-conversation-android-${{ github.sha }}
+          path: actual-conversation-android.log
+          retention-days: 7
       - name: Commit validated conversation source
         run: |
           set -euo pipefail
@@ -76,7 +85,6 @@ jobs:
           git add \
             rust/crates/mukei-core/src/application_runtime.rs \
             rust/crates/mukei-core/src/application_runtime/conversation.rs \
-            rust/crates/mukei-core/src/application_runtime/foundation_types.rs \
             rust/crates/mukei-core/src/application_runtime/foundation_state.rs \
             rust/crates/mukei-core/src/application_runtime/persistence_flush.rs \
             rust/crates/mukei-core/src/application_runtime/chat.rs \
