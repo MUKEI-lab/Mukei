@@ -7,6 +7,13 @@ text = text.replace(
     'path = "rust/crates/mukei-core/src/application_runtime/foundation_state.rs"\n',
     1,
 )
+# The existing app entrypoint already lives in MukeiChatShell.kt. Replace that
+# implementation instead of creating a second MukeiAppShell symbol.
+text = text.replace(
+    '"android/app/src/main/kotlin/ai/mukei/android/MukeiAppShell.kt",\n    \'\'\'package ai.mukei.android',
+    '"android/app/src/main/kotlin/ai/mukei/android/MukeiChatShell.kt",\n    \'\'\'package ai.mukei.android',
+    1,
+)
 start_marker = 'path = "rust/crates/mukei-core/src/application_runtime/persistence_flush.rs"\n'
 end_marker = '\npath = "rust/crates/mukei-core/src/application_runtime/chat_branching.rs"\n'
 start = text.index(start_marker)
@@ -84,4 +91,4 @@ replace_once(
 )
 '''
 path.write_text(text[:start] + replacement + text[end:])
-print('retargeted conversation patch to current state/persistence layout')
+print('retargeted conversation patch to current state/persistence/shell layout')
