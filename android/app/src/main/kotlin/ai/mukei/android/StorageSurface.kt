@@ -3,10 +3,11 @@ package ai.mukei.android
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,388 +16,547 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import ai.mukei.android.designsystem.MukeiLayout
-import ai.mukei.android.designsystem.MukeiRadius
 import ai.mukei.android.designsystem.MukeiSpacing
-import ai.mukei.android.designsystem.MukeiStroke
-import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
-private enum class StorageRowState {
-    IMPORTING,
-    READY,
-    FAILED,
-}
+private const val StorageNavigationPreferences = "mukei-storage-navigation"
+private const val StorageCurrentNodeKey = "current-node-id"
+private const val MaxStorageNameCharacters = 255
 
-private data class StorageRow(
-    val rowId: String,
-    val operationId: String?,
-    val nodeId: String?,
-    val name: String,
+private data class StorageNodeCard(
+    val nodeId: String,
+    val parentNodeId: String?,
+    val nodeType: String,
+    val displayName: String,
+    val state: String,
+    val systemRole: String?,
     val sizeBytes: Long?,
-    val deduplicated: Boolean,
-    val state: StorageRowState,
-    val detail: String? = null,
+    val mimeType: String?,
+    val updatedAt: String,
 )
 
-private data class SelectedStorageDocument(
-    val uri: Uri,
-    val displayName: String,
-    val mimeType: String,
+private data class StorageWorkspaceSnapshot(
+    val scopeId: String,
+    val rootNodeId: String,
+    val nodes: List<StorageNodeCard>,
 )
 
 @Composable
 internal fun StorageSurface() {
     val context = LocalContext.current
-    val rows = remember { mutableStateListOf<StorageRow>() }
-    val pendingNames = remember { mutableStateMapOf<String, String>() }
-    val workspaceConversationId = remember(context) { storageInboxConversationId(context) }
-    var banner by remember { mutableStateOf<String?>(null) }
-
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val selected = resolveSelectedDocument(context, uri)
-        if (selected == null) {
-            banner = "The selected file could not be inspected safely."
-            return@rememberLauncherForActivityResult
-        }
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-            )
-        }
-        val submission = BackendRuntimeHost.submitStorageImport(
-            conversationId = workspaceConversationId,
-            target = selected.uri.toString(),
-            displayName = selected.displayName,
-            mimeType = selected.mimeType,
-        )
-        if (submission.status != "accepted" || submission.operationId.isNullOrBlank()) {
-            banner = friendlyStorageFailure(submission.rejectionReason ?: "storage_import_rejected")
-            return@rememberLauncherForActivityResult
-        }
-        val operationId = submission.operationId
-        pendingNames[operationId] = selected.displayName
-        rows.removeAll { it.operationId == operationId }
-        rows.add(
-            0,
-            StorageRow(
-                rowId = "operation:$operationId",
-                operationId = operationId,
-                nodeId = null,
-                name = selected.displayName,
-                sizeBytes = null,
-                deduplicated = false,
-                state = StorageRowState.IMPORTING,
-            ),
-        )
-        banner = null
+    val navigationPreferences = remember(context) {
+        context.getSharedPreferences(StorageNavigationPreferences, Context.MODE_PRIVATE)
     }
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    var snapshot by remember { mutableStateOf<StorageWorkspaceSnapshot?>(null) }
+    var refreshGeneration by remember { mutableIntStateOf(0) }
+    var currentNodeId by rememberSaveable {
+        mutableStateOf(navigationPreferences.getString(StorageCurrentNodeKey, null))
+    }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var banner by remember { mutableStateOf<String?>(null) }
+    var createFolderOpen by remember { mutableStateOf(false) }
+    var renameTarget by remember { mutableStateOf<StorageNodeCard?>(null) }
 
-    LaunchedEffect(Unit) {
-        val persisted = parseStorageHistory(BackendRuntimeHost.requestRuntimeSnapshot("operations"))
-        if (persisted.isNotEmpty()) {
-            rows.clear()
-            rows.addAll(persisted)
+    LaunchedEffect(refreshGeneration) {
+        val loaded = withContext(Dispatchers.IO) { loadStorageWorkspaceSnapshot() }
+        snapshot = loaded
+        if (loaded != null) {
+            val candidate = currentNodeId
+            val valid = candidate != null && loaded.nodes.any {
+                it.nodeId == candidate && it.nodeType == "directory" && it.state != "deleted"
+            }
+            if (!valid) {
+                currentNodeId = loaded.rootNodeId
+                navigationPreferences.edit().putString(StorageCurrentNodeKey, loaded.rootNodeId).apply()
+            }
         }
     }
 
     DisposableEffect(Unit) {
         val registration = BackendRuntimeHost.addEventListener { batch ->
+            var storageChanged = false
+            var failureCode: String? = null
             batch.events.forEach { raw ->
-                runCatching { JSONObject(raw) }.getOrNull()?.let { event ->
-                    val operationId = event.optString("operation_id").takeIf(String::isNotBlank)
-                    when (event.optString("event_type")) {
-                        "storage.file_imported" -> {
-                            val payload = event.optJSONObject("payload") ?: return@let
-                            val nodeId = payload.optString("node_id").takeIf(String::isNotBlank)
-                            val name = payload.optString("display_name").ifBlank {
-                                operationId?.let(pendingNames::get).orEmpty()
-                            }.ifBlank { "Imported file" }
-                            if (operationId != null) pendingNames.remove(operationId)
-                            rows.removeAll {
-                                (operationId != null && it.operationId == operationId) ||
-                                    (nodeId != null && it.nodeId == nodeId)
-                            }
-                            rows.add(
-                                0,
-                                StorageRow(
-                                    rowId = nodeId ?: "operation:${operationId ?: UUID.randomUUID()}",
-                                    operationId = operationId,
-                                    nodeId = nodeId,
-                                    name = name,
-                                    sizeBytes = payload.optLong("size_bytes").takeIf { payload.has("size_bytes") },
-                                    deduplicated = payload.optBoolean("deduplicated", false),
-                                    state = StorageRowState.READY,
-                                    detail = payload.optString("ocr_status").takeIf {
-                                        it.isNotBlank() && it != "unavailable"
-                                    }?.let { "OCR: $it" },
-                                ),
-                            )
-                            banner = "Imported securely."
-                        }
-
-                        "operation.failed" -> {
-                            if (operationId == null || !pendingNames.containsKey(operationId)) return@let
-                            val payload = event.optJSONObject("payload")
-                            val code = payload?.optString("code")?.takeIf(String::isNotBlank)
-                                ?: "storage_import_failed"
-                            val name = pendingNames.remove(operationId) ?: "Selected file"
-                            rows.removeAll { it.operationId == operationId }
-                            rows.add(
-                                0,
-                                StorageRow(
-                                    rowId = "operation:$operationId",
-                                    operationId = operationId,
-                                    nodeId = null,
-                                    name = name,
-                                    sizeBytes = null,
-                                    deduplicated = false,
-                                    state = StorageRowState.FAILED,
-                                    detail = friendlyStorageFailure(code),
-                                ),
-                            )
-                            banner = friendlyStorageFailure(code)
-                        }
+                runCatching {
+                    val event = JSONObject(raw)
+                    val eventType = event.optString("event_type")
+                    val commandType = event.optString("command_type")
+                    if (eventType.startsWith("storage.")) storageChanged = true
+                    if (eventType == "operation.failed" && commandType.startsWith("storage.")) {
+                        failureCode = event.optJSONObject("payload")?.optString("code")
+                            ?.takeIf { it.isNotBlank() }
+                        storageChanged = true
                     }
+                }
+            }
+            if (storageChanged) {
+                mainHandler.post {
+                    refreshGeneration += 1
+                    failureCode?.let { banner = storageFailureMessage(it) }
                 }
             }
         }
         onDispose { registration.close() }
     }
 
+    val loaded = snapshot
+    val selectedNodeId = currentNodeId ?: loaded?.rootNodeId
+    val currentNode = loaded?.nodes?.firstOrNull { it.nodeId == selectedNodeId }
+    val insideTrash = loaded != null && selectedNodeId != null && isInsideTrash(loaded, selectedNodeId)
+    val writableDirectory = currentNode != null &&
+        currentNode.nodeType == "directory" &&
+        currentNode.state == "active" &&
+        currentNode.systemRole != "trash" &&
+        !insideTrash
+
+    fun openDirectory(nodeId: String) {
+        val activeSnapshot = snapshot ?: return
+        val target = activeSnapshot.nodes.firstOrNull {
+            it.nodeId == nodeId && it.nodeType == "directory" && it.state != "deleted"
+        } ?: return
+        currentNodeId = target.nodeId
+        searchQuery = ""
+        navigationPreferences.edit().putString(StorageCurrentNodeKey, target.nodeId).apply()
+    }
+
+    val documentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val parentNodeId = currentNodeId ?: snapshot?.rootNodeId
+        if (uri == null || parentNodeId == null || !writableDirectory) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+        val displayName = resolveDocumentDisplayName(context, uri)
+        val mimeType = context.contentResolver.getType(uri)?.takeIf { it.isNotBlank() }
+            ?: "application/octet-stream"
+        val submission = BackendRuntimeHost.submitUniversalStorageImport(
+            parentNodeId = parentNodeId,
+            target = uri.toString(),
+            displayName = displayName,
+            mimeType = mimeType,
+        )
+        banner = if (submission.status == "accepted") {
+            "Importing $displayName into encrypted storage…"
+        } else {
+            "Import rejected: ${submission.rejectionReason ?: "unknown_error"}"
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(MukeiLayout.LargePhoneTextPadding),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .padding(MukeiSpacing.Large),
+        verticalArrangement = Arrangement.spacedBy(MukeiSpacing.Medium),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = MukeiLayout.ReadableContentMaxWidth),
-        ) {
-            Text(
-                text = "Storage",
-                style = MaterialTheme.typography.headlineMedium,
-            )
-            Spacer(Modifier.height(MukeiSpacing.ExtraSmall))
-            Text(
-                text = "Files are copied through Android’s document broker, validated, then committed to Mukei’s encrypted object store.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(MukeiSpacing.Large))
+        Text("My Storage", style = MaterialTheme.typography.headlineSmall)
+        Text(
+            "Folders and files below come from the encrypted Universal Storage tree. File bytes remain in the immutable object store.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
-            Button(
-                onClick = { picker.launch(arrayOf("*/*")) },
+        if (loaded == null || currentNode == null) {
+            Text("Opening encrypted storage…", style = MaterialTheme.typography.bodyMedium)
+            return@Column
+        }
+
+        StorageBreadcrumbs(
+            snapshot = loaded,
+            currentNodeId = currentNode.nodeId,
+            onOpen = ::openDirectory,
+        )
+
+        banner?.let { message ->
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceVariant,
             ) {
-                Text("Import file")
-            }
-
-            Spacer(Modifier.height(MukeiSpacing.Small))
-            Text(
-                text = "Phase 1: UTF-8 text/source files up to 32 MiB. PDF, DOCX, PNG and other binary formats are rejected safely.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            banner?.let { message ->
-                Spacer(Modifier.height(MukeiSpacing.Medium))
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(MukeiRadius.Composer),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+                Row(
+                    modifier = Modifier.padding(MukeiSpacing.Medium),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
                         text = message,
-                        modifier = Modifier.padding(MukeiSpacing.Medium),
+                        modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodyMedium,
                     )
+                    TextButton(onClick = { banner = null }) { Text("Dismiss") }
                 }
             }
+        }
 
-            Spacer(Modifier.height(MukeiSpacing.Large))
-            Text(
-                text = if (rows.isEmpty()) "No imported files yet" else "Imported files",
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Spacer(Modifier.height(MukeiSpacing.Small))
-
-            if (rows.isEmpty()) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(MukeiStroke.Thin, MaterialTheme.colorScheme.outline),
+        if (writableDirectory) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(MukeiSpacing.Small),
+            ) {
+                Button(
+                    onClick = { documentPicker.launch(arrayOf("*/*")) },
+                    modifier = Modifier.weight(1f),
                 ) {
-                    Text(
-                        text = "Choose a supported file to create your encrypted Storage Inbox workspace.",
-                        modifier = Modifier.padding(MukeiSpacing.Large),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Text("Import file")
                 }
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(MukeiSpacing.Small)) {
-                    rows.forEach { row -> StorageRowCard(row) }
+                Button(
+                    onClick = { createFolderOpen = true },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("New folder")
                 }
             }
-            Spacer(Modifier.height(MukeiSpacing.Major))
+        } else {
+            Text(
+                if (insideTrash) {
+                    "Trash is read-only. Restore an item before editing or importing into it."
+                } else {
+                    "This directory is protected and cannot accept new content."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it.take(256) },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Search this folder") },
+            singleLine = true,
+        )
+
+        val children = storageChildren(loaded, currentNode.nodeId)
+            .filter { node ->
+                searchQuery.isBlank() || node.displayName.contains(searchQuery.trim(), ignoreCase = true)
+            }
+            .sortedWith(
+                compareBy<StorageNodeCard> { it.nodeType != "directory" }
+                    .thenBy(String.CASE_INSENSITIVE_ORDER) { it.displayName },
+            )
+
+        if (children.isEmpty()) {
+            Text(
+                if (searchQuery.isBlank()) "This folder is empty." else "No matching items.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            children.forEachIndexed { index, node ->
+                StorageNodeRow(
+                    node = node,
+                    insideTrash = insideTrash || currentNode.systemRole == "trash",
+                    onOpen = { if (node.nodeType == "directory") openDirectory(node.nodeId) },
+                    onRename = { renameTarget = node },
+                    onTrash = {
+                        val result = BackendRuntimeHost.trashStorageNode(node.nodeId)
+                        banner = if (result.status == "accepted") {
+                            "Moving ${node.displayName} to Trash…"
+                        } else {
+                            "Move to Trash rejected: ${result.rejectionReason ?: "unknown_error"}"
+                        }
+                    },
+                    onRestore = {
+                        val result = BackendRuntimeHost.restoreStorageNode(node.nodeId)
+                        banner = if (result.status == "accepted") {
+                            "Restoring ${node.displayName}…"
+                        } else {
+                            "Restore rejected: ${result.rejectionReason ?: "unknown_error"}"
+                        }
+                    },
+                )
+                if (index != children.lastIndex) HorizontalDivider()
+            }
+        }
+
+        Spacer(Modifier.height(MukeiSpacing.Large))
+        Text(
+            "M1 policy · Imports are currently limited by the native admission pipeline to supported UTF-8 text/source files up to 32 MiB. Delete is intentionally reversible: items move to Trash.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    if (createFolderOpen) {
+        var folderName by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { createFolderOpen = false },
+            title = { Text("New folder") },
+            text = {
+                OutlinedTextField(
+                    value = folderName,
+                    onValueChange = { folderName = it.take(MaxStorageNameCharacters) },
+                    label = { Text("Folder name") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = folderName.trim().isNotEmpty() && currentNodeId != null,
+                    onClick = {
+                        val parent = currentNodeId ?: return@TextButton
+                        val result = BackendRuntimeHost.createStorageDirectory(parent, folderName.trim())
+                        if (result.status == "accepted") {
+                            createFolderOpen = false
+                            banner = "Creating ${folderName.trim()}…"
+                        } else {
+                            banner = "Folder creation rejected: ${result.rejectionReason ?: "unknown_error"}"
+                        }
+                    },
+                ) { Text("Create") }
+            },
+            dismissButton = {
+                TextButton(onClick = { createFolderOpen = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    renameTarget?.let { target ->
+        var replacementName by remember(target.nodeId) { mutableStateOf(target.displayName) }
+        AlertDialog(
+            onDismissRequest = { renameTarget = null },
+            title = { Text("Rename") },
+            text = {
+                OutlinedTextField(
+                    value = replacementName,
+                    onValueChange = { replacementName = it.take(MaxStorageNameCharacters) },
+                    label = { Text("Name") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = replacementName.trim().isNotEmpty(),
+                    onClick = {
+                        val result = BackendRuntimeHost.renameStorageNode(
+                            target.nodeId,
+                            replacementName.trim(),
+                        )
+                        if (result.status == "accepted") {
+                            renameTarget = null
+                            banner = "Renaming ${target.displayName}…"
+                        } else {
+                            banner = "Rename rejected: ${result.rejectionReason ?: "unknown_error"}"
+                        }
+                    },
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameTarget = null }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun StorageBreadcrumbs(
+    snapshot: StorageWorkspaceSnapshot,
+    currentNodeId: String,
+    onOpen: (String) -> Unit,
+) {
+    val breadcrumbs = storageBreadcrumbs(snapshot, currentNodeId)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(MukeiSpacing.ExtraSmall),
+    ) {
+        breadcrumbs.forEachIndexed { index, node ->
+            TextButton(onClick = { onOpen(node.nodeId) }) {
+                Text(if (node.nodeId == snapshot.rootNodeId) "My Storage" else node.displayName)
+            }
+            if (index != breadcrumbs.lastIndex) {
+                Text("/", modifier = Modifier.padding(top = MukeiSpacing.Medium))
+            }
         }
     }
 }
 
 @Composable
-private fun StorageRowCard(row: StorageRow) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(MukeiStroke.Thin, MaterialTheme.colorScheme.outline),
+private fun StorageNodeRow(
+    node: StorageNodeCard,
+    insideTrash: Boolean,
+    onOpen: () -> Unit,
+    onRename: () -> Unit,
+    onTrash: () -> Unit,
+    onRestore: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = MukeiSpacing.Medium),
+        verticalArrangement = Arrangement.spacedBy(MukeiSpacing.ExtraSmall),
     ) {
-        Row(
-            modifier = Modifier.padding(MukeiSpacing.Medium),
-            horizontalArrangement = Arrangement.spacedBy(MukeiSpacing.Medium),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (row.state == StorageRowState.IMPORTING) {
-                CircularProgressIndicator()
+        Text(
+            text = when {
+                node.systemRole == "trash" -> "Trash"
+                node.nodeType == "directory" -> "Folder · ${node.displayName}"
+                else -> node.displayName
+            },
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text = storageMetadata(node),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(MukeiSpacing.ExtraSmall)) {
+            if (node.nodeType == "directory") {
+                TextButton(onClick = onOpen) { Text("Open") }
             }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = row.name,
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                val summary = when (row.state) {
-                    StorageRowState.IMPORTING -> "Encrypting and committing…"
-                    StorageRowState.READY -> buildString {
-                        append(row.sizeBytes?.let(::formatBytes) ?: "Stored")
-                        if (row.deduplicated) append(" · deduplicated")
-                    }
-                    StorageRowState.FAILED -> row.detail ?: "Import failed safely"
+            when {
+                node.state == "trashed" -> {
+                    TextButton(onClick = onRestore) { Text("Restore") }
                 }
-                Text(
-                    text = summary,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                row.detail?.takeIf { row.state == StorageRowState.READY }?.let { detail ->
-                    Text(
-                        text = detail,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                node.systemRole == null && !insideTrash && node.state == "active" -> {
+                    TextButton(onClick = onRename) { Text("Rename") }
+                    TextButton(onClick = onTrash) { Text("Move to Trash") }
                 }
             }
         }
     }
 }
 
-private fun resolveSelectedDocument(context: Context, uri: Uri): SelectedStorageDocument? {
-    val displayName = runCatching {
-        context.contentResolver.query(
-            uri,
-            arrayOf(OpenableColumns.DISPLAY_NAME),
-            null,
-            null,
-            null,
-        )?.use { cursor ->
-            if (!cursor.moveToFirst()) return@use null
-            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (index < 0) null else cursor.getString(index)
-        }
-    }.getOrNull()?.trim().orEmpty()
-    if (displayName.isBlank() || displayName.length > 255) return null
-    val mimeType = context.contentResolver.getType(uri)
-        ?.trim()
-        ?.takeIf(String::isNotBlank)
-        ?: "application/octet-stream"
-    return SelectedStorageDocument(uri, displayName, mimeType)
-}
-
-private fun storageInboxConversationId(context: Context): String {
-    val preferences = context.getSharedPreferences("mukei.storage", Context.MODE_PRIVATE)
-    preferences.getString("storage_inbox_conversation_id", null)?.let { existing ->
-        runCatching { UUID.fromString(existing) }.getOrNull()?.let { return existing }
-    }
-    val created = UUID.randomUUID().toString()
-    preferences.edit().putString("storage_inbox_conversation_id", created).apply()
-    return created
-}
-
-private fun parseStorageHistory(raw: String?): List<StorageRow> {
-    if (raw.isNullOrBlank()) return emptyList()
+private fun loadStorageWorkspaceSnapshot(): StorageWorkspaceSnapshot? {
+    val raw = BackendRuntimeHost.requestRuntimeSnapshot("storage") ?: return null
     return runCatching {
-        val envelope = JSONObject(raw)
-        val payload = envelope.opt("payload")
-        val operations = when (payload) {
-            is JSONArray -> payload
-            is JSONObject -> payload.optJSONArray("operations") ?: JSONArray()
-            else -> JSONArray()
-        }
-        buildList {
-            for (index in 0 until operations.length()) {
-                val operation = operations.optJSONObject(index) ?: continue
-                if (operation.optString("command_type") != "storage.import_file") continue
-                if (operation.optString("status") != "completed") continue
-                val result = operation.optJSONObject("result") ?: continue
-                val nodeId = result.optString("node_id").takeIf(String::isNotBlank) ?: continue
+        val payload = JSONObject(raw).optJSONObject("payload") ?: return@runCatching null
+        val scopeId = payload.optString("scope_id")
+        val rootNodeId = payload.optString("root_node_id")
+        if (scopeId.isBlank() || rootNodeId.isBlank()) return@runCatching null
+        val nodesJson = payload.optJSONArray("nodes") ?: JSONArray()
+        val nodes = buildList {
+            for (index in 0 until nodesJson.length()) {
+                val node = nodesJson.optJSONObject(index) ?: continue
+                val nodeId = node.optString("node_id")
+                if (nodeId.isBlank()) continue
                 add(
-                    StorageRow(
-                        rowId = nodeId,
-                        operationId = operation.optString("operation_id").takeIf(String::isNotBlank),
+                    StorageNodeCard(
                         nodeId = nodeId,
-                        name = result.optString("display_name").ifBlank { "Imported file" },
-                        sizeBytes = result.optLong("size_bytes").takeIf { result.has("size_bytes") },
-                        deduplicated = result.optBoolean("deduplicated", false),
-                        state = StorageRowState.READY,
+                        parentNodeId = nullableJsonString(node, "parent_node_id"),
+                        nodeType = node.optString("node_type"),
+                        displayName = node.optString("display_name", "Untitled"),
+                        state = node.optString("state"),
+                        systemRole = nullableJsonString(node, "system_role"),
+                        sizeBytes = if (node.isNull("size_bytes")) null else node.optLong("size_bytes"),
+                        mimeType = nullableJsonString(node, "mime_type"),
+                        updatedAt = node.optString("updated_at"),
                     ),
                 )
             }
-        }.reversed()
-    }.getOrDefault(emptyList())
+        }
+        StorageWorkspaceSnapshot(scopeId = scopeId, rootNodeId = rootNodeId, nodes = nodes)
+    }.getOrNull()
 }
 
-private fun friendlyStorageFailure(code: String): String = when (code) {
-    "file_policy_rejected" -> "That filename or file type is not supported by the Phase 1 storage policy."
-    "staged_file_too_large", "document_too_large" -> "That file is larger than the 32 MiB import limit."
-    "non_utf8_text_rejected" -> "This Phase 1 importer accepts UTF-8 text/source files only."
-    "storage_import_cancelled" -> "The import was cancelled before publication."
-    "android_permission_denied" -> "Android did not grant permission to read that file."
-    "document_open_failed", "platform_document_stage_failed" -> "The selected document could not be staged safely."
-    "storage_import_commit_failed", "encrypted_object_store_failed" -> "The encrypted storage commit failed; no partial file was published."
-    "backend_unavailable" -> "The secure runtime is not available."
-    else -> "Import failed safely ($code)."
+private fun storageChildren(
+    snapshot: StorageWorkspaceSnapshot,
+    parentNodeId: String,
+): List<StorageNodeCard> {
+    val inTrash = isInsideTrash(snapshot, parentNodeId)
+    return snapshot.nodes.filter { node ->
+        node.parentNodeId == parentNodeId &&
+            node.state != "deleted" &&
+            (inTrash || node.state == "active" || node.systemRole == "trash")
+    }
 }
 
-private fun formatBytes(value: Long): String = when {
-    value < 1_024L -> "$value B"
-    value < 1_048_576L -> String.format("%.1f KiB", value / 1_024.0)
-    else -> String.format("%.1f MiB", value / 1_048_576.0)
+private fun storageBreadcrumbs(
+    snapshot: StorageWorkspaceSnapshot,
+    currentNodeId: String,
+): List<StorageNodeCard> {
+    val byId = snapshot.nodes.associateBy(StorageNodeCard::nodeId)
+    val path = mutableListOf<StorageNodeCard>()
+    val visited = mutableSetOf<String>()
+    var cursor: String? = currentNodeId
+    while (cursor != null && visited.add(cursor)) {
+        val node = byId[cursor] ?: break
+        path += node
+        if (node.nodeId == snapshot.rootNodeId) break
+        cursor = node.parentNodeId
+    }
+    if (path.none { it.nodeId == snapshot.rootNodeId }) {
+        byId[snapshot.rootNodeId]?.let { path += it }
+    }
+    return path.asReversed()
+}
+
+private fun isInsideTrash(snapshot: StorageWorkspaceSnapshot, nodeId: String): Boolean {
+    val byId = snapshot.nodes.associateBy(StorageNodeCard::nodeId)
+    val visited = mutableSetOf<String>()
+    var cursor: String? = nodeId
+    while (cursor != null && visited.add(cursor)) {
+        val node = byId[cursor] ?: return false
+        if (node.systemRole == "trash") return true
+        cursor = node.parentNodeId
+    }
+    return false
+}
+
+private fun storageMetadata(node: StorageNodeCard): String = when {
+    node.systemRole == "trash" -> "Protected system folder"
+    node.nodeType == "directory" && node.state == "trashed" -> "Folder · In Trash"
+    node.nodeType == "directory" -> "Folder"
+    else -> listOfNotNull(
+        node.mimeType,
+        node.sizeBytes?.let(::formatStorageSize),
+        if (node.state == "trashed") "In Trash" else null,
+    ).joinToString(" · ").ifBlank { "Encrypted file" }
+}
+
+private fun formatStorageSize(bytes: Long): String = when {
+    bytes < 1024L -> "$bytes B"
+    bytes < 1024L * 1024L -> "${bytes / 1024L} KiB"
+    else -> "${bytes / (1024L * 1024L)} MiB"
+}
+
+private fun nullableJsonString(json: JSONObject, key: String): String? {
+    if (!json.has(key) || json.isNull(key)) return null
+    return json.optString(key).takeIf { it.isNotBlank() && it != "null" }
+}
+
+private fun resolveDocumentDisplayName(context: Context, uri: Uri): String {
+    val fromProvider = runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+            }
+    }.getOrNull()
+    return fromProvider?.trim()?.takeIf { it.isNotEmpty() }
+        ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+        ?: "imported-file.txt"
+}
+
+private fun storageFailureMessage(code: String): String = when (code) {
+    "storage_directory_create_failed" -> "Folder could not be created. Check the name and destination."
+    "storage_node_rename_failed" -> "Rename failed. Another item may already use that name."
+    "storage_node_trash_failed" -> "Item could not be moved to Trash."
+    "storage_node_restore_failed" -> "Restore failed. The original folder may be unavailable or contain a name conflict."
+    "storage_import_failed" -> "Import failed native validation or encrypted storage commit."
+    else -> "Storage operation failed: $code"
 }
