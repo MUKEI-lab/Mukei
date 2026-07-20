@@ -2,6 +2,11 @@ from pathlib import Path
 
 path = Path('.github/scripts/patch_actual_conversations.py')
 text = path.read_text()
+text = text.replace(
+    'path = "rust/crates/mukei-core/src/application_runtime/foundation_types.rs"\n',
+    'path = "rust/crates/mukei-core/src/application_runtime/foundation_state.rs"\n',
+    1,
+)
 start_marker = 'path = "rust/crates/mukei-core/src/application_runtime/persistence_flush.rs"\n'
 end_marker = '\npath = "rust/crates/mukei-core/src/application_runtime/chat_branching.rs"\n'
 start = text.index(start_marker)
@@ -79,4 +84,4 @@ replace_once(
 )
 '''
 path.write_text(text[:start] + replacement + text[end:])
-print('retargeted persistence_flush patch anchor')
+print('retargeted conversation patch to current state/persistence layout')
