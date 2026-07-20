@@ -46,6 +46,7 @@ jobs:
       - name: Apply exact conversation patches
         run: |
           set -euo pipefail
+          python3 .github/scripts/normalize_actual_conversation_patch.py
           python3 .github/scripts/patch_actual_conversations.py
           cargo fmt --manifest-path rust/Cargo.toml --all
           git diff --check
