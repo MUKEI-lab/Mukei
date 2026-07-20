@@ -96,7 +96,7 @@ jobs:
             android/app/src/main/kotlin/ai/mukei/android/BackendRuntimeHost.kt \
             android/app/src/main/kotlin/ai/mukei/android/ChatConversationSurface.kt \
             android/app/src/main/kotlin/ai/mukei/android/ConversationWorkspaceSurface.kt \
-            android/app/src/main/kotlin/ai/mukei/android/MukeiAppShell.kt \
+            android/app/src/main/kotlin/ai/mukei/android/MukeiChatShell.kt \
             android/app/src/main/kotlin/ai/mukei/android/MukeiProductShell.kt
           git commit -m 'Set up first-class durable conversations'
           git push origin HEAD:temp/universal-storage-workspace-v0.1
