@@ -14,11 +14,11 @@ data class EventSequenceValidation(
 )
 
 /**
- * Process-local guard against duplicate/out-of-order event projection.
+ * Process-local guard against duplicate, out-of-order, or incomplete event projection.
  *
- * A new runtime session resets sequence history. Forward gaps are reported so the
- * repository layer can request an authoritative snapshot/reconciliation instead of
- * silently pretending the event stream is complete.
+ * Until the Android repository layer implements domain-specific snapshot replay, a forward
+ * sequence gap or an unexpected runtime-session change must fail closed. Continuing after either
+ * condition could project a partial operation lifecycle and leave UI state permanently stale.
  */
 class EventSequenceTracker {
     private var runtimeSessionId: String? = null
@@ -27,13 +27,13 @@ class EventSequenceTracker {
     @Synchronized
     fun accept(batch: EventBatchV2): EventSequenceValidation {
         val previousSession = runtimeSessionId
-        val sessionChanged = previousSession != null && previousSession != batch.runtimeSessionId
-        if (previousSession == null || sessionChanged) {
+        if (previousSession != null && previousSession != batch.runtimeSessionId) {
+            throw ProtocolCodecException("runtime_session_changed")
+        }
+        if (previousSession == null) {
             runtimeSessionId = batch.runtimeSessionId
-            lastSequenceByStream.clear()
         }
 
-        val gaps = mutableListOf<EventSequenceGap>()
         for (event in batch.events) {
             val previous = lastSequenceByStream[event.streamId]
             if (previous != null) {
@@ -42,19 +42,15 @@ class EventSequenceTracker {
                 }
                 val expected = previous + 1L
                 if (event.sequence > expected) {
-                    gaps += EventSequenceGap(
-                        streamId = event.streamId,
-                        expectedSequence = expected,
-                        actualSequence = event.sequence,
-                    )
+                    throw ProtocolCodecException("event_sequence_gap")
                 }
             }
             lastSequenceByStream[event.streamId] = event.sequence
         }
 
         return EventSequenceValidation(
-            runtimeSessionChanged = sessionChanged,
-            gaps = gaps,
+            runtimeSessionChanged = false,
+            gaps = emptyList(),
         )
     }
 
