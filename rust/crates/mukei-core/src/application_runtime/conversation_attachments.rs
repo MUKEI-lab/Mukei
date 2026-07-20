@@ -1,4 +1,6 @@
+#[cfg(feature = "rusqlite")]
 const MAX_ATTACHMENT_CONTEXT_BYTES_PER_FILE: usize = 16 * 1024;
+#[cfg(feature = "rusqlite")]
 const MAX_ATTACHMENT_CONTEXT_BYTES_TOTAL: usize = 48 * 1024;
 
 #[cfg(feature = "rusqlite")]
