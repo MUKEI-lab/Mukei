@@ -47,8 +47,11 @@ pub trait ConversationAttachmentPort: Send + Sync {
         node_id: StorageNodeId,
     ) -> Result<ConversationStorageAttachment>;
 
-    async fn remove_attachment(&self, conversation_id: String, node_id: StorageNodeId)
-        -> Result<bool>;
+    async fn remove_attachment(
+        &self,
+        conversation_id: String,
+        node_id: StorageNodeId,
+    ) -> Result<bool>;
 
     async fn remove_all_for_conversation(&self, conversation_id: String) -> Result<usize>;
 
@@ -342,10 +345,10 @@ fn stored_object_from_row(row: &AttachmentObjectRow) -> Result<StoredObject> {
         .as_slice()
         .try_into()
         .map_err(|_| MukeiError::DatabaseCorruption)?;
-    let plaintext_size = u64::try_from(row.plaintext_size)
-        .map_err(|_| MukeiError::DatabaseCorruption)?;
-    let encrypted_size = u64::try_from(row.encrypted_size)
-        .map_err(|_| MukeiError::DatabaseCorruption)?;
+    let plaintext_size =
+        u64::try_from(row.plaintext_size).map_err(|_| MukeiError::DatabaseCorruption)?;
+    let encrypted_size =
+        u64::try_from(row.encrypted_size).map_err(|_| MukeiError::DatabaseCorruption)?;
     Ok(StoredObject {
         object_id,
         plaintext_sha256,

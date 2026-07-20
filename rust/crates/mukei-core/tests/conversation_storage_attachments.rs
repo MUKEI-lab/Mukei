@@ -5,8 +5,7 @@ use std::sync::Arc;
 use mukei_core::storage::{
     Aes256GcmObjectCipher, ChatId, ConversationAttachmentPort, DatabasePool, DbError,
     ImmutableObjectStore, Migrator, PooledConnectionExt, SqlConversationAttachmentService,
-    SqlStorageWorkspaceService, StorageNodeId, StorageWorkspacePort, SystemDirectoryRole,
-    UniversalStorageRepository,
+    SqlStorageWorkspaceService, StorageNodeId, StorageWorkspacePort, UniversalStorageRepository,
 };
 use uuid::Uuid;
 
@@ -37,10 +36,8 @@ impl Fixture {
             )
             .expect("open object store"),
         );
-        let service = SqlConversationAttachmentService::new(
-            Arc::clone(&pool),
-            Arc::clone(&object_store),
-        );
+        let service =
+            SqlConversationAttachmentService::new(Arc::clone(&pool), Arc::clone(&object_store));
         Self {
             _database_dir: database_dir,
             _object_dir: object_dir,
@@ -57,7 +54,10 @@ impl Fixture {
         display_name: &str,
         content: &[u8],
     ) -> StorageNodeId {
-        let stored = self.object_store.put(content).expect("store encrypted object");
+        let stored = self
+            .object_store
+            .put(content)
+            .expect("store encrypted object");
         let node_id = StorageNodeId::new();
         let version_id = Uuid::new_v4().to_string();
         let scope_id = scope_id.to_string();
