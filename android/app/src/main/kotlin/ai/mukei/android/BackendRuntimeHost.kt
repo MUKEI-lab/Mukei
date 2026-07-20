@@ -360,6 +360,24 @@ object BackendRuntimeHost {
         payload = JSONObject(),
     )
 
+    fun addConversationAttachment(
+        conversationId: String,
+        nodeId: String,
+    ): ChatCommandSubmission = submitConversationCommand(
+        commandType = "conversation.attachment.add",
+        conversationId = conversationId,
+        payload = JSONObject().put("node_id", nodeId),
+    )
+
+    fun removeConversationAttachment(
+        conversationId: String,
+        nodeId: String,
+    ): ChatCommandSubmission = submitConversationCommand(
+        commandType = "conversation.attachment.remove",
+        conversationId = conversationId,
+        payload = JSONObject().put("node_id", nodeId),
+    )
+
     fun regenerateChat(
         conversationId: String,
         branchId: String,
@@ -399,7 +417,7 @@ object BackendRuntimeHost {
             val scope = JSONObject().put("conversation_id", conversationId)
             if (branchId != null) scope.put("branch_id", branchId)
             val envelope = JSONObject()
-                .put("protocol_version", JSONObject().put("major", 2).put("minor", 3))
+                .put("protocol_version", JSONObject().put("major", 2).put("minor", 5))
                 .put("command_id", UUID.randomUUID().toString())
                 .put("request_id", UUID.randomUUID().toString())
                 .put("command_type", commandType)
@@ -489,11 +507,13 @@ object BackendRuntimeHost {
             val payload = envelope.optJSONObject("payload") ?: JSONObject()
             val branches = payload.optJSONArray("conversation_branches")
             val conversations = payload.optJSONArray("conversations")
+            val attachments = payload.optJSONArray("conversation_attachments")
             envelope.put(
                 "payload",
                 JSONObject()
                     .put("conversations", conversations)
-                    .put("branches", branches),
+                    .put("branches", branches)
+                    .put("attachments", attachments),
             )
             envelope.toString()
         }.getOrNull()

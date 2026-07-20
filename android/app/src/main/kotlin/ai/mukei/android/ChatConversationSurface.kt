@@ -249,10 +249,15 @@ internal fun ChatConversationSurface(
     var streamingText by remember(conversationId) { mutableStateOf("") }
     var banner by remember(conversationId) { mutableStateOf<String?>(null) }
     var editing by remember(conversationId) { mutableStateOf<ChatMessageCard?>(null) }
+    var attachments by remember(conversationId) {
+        mutableStateOf(loadConversationStorageAttachments(conversationId))
+    }
+    var storagePickerOpen by remember(conversationId) { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
 
     fun refresh() {
         branches = loadChatBranches(conversationId)
+        attachments = loadConversationStorageAttachments(conversationId)
     }
 
     LaunchedEffect(conversationId, branchId) { refresh() }
@@ -263,6 +268,7 @@ internal fun ChatConversationSurface(
                 runCatching {
                     val event = JSONObject(raw)
                     val eventType = event.optString("event_type")
+                    val commandType = event.optString("command_type")
                     val operationId = event.optString("operation_id").takeIf(String::isNotBlank)
                     val payload = event.optJSONObject("payload") ?: JSONObject()
                     when {
@@ -275,6 +281,15 @@ internal fun ChatConversationSurface(
                         eventType == "chat.token.delta" && operationId == activeOperationId -> {
                             streamingText += payload.optString("text")
                         }
+                        eventType == "operation.failed" &&
+                            commandType.startsWith("conversation.attachment.") -> {
+                            banner = chatFailure(
+                                payload.optString("code", "conversation_attachment_failed"),
+                            )
+                            shouldRefresh = true
+                        }
+                        eventType.startsWith("conversation.attachment.") ||
+                            eventType.startsWith("storage.") -> shouldRefresh = true
                         operationId == activeOperationId &&
                             eventType in setOf(
                                 "chat.generation.completed",
@@ -311,7 +326,10 @@ internal fun ChatConversationSurface(
     val activeProjectName = activeBranch?.projectId?.let { loadChatProjectNames()[it] }
     val lastAssistantId = messages.lastOrNull { it.role == "assistant" }?.messageId
     val isArchived = record?.status == "archived"
-    val canGenerate = readiness.inference.status == ReadinessStatus.READY && !isArchived
+    val attachmentsAvailable = attachments.all { it.nodeState == "active" }
+    val canGenerate = readiness.inference.status == ReadinessStatus.READY &&
+        !isArchived &&
+        attachmentsAvailable
 
     Column(
         modifier = Modifier
@@ -411,6 +429,72 @@ internal fun ChatConversationSurface(
             }
         }
 
+        Text("Files from Storage", style = MaterialTheme.typography.titleMedium)
+        if (attachments.isEmpty()) {
+            Text(
+                "No Storage files attached to this conversation.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            attachments.forEach { attachment ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Column(modifier = Modifier.padding(MukeiSpacing.Medium)) {
+                        Text(attachment.displayName, style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            buildString {
+                                append(attachment.mimeType ?: "File")
+                                append(" · ")
+                                append(formatConversationAttachmentSize(attachment.sizeBytes))
+                                if (attachment.nodeState != "active") {
+                                    append(" · unavailable")
+                                }
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (attachment.nodeState != "active") {
+                            Text(
+                                "Restore this file in Storage or remove the attachment before sending.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        TextButton(
+                            enabled = !isArchived && activeOperationId == null,
+                            onClick = {
+                                val result = BackendRuntimeHost.removeConversationAttachment(
+                                    conversationId = conversationId,
+                                    nodeId = attachment.nodeId,
+                                )
+                                banner = if (result.status == "accepted") {
+                                    "Removing ${attachment.displayName} from this conversation…"
+                                } else {
+                                    chatFailure(result.rejectionReason ?: "attachment_remove_rejected")
+                                }
+                            },
+                        ) { Text("Remove") }
+                    }
+                }
+            }
+        }
+        Button(
+            enabled = record != null && !isArchived && activeOperationId == null,
+            onClick = { storagePickerOpen = true },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Attach from Storage") }
+        if (!attachmentsAvailable) {
+            Text(
+                "Sending is blocked while an attached Storage file is unavailable.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
         OutlinedTextField(
             value = draft,
             onValueChange = { draft = it.take(MaxChatMessageLength) },
@@ -460,6 +544,24 @@ internal fun ChatConversationSurface(
                 ) { Text("Send") }
             }
         }
+    }
+
+    if (storagePickerOpen) {
+        ConversationStoragePickerDialog(
+            onDismiss = { storagePickerOpen = false },
+            onSelect = { node ->
+                val result = BackendRuntimeHost.addConversationAttachment(
+                    conversationId = conversationId,
+                    nodeId = node.nodeId,
+                )
+                if (result.status == "accepted") {
+                    storagePickerOpen = false
+                    banner = "Attaching ${node.displayName} from encrypted Storage…"
+                } else {
+                    banner = chatFailure(result.rejectionReason ?: "attachment_add_rejected")
+                }
+            },
+        )
     }
 
     editing?.let { message ->
