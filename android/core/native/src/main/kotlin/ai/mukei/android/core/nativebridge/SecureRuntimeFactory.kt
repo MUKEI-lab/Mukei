@@ -47,7 +47,14 @@ object SecureRuntimeFactory {
             rawKey.fill(0)
         }
         return try {
-            configureRemoteToolsIfPresent(gateway, filesRoot)
+            // Remote providers are optional. Invalid, incomplete, or stale provider
+            // credentials must degrade to local-only operation rather than bricking the
+            // encrypted local runtime during bootstrap.
+            try {
+                configureRemoteToolsIfPresent(gateway, filesRoot)
+            } catch (_: Exception) {
+                // Keep the secure runtime alive with its default local-only tool policy.
+            }
             gateway
         } catch (failure: Throwable) {
             gateway.runCatching { close() }
