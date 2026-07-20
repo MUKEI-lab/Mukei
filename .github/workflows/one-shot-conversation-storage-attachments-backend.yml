@@ -40,7 +40,7 @@ jobs:
       - name: Apply guarded backend patch
         run: |
           set -euo pipefail
-          python3 .github/scripts/patch_conversation_storage_attachments_v3.py 2>&1 | tee conversation-storage-attachments-backend.log
+          python3 .github/scripts/patch_conversation_storage_attachments_v4.py 2>&1 | tee conversation-storage-attachments-backend.log
           cargo fmt --manifest-path rust/Cargo.toml --all 2>&1 | tee -a conversation-storage-attachments-backend.log
           git diff --check 2>&1 | tee -a conversation-storage-attachments-backend.log
           grep -F 'V017__conversation_storage_attachments' rust/crates/mukei-core/src/storage/migrations.rs | tee -a conversation-storage-attachments-backend.log
@@ -86,6 +86,7 @@ jobs:
             rust/crates/mukei-core/src/application_runtime/storage_import_tests.rs \
             rust/crates/mukei-core/src/ui_protocol.rs \
             rust/crates/mukei-core/tests/universal_storage_embedded_migrations.rs \
+            rust/crates/mukei-core/tests/universal_storage_v016_upgrade.rs \
             rust/crates/mukei-android-jni/src/secure_runtime_jni.rs \
             rust/crates/mukei-android-jni/src/lib.rs
           git commit -m 'Wire conversation Storage attachments'
