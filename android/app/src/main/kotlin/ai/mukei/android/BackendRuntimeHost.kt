@@ -231,6 +231,37 @@ object BackendRuntimeHost {
         idempotent = true,
     )
 
+    fun renameConversation(conversationId: String, title: String): ChatCommandSubmission =
+        submitConversationCommand(
+            commandType = "conversation.rename",
+            conversationId = conversationId,
+            payload = JSONObject().put("title", title),
+        )
+
+    fun archiveConversation(conversationId: String): ChatCommandSubmission =
+        submitConversationCommand(
+            commandType = "conversation.archive",
+            conversationId = conversationId,
+            payload = JSONObject(),
+        )
+
+    fun deleteConversation(conversationId: String): ChatCommandSubmission =
+        submitConversationCommand(
+            commandType = "conversation.delete",
+            conversationId = conversationId,
+            payload = JSONObject(),
+        )
+
+    fun selectConversationBranch(
+        conversationId: String,
+        branchId: String,
+    ): ChatCommandSubmission = submitConversationCommand(
+        commandType = "conversation.select_branch",
+        conversationId = conversationId,
+        branchId = branchId,
+        payload = JSONObject(),
+    )
+
     fun regenerateChat(
         conversationId: String,
         branchId: String,
@@ -254,6 +285,49 @@ object BackendRuntimeHost {
         operationId = operationId,
         idempotent = false,
     )
+
+    private fun submitConversationCommand(
+        commandType: String,
+        conversationId: String,
+        branchId: String? = null,
+        payload: JSONObject,
+    ): ChatCommandSubmission {
+        val activeGateway = gateway.get()
+            ?: return ChatCommandSubmission("rejected", null, "backend_unavailable")
+        if (conversationId.isBlank() || (branchId != null && branchId.isBlank())) {
+            return ChatCommandSubmission("rejected", null, "stale_scope")
+        }
+        return try {
+            val scope = JSONObject().put("conversation_id", conversationId)
+            if (branchId != null) scope.put("branch_id", branchId)
+            val envelope = JSONObject()
+                .put("protocol_version", JSONObject().put("major", 2).put("minor", 3))
+                .put("command_id", UUID.randomUUID().toString())
+                .put("request_id", UUID.randomUUID().toString())
+                .put("command_type", commandType)
+                .put("submitted_at", Instant.now().toString())
+                .put("correlation_id", UUID.randomUUID().toString())
+                .put("idempotency_key", "conversation-${UUID.randomUUID()}")
+                .put("scope", scope)
+                .put("payload", payload)
+            val acknowledgement = JSONObject(
+                String(
+                    activeGateway.submitCommand(
+                        envelope.toString().toByteArray(StandardCharsets.UTF_8),
+                    ),
+                    StandardCharsets.UTF_8,
+                ),
+            )
+            ChatCommandSubmission(
+                status = acknowledgement.optString("status", "rejected"),
+                operationId = acknowledgement.optString("operation_id").takeIf { it.isNotBlank() },
+                rejectionReason = acknowledgement.optString("rejection_reason")
+                    .takeIf { it.isNotBlank() },
+            )
+        } catch (failure: Throwable) {
+            ChatCommandSubmission("rejected", null, stableFailureCode(failure))
+        }
+    }
 
     private fun submitChatCommand(
         commandType: String,
@@ -316,7 +390,13 @@ object BackendRuntimeHost {
             val envelope = JSONObject(raw)
             val payload = envelope.optJSONObject("payload") ?: JSONObject()
             val branches = payload.optJSONArray("conversation_branches")
-            envelope.put("payload", JSONObject().put("branches", branches))
+            val conversations = payload.optJSONArray("conversations")
+            envelope.put(
+                "payload",
+                JSONObject()
+                    .put("conversations", conversations)
+                    .put("branches", branches),
+            )
             envelope.toString()
         }.getOrNull()
     }

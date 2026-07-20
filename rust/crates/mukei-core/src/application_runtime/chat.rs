@@ -66,20 +66,20 @@ impl MukeiRuntime {
             }
             return self.edit_chat_message(command, message_id, &payload.text);
         }
-        if let Some(project_id) = payload.project_id.as_deref() {
-            if let Err(acknowledgement) = self.ensure_inference_ready_for_branching(command) {
-                return acknowledgement;
-            }
-            let (conversation, _, _, _) = match Self::parse_chat_scope(command) {
-                Ok(value) => value,
-                Err(acknowledgement) => return acknowledgement,
-            };
-            if let Err(reason) = self
-                .features
-                .bind_conversation_project(&conversation, project_id)
-            {
-                return CommandAcknowledgementV2::rejected(Some(&command.envelope), reason);
-            }
+        if let Err(acknowledgement) = self.ensure_inference_ready_for_branching(command) {
+            return acknowledgement;
+        }
+        let (conversation, branch, _, _) = match Self::parse_chat_scope(command) {
+            Ok(value) => value,
+            Err(acknowledgement) => return acknowledgement,
+        };
+        if let Err(reason) = self.features.prepare_conversation_for_send(
+            &conversation,
+            &branch,
+            payload.project_id.as_deref(),
+            &payload.text,
+        ) {
+            return CommandAcknowledgementV2::rejected(Some(&command.envelope), reason);
         }
         self.start_chat_operation(command, payload.text.clone(), false, None)
     }
@@ -96,6 +96,9 @@ impl MukeiRuntime {
                 Ok(value) => value,
                 Err(ack) => return ack,
             };
+        if let Err(reason) = self.features.ensure_active_conversation(&conversation) {
+            return CommandAcknowledgementV2::rejected(Some(&command.envelope), reason);
+        }
         if !self.activation.readiness_snapshot().active_backend_ready {
             return CommandAcknowledgementV2::rejected(
                 Some(&command.envelope),

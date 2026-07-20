@@ -53,6 +53,16 @@ private data class ChatBranchCard(
         get() = messages.lastOrNull()?.createdAt.orEmpty()
 }
 
+private data class ConversationRecordCard(
+    val conversationId: String,
+    val title: String,
+    val projectId: String?,
+    val activeBranchId: String,
+    val status: String,
+    val createdAt: String,
+    val updatedAt: String,
+)
+
 private data class ChatSummary(
     val conversationId: String,
     val branchId: String,
@@ -60,6 +70,7 @@ private data class ChatSummary(
     val preview: String,
     val branchCount: Int,
     val projectId: String?,
+    val status: String,
     val lastTimestamp: String,
 )
 
@@ -68,9 +79,13 @@ internal fun ChatsSurface(
     onOpenChat: (conversationId: String, branchId: String) -> Unit,
 ) {
     var branches by remember { mutableStateOf(loadChatBranches()) }
+    var conversations by remember { mutableStateOf(loadConversationRecords()) }
+    var renameTarget by remember { mutableStateOf<ChatSummary?>(null) }
+    var deleteTarget by remember { mutableStateOf<ChatSummary?>(null) }
 
     fun refresh() {
         branches = loadChatBranches()
+        conversations = loadConversationRecords()
     }
 
     LaunchedEffect(Unit) { refresh() }
@@ -78,7 +93,8 @@ internal fun ChatsSurface(
         val registration = BackendRuntimeHost.addEventListener { batch ->
             if (batch.events.any { raw ->
                     runCatching {
-                        JSONObject(raw).optString("event_type").startsWith("chat.")
+                        val eventType = JSONObject(raw).optString("event_type")
+                        eventType.startsWith("chat.") || eventType.startsWith("conversation.")
                     }.getOrDefault(false)
                 }
             ) {
@@ -88,7 +104,7 @@ internal fun ChatsSurface(
         onDispose { registration.close() }
     }
 
-    val summaries = remember(branches) { summarizeChats(branches) }
+    val summaries = remember(branches, conversations) { summarizeChats(branches, conversations) }
     val projectNames = loadChatProjectNames()
     Column(
         modifier = Modifier
@@ -114,6 +130,13 @@ internal fun ChatsSurface(
                 ) {
                     Column(modifier = Modifier.padding(MukeiSpacing.Large)) {
                         Text(chat.title, style = MaterialTheme.typography.titleMedium)
+                        if (chat.status == "archived") {
+                            Text(
+                                "Archived · read-only",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         Spacer(Modifier.height(MukeiSpacing.ExtraSmall))
                         Text(
                             chat.preview,
@@ -139,12 +162,76 @@ internal fun ChatsSurface(
                             onClick = { onOpenChat(chat.conversationId, chat.branchId) },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Open chat")
+                            Text("Open conversation")
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(MukeiSpacing.ExtraSmall)) {
+                            TextButton(onClick = { renameTarget = chat }) { Text("Rename") }
+                            if (chat.status == "active") {
+                                TextButton(
+                                    onClick = {
+                                        val result = BackendRuntimeHost.archiveConversation(chat.conversationId)
+                                        if (result.status == "accepted") refresh()
+                                    },
+                                ) { Text("Archive") }
+                            }
+                            TextButton(onClick = { deleteTarget = chat }) { Text("Delete") }
                         }
                     }
                 }
             }
         }
+    }
+
+    renameTarget?.let { target ->
+        var title by remember(target.conversationId) { mutableStateOf(target.title) }
+        AlertDialog(
+            onDismissRequest = { renameTarget = null },
+            title = { Text("Rename conversation") },
+            text = {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it.take(128) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = title.trim().isNotEmpty(),
+                    onClick = {
+                        val result = BackendRuntimeHost.renameConversation(
+                            target.conversationId,
+                            title.trim(),
+                        )
+                        if (result.status == "accepted") {
+                            renameTarget = null
+                            refresh()
+                        }
+                    },
+                ) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { renameTarget = null }) { Text("Cancel") } },
+        )
+    }
+
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Delete conversation?") },
+            text = { Text("This permanently deletes this conversation and all of its branches.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val result = BackendRuntimeHost.deleteConversation(target.conversationId)
+                        if (result.status == "accepted") {
+                            deleteTarget = null
+                            refresh()
+                        }
+                    },
+                ) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } },
+        )
     }
 }
 
@@ -220,9 +307,11 @@ internal fun ChatConversationSurface(
         ?: orderedBranches.lastOrNull()
     val activeIndex = orderedBranches.indexOfFirst { it.branchId == activeBranch?.branchId }
     val messages = activeBranch?.messages.orEmpty()
+    val record = loadConversationRecords().firstOrNull { it.conversationId == conversationId }
     val activeProjectName = activeBranch?.projectId?.let { loadChatProjectNames()[it] }
     val lastAssistantId = messages.lastOrNull { it.role == "assistant" }?.messageId
-    val canGenerate = readiness.inference.status == ReadinessStatus.READY
+    val isArchived = record?.status == "archived"
+    val canGenerate = readiness.inference.status == ReadinessStatus.READY && !isArchived
 
     Column(
         modifier = Modifier
@@ -231,6 +320,16 @@ internal fun ChatConversationSurface(
             .padding(MukeiLayout.LargePhoneTextPadding),
         verticalArrangement = Arrangement.spacedBy(MukeiSpacing.Medium),
     ) {
+        record?.let { conversation ->
+            Text(conversation.title, style = MaterialTheme.typography.headlineSmall)
+            if (isArchived) {
+                Text(
+                    "Archived conversation · messages are read-only",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         activeBranch?.projectId?.let {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -319,7 +418,7 @@ internal fun ChatConversationSurface(
             label = { Text("Message Mukei") },
             minLines = 2,
             maxLines = 8,
-            enabled = activeOperationId == null,
+            enabled = activeOperationId == null && !isArchived,
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -506,25 +605,61 @@ private fun loadChatBranches(conversationId: String? = null): List<ChatBranchCar
     }.getOrDefault(emptyList())
 }
 
-private fun summarizeChats(branches: List<ChatBranchCard>): List<ChatSummary> = branches
-    .groupBy { it.conversationId }
-    .mapNotNull { (conversationId, values) ->
-        val latest = values.maxWithOrNull(
-            compareBy<ChatBranchCard> { it.lastTimestamp }.thenBy { it.branchId },
-        ) ?: return@mapNotNull null
-        val firstUser = latest.messages.firstOrNull { it.role == "user" }?.content.orEmpty()
-        val last = latest.messages.lastOrNull()?.content.orEmpty()
+private fun loadConversationRecords(): List<ConversationRecordCard> {
+    val raw = BackendRuntimeHost.requestRuntimeSnapshot("conversations") ?: return emptyList()
+    return runCatching {
+        val payload = JSONObject(raw).optJSONObject("payload") ?: JSONObject()
+        val values = payload.optJSONArray("conversations") ?: JSONArray()
+        buildList {
+            for (index in 0 until values.length()) {
+                val conversation = values.optJSONObject(index) ?: continue
+                val conversationId = conversation.optString("conversation_id")
+                val activeBranchId = conversation.optString("active_branch_id")
+                if (conversationId.isBlank() || activeBranchId.isBlank()) continue
+                add(
+                    ConversationRecordCard(
+                        conversationId = conversationId,
+                        title = conversation.optString("title", "Conversation"),
+                        projectId = conversation.optString("project_id").takeIf(String::isNotBlank),
+                        activeBranchId = activeBranchId,
+                        status = conversation.optString("status", "active"),
+                        createdAt = conversation.optString("created_at"),
+                        updatedAt = conversation.optString("updated_at"),
+                    ),
+                )
+            }
+        }
+    }.getOrDefault(emptyList())
+}
+
+private fun summarizeChats(
+    branches: List<ChatBranchCard>,
+    conversations: List<ConversationRecordCard>,
+): List<ChatSummary> {
+    val branchesByConversation = branches.groupBy { it.conversationId }
+    return conversations.map { conversation ->
+        val values = branchesByConversation[conversation.conversationId].orEmpty()
+        val active = values.firstOrNull { it.branchId == conversation.activeBranchId }
+            ?: values.maxWithOrNull(compareBy<ChatBranchCard> { it.lastTimestamp }.thenBy { it.branchId })
+        val firstUser = values
+            .flatMap { it.messages }
+            .filter { it.role == "user" }
+            .minByOrNull { it.createdAt }
+            ?.content
+            .orEmpty()
+        val last = active?.messages?.lastOrNull()?.content.orEmpty()
         ChatSummary(
-            conversationId = conversationId,
-            branchId = latest.branchId,
-            title = firstUser.ifBlank { "Conversation" }.lineSequence().first().take(72),
+            conversationId = conversation.conversationId,
+            branchId = active?.branchId ?: conversation.activeBranchId,
+            title = conversation.title,
             preview = last.ifBlank { firstUser }.replace('\n', ' ').take(160),
             branchCount = values.size,
-            projectId = latest.projectId,
-            lastTimestamp = latest.lastTimestamp,
+            projectId = conversation.projectId,
+            status = conversation.status,
+            lastTimestamp = conversation.updatedAt,
         )
-    }
-    .sortedByDescending { it.lastTimestamp }
+    }.sortedByDescending { it.lastTimestamp }
+}
 
 
 internal data class ChatProjectOption(
@@ -550,8 +685,21 @@ internal fun loadActiveChatProjects(): List<ChatProjectOption> {
     }.getOrDefault(emptyList())
 }
 
-private fun loadChatProjectNames(): Map<String, String> = loadActiveChatProjects()
-    .associate { it.projectId to it.name }
+private fun loadChatProjectNames(): Map<String, String> {
+    val raw = BackendRuntimeHost.requestRuntimeSnapshot("projects") ?: return emptyMap()
+    return runCatching {
+        val payload = JSONObject(raw).optJSONObject("payload") ?: JSONObject()
+        val projects = payload.optJSONArray("projects") ?: JSONArray()
+        buildMap {
+            for (index in 0 until projects.length()) {
+                val project = projects.optJSONObject(index) ?: continue
+                val projectId = project.optString("project_id")
+                val name = project.optString("name")
+                if (projectId.isNotBlank() && name.isNotBlank()) put(projectId, name)
+            }
+        }
+    }.getOrDefault(emptyMap())
+}
 
 private fun chatFailure(code: String): String = when (code) {
     "backend_unavailable" -> "A ready model is required for this action."

@@ -68,6 +68,10 @@ impl MukeiRuntime {
         let mut commands = vec![
             CommandType::AppInitialize,
             CommandType::ChatClearConversation,
+            CommandType::ConversationRename,
+            CommandType::ConversationArchive,
+            CommandType::ConversationDelete,
+            CommandType::ConversationSelectBranch,
             CommandType::DownloadCancel,
             CommandType::ModelDelete,
             CommandType::DocumentGrant,

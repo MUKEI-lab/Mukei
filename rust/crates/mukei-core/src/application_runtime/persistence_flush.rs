@@ -60,6 +60,13 @@ impl FeatureState {
                     },
                 )
                 .collect::<Vec<_>>();
+            let conversation_metadata = self
+                .conversation_records
+                .read()
+                .unwrap_or_else(|p| p.into_inner())
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
             let projections = vec![
                 (
                     "operations",
@@ -79,6 +86,11 @@ impl FeatureState {
                 (
                     "conversations",
                     serde_json::to_value(conversations)
+                        .map_err(|error| MukeiError::Internal(error.to_string()))?,
+                ),
+                (
+                    "conversation_metadata",
+                    serde_json::to_value(conversation_metadata)
                         .map_err(|error| MukeiError::Internal(error.to_string()))?,
                 ),
                 (

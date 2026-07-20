@@ -207,8 +207,16 @@ pub enum CommandType {
     ChatSendMessage,
     /// Cancel an active generation.
     ChatStopGeneration,
-    /// Clear the active conversation.
+    /// Clear messages from the active conversation branch without deleting its identity.
     ChatClearConversation,
+    /// Rename one durable conversation.
+    ConversationRename,
+    /// Archive one durable conversation and make it read-only.
+    ConversationArchive,
+    /// Permanently delete one durable conversation and all of its branches.
+    ConversationDelete,
+    /// Persist the active branch selected for one conversation.
+    ConversationSelectBranch,
     /// Start a model download.
     ModelDownload,
     /// Cancel model downloads.
@@ -255,6 +263,10 @@ impl CommandType {
             "chat.send_message" => Some(Self::ChatSendMessage),
             "chat.stop_generation" => Some(Self::ChatStopGeneration),
             "chat.clear_conversation" => Some(Self::ChatClearConversation),
+            "conversation.rename" => Some(Self::ConversationRename),
+            "conversation.archive" => Some(Self::ConversationArchive),
+            "conversation.delete" => Some(Self::ConversationDelete),
+            "conversation.select_branch" => Some(Self::ConversationSelectBranch),
             "model.download" => Some(Self::ModelDownload),
             "download.cancel" => Some(Self::DownloadCancel),
             "model.select" => Some(Self::ModelSelect),
@@ -284,6 +296,10 @@ impl CommandType {
             Self::ChatSendMessage => "chat.send_message",
             Self::ChatStopGeneration => "chat.stop_generation",
             Self::ChatClearConversation => "chat.clear_conversation",
+            Self::ConversationRename => "conversation.rename",
+            Self::ConversationArchive => "conversation.archive",
+            Self::ConversationDelete => "conversation.delete",
+            Self::ConversationSelectBranch => "conversation.select_branch",
             Self::ModelDownload => "model.download",
             Self::DownloadCancel => "download.cancel",
             Self::ModelSelect => "model.select",
@@ -310,6 +326,10 @@ impl CommandType {
         matches!(
             self,
             Self::ChatSendMessage
+                | Self::ConversationRename
+                | Self::ConversationArchive
+                | Self::ConversationDelete
+                | Self::ConversationSelectBranch
                 | Self::ModelDownload
                 | Self::ModelDelete
                 | Self::DocumentGrant
@@ -349,6 +369,13 @@ pub struct SendMessagePayload {
     /// Optional active project to bind when creating a brand-new conversation.
     #[serde(default)]
     pub project_id: Option<String>,
+}
+
+/// Mutable conversation title payload.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationRenamePayload {
+    /// Replacement user-visible title.
+    pub title: String,
 }
 
 /// Payload containing one model identity.
@@ -482,6 +509,8 @@ pub enum ValidatedCommandPayload {
     Initialize(InitializePayload),
     /// Chat submission.
     SendMessage(SendMessagePayload),
+    /// Conversation title mutation.
+    ConversationRename(ConversationRenamePayload),
     /// Model download.
     ModelDownload(ModelDownloadPayload),
     /// Model identity.
@@ -820,6 +849,10 @@ fn validate_scope_for_command(
             CommandType::RecoveryResume
                 | CommandType::RecoveryRegenerate
                 | CommandType::StorageImportFile
+                | CommandType::ConversationRename
+                | CommandType::ConversationArchive
+                | CommandType::ConversationDelete
+                | CommandType::ConversationSelectBranch
         ) {
             Err(RejectionReason::StaleScope)
         } else {
@@ -843,6 +876,31 @@ fn validate_scope_for_command(
         }
         (CommandType::ChatSendMessage | CommandType::ChatClearConversation, _) => {
             if has_model || has_document {
+                return Err(RejectionReason::StaleScope);
+            }
+        }
+        (
+            CommandType::ConversationRename
+            | CommandType::ConversationArchive
+            | CommandType::ConversationDelete,
+            _,
+        ) => {
+            if scope.conversation_id.is_none()
+                || scope.branch_id.is_some()
+                || scope.turn_id.is_some()
+                || has_model
+                || has_document
+            {
+                return Err(RejectionReason::StaleScope);
+            }
+        }
+        (CommandType::ConversationSelectBranch, _) => {
+            if scope.conversation_id.is_none()
+                || scope.branch_id.is_none()
+                || scope.turn_id.is_some()
+                || has_model
+                || has_document
+            {
                 return Err(RejectionReason::StaleScope);
             }
         }
@@ -980,6 +1038,14 @@ pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand,
                 return Err(RejectionReason::InvalidPayload);
             }
             ValidatedCommandPayload::SendMessage(value)
+        }
+        CommandType::ConversationRename => {
+            let value: ConversationRenamePayload = serde_json::from_value(envelope.payload.clone())
+                .map_err(|_| RejectionReason::InvalidPayload)?;
+            if !non_empty_bounded(&value.title, 128) || value.title.chars().any(char::is_control) {
+                return Err(RejectionReason::InvalidPayload);
+            }
+            ValidatedCommandPayload::ConversationRename(value)
         }
         CommandType::ModelDownload => {
             let value: ModelDownloadPayload = serde_json::from_value(envelope.payload.clone())
@@ -1121,6 +1187,9 @@ pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand,
         }
         CommandType::ChatStopGeneration
         | CommandType::ChatClearConversation
+        | CommandType::ConversationArchive
+        | CommandType::ConversationDelete
+        | CommandType::ConversationSelectBranch
         | CommandType::DownloadCancel
         | CommandType::RecoveryResume
         | CommandType::RecoveryRegenerate => {

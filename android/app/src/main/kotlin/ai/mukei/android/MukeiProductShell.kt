@@ -206,6 +206,8 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
     var openDrawerRequest by remember { mutableIntStateOf(0) }
     var closeDrawerRequest by remember { mutableIntStateOf(0) }
     var newChatGeneration by rememberSaveable { mutableIntStateOf(0) }
+    var conversationWorkspaceGeneration by rememberSaveable { mutableIntStateOf(0) }
+    var pendingHomePrompt by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(openDrawerRequest) {
         if (openDrawerRequest > 0) drawerState.open()
@@ -314,8 +316,9 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                     actions = {
                         IconButton(
                             onClick = {
-                                selectedName = TopLevelDestination.HOME.name
-                                newChatGeneration += 1
+                                selectedName = TopLevelDestination.CHATS.name
+                                pendingHomePrompt = null
+                                conversationWorkspaceGeneration += 1
                             },
                             modifier = Modifier.semantics {
                                 contentDescription = "New chat"
@@ -349,10 +352,21 @@ private fun ReadyProductShell(state: BackendRuntimeHost.State.Ready) {
                         readiness = state.readiness,
                         resetGeneration = newChatGeneration,
                         openModels = { selectedName = TopLevelDestination.MODELS.name },
+                        onStartConversation = { prompt ->
+                            pendingHomePrompt = prompt
+                            conversationWorkspaceGeneration += 1
+                            selectedName = TopLevelDestination.CHATS.name
+                        },
                     )
                     TopLevelDestination.STORAGE -> StorageSurface()
                     TopLevelDestination.PROJECTS -> ProjectsSurface()
                     TopLevelDestination.MODELS -> ModelsSurface(state.readiness)
+                    TopLevelDestination.CHATS -> ConversationWorkspaceSurface(
+                        readiness = state.readiness,
+                        resetGeneration = conversationWorkspaceGeneration,
+                        initialPrompt = pendingHomePrompt,
+                        onInitialPromptConsumed = { pendingHomePrompt = null },
+                    )
                     else -> ReservedDestinationSurface(selected)
                 }
             }
@@ -396,6 +410,7 @@ private fun HomeSurface(
     readiness: AppReadiness,
     resetGeneration: Int,
     openModels: () -> Unit,
+    onStartConversation: (String) -> Unit,
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
     var selectedCapabilityId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -471,6 +486,15 @@ private fun HomeSurface(
                 draft = draft,
                 onDraftChange = { draft = it },
                 placeholder = selectedCapability?.placeholder ?: "Tell Mukei what you want to do…",
+                sendEnabled = readiness.inference.status == ReadinessStatus.READY &&
+                    draft.trim().isNotEmpty(),
+                onSend = {
+                    val prompt = draft.trim()
+                    if (prompt.isNotEmpty()) {
+                        draft = ""
+                        onStartConversation(prompt)
+                    }
+                },
             )
 
             if (readiness.inference.status == ReadinessStatus.ACTION_REQUIRED) {
@@ -488,6 +512,8 @@ private fun MukeiComposer(
     draft: String,
     onDraftChange: (String) -> Unit,
     placeholder: String,
+    sendEnabled: Boolean,
+    onSend: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -547,10 +573,10 @@ private fun MukeiComposer(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                 ) {
                     IconButton(
-                        onClick = {},
-                        enabled = false,
+                        onClick = onSend,
+                        enabled = sendEnabled,
                         modifier = Modifier.semantics {
-                            contentDescription = "Send unavailable until conversation runtime is connected"
+                            contentDescription = "Send message"
                         },
                     ) {
                         MukeiIcon(

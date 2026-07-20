@@ -73,7 +73,10 @@ impl FeatureState {
                 .cmp(&right.conversation_id)
                 .then_with(|| left.branch_id.cmp(&right.branch_id))
         });
-        json!({ "branches": branches })
+        json!({
+            "conversations": self.conversation_metadata_snapshot(),
+            "branches": branches,
+        })
     }
 
     fn fork_branch_through(
@@ -102,7 +105,9 @@ impl FeatureState {
             conversations.insert((conversation.to_owned(), new_branch.clone()), cloned.clone());
             cloned
         };
+        self.touch_conversation(conversation, &new_branch);
         self.persist_conversations();
+        self.persist_conversation_metadata();
         let target = cloned
             .last()
             .cloned()
@@ -157,6 +162,9 @@ impl MukeiRuntime {
             Ok(value) => value,
             Err(acknowledgement) => return acknowledgement,
         };
+        if let Err(reason) = self.features.ensure_active_conversation(&conversation) {
+            return CommandAcknowledgementV2::rejected(Some(&command.envelope), reason);
+        }
         let message_id = match Uuid::parse_str(message_id) {
             Ok(value) => MessageId(value),
             Err(_) => {
@@ -283,6 +291,9 @@ impl MukeiRuntime {
             Ok(value) => value,
             Err(acknowledgement) => return acknowledgement,
         };
+        if let Err(reason) = self.features.ensure_active_conversation(&conversation) {
+            return CommandAcknowledgementV2::rejected(Some(&command.envelope), reason);
+        }
         let Some(user_message) = self.features.last_user_message(&conversation, &source_branch) else {
             return CommandAcknowledgementV2::rejected(
                 Some(&command.envelope),

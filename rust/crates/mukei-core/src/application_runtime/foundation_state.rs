@@ -75,6 +75,25 @@ struct ConversationProjection {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+enum ConversationStatus {
+    Active,
+    Archived,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ConversationRecord {
+    conversation_id: String,
+    title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    project_id: Option<String>,
+    active_branch_id: String,
+    status: ConversationStatus,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 enum ProjectStatus {
     Active,
     Archived,
@@ -122,6 +141,7 @@ struct FeatureState {
     operation_tokens: Mutex<HashMap<String, CancellationToken>>,
     conversations: RwLock<HashMap<(String, String), Vec<ChatMessage>>>,
     conversation_projects: RwLock<HashMap<String, String>>,
+    conversation_records: RwLock<HashMap<String, ConversationRecord>>,
     models: RwLock<HashMap<String, ModelProjection>>,
     documents: RwLock<HashMap<String, DocumentProjection>>,
     projects: RwLock<HashMap<String, ProjectProjection>>,
@@ -173,6 +193,7 @@ impl FeatureState {
             operation_tokens: Mutex::new(HashMap::new()),
             conversations: RwLock::new(HashMap::new()),
             conversation_projects: RwLock::new(HashMap::new()),
+            conversation_records: RwLock::new(HashMap::new()),
             models: RwLock::new(HashMap::new()),
             documents: RwLock::new(HashMap::new()),
             projects: RwLock::new(HashMap::new()),
@@ -269,6 +290,10 @@ impl FeatureState {
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = conversations;
         }
+        if let Some(value) = store.load("conversation_metadata").await? {
+            self.hydrate_conversation_metadata(value)?;
+        }
+        self.reconcile_conversation_records()?;
         if let Some(value) = store.load("projects").await? {
             let records: Vec<ProjectProjection> =
                 serde_json::from_value(value).map_err(|_| MukeiError::DatabaseCorruption)?;
@@ -488,7 +513,9 @@ impl FeatureState {
             .entry((conversation.to_owned(), branch.to_owned()))
             .or_default()
             .push(message);
+        self.touch_conversation(conversation, branch);
         self.persist_conversations();
+        self.persist_conversation_metadata();
     }
 
     fn history(&self, conversation: ConversationId, branch: BranchId) -> Vec<ChatMessage> {
@@ -501,14 +528,21 @@ impl FeatureState {
     }
 
     fn clear_conversation(&self, conversation: &str, branch: &str) -> usize {
-        let removed = self
-            .conversations
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(&(conversation.to_owned(), branch.to_owned()))
-            .map(|messages| messages.len())
-            .unwrap_or(0);
+        let removed = {
+            let mut conversations = self
+                .conversations
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let messages = conversations
+                .entry((conversation.to_owned(), branch.to_owned()))
+                .or_default();
+            let removed = messages.len();
+            messages.clear();
+            removed
+        };
+        self.touch_conversation(conversation, branch);
         self.persist_conversations();
+        self.persist_conversation_metadata();
         removed
     }
 
