@@ -29,6 +29,7 @@ data class AppReadiness(
             encryptedDatabase.status == ReadinessStatus.READY &&
             encryptedProjections.status == ReadinessStatus.READY
 
+    /** Mirrors the native chat admission guard: only an active backend may accept generation. */
     val inferenceReady: Boolean
         get() = inference.status == ReadinessStatus.READY
 
@@ -62,13 +63,9 @@ data class AppReadiness(
                     ReadinessDimension(ReadinessStatus.UNAVAILABLE, "projections_unavailable")
                 else -> ReadinessDimension(ReadinessStatus.UNKNOWN, "projections_unknown")
             }
-            val inference = when (root.optString("rag", "unknown")) {
-                "ready" -> ReadinessDimension(ReadinessStatus.READY, "ready")
-                "artifacts_required" ->
-                    ReadinessDimension(ReadinessStatus.ACTION_REQUIRED, "artifacts_required")
-                "unavailable" -> ReadinessDimension(ReadinessStatus.UNAVAILABLE, "unavailable")
-                else -> ReadinessDimension(ReadinessStatus.UNKNOWN, "inference_unknown")
-            }
+            val inference = root.optJSONObject("inference")
+                ?.let(::inferenceReadiness)
+                ?: ReadinessDimension(ReadinessStatus.UNKNOWN, "inference_unknown")
             val panic = if (root.optBoolean("panic_hook", false)) {
                 ReadinessDimension(ReadinessStatus.READY, "panic_contained")
             } else {
@@ -82,6 +79,33 @@ data class AppReadiness(
                 inference = inference,
                 panicContainment = panic,
             )
+        }
+
+        private fun inferenceReadiness(inference: JSONObject): ReadinessDimension = when {
+            // This is the same condition enforced by the native chat runtime before accepting
+            // chat.send_message, so UI admission cannot be coupled to unrelated RAG artifacts.
+            inference.optBoolean("active_backend_ready", false) ->
+                ReadinessDimension(ReadinessStatus.READY, "ready")
+
+            !inference.optBoolean("inference_interface_exists", false) ->
+                ReadinessDimension(ReadinessStatus.UNAVAILABLE, "inference_interface_unavailable")
+
+            !inference.optBoolean("real_backend_implementation_available", false) ->
+                ReadinessDimension(ReadinessStatus.UNAVAILABLE, "inference_backend_unavailable")
+
+            inference.optBoolean("activation_failed", false) ->
+                ReadinessDimension(ReadinessStatus.DEGRADED, "model_activation_failed")
+
+            inference.optBoolean("activation_in_progress", false) ->
+                ReadinessDimension(ReadinessStatus.UNKNOWN, "model_activation_in_progress")
+
+            !inference.optBoolean("selected_model_exists", false) ->
+                ReadinessDimension(ReadinessStatus.ACTION_REQUIRED, "model_required")
+
+            !inference.optBoolean("selected_model_verified", false) ->
+                ReadinessDimension(ReadinessStatus.ACTION_REQUIRED, "model_verification_required")
+
+            else -> ReadinessDimension(ReadinessStatus.ACTION_REQUIRED, "model_activation_required")
         }
     }
 }

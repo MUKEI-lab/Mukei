@@ -101,6 +101,7 @@ jobs:
           gradle -p android \
             :core:protocol:testDebugUnitTest \
             :core:native:testDebugUnitTest \
+            :app:testDebugUnitTest \
             :app:lintDebug \
             :app:assembleDebug \
             :app:assembleOffline \

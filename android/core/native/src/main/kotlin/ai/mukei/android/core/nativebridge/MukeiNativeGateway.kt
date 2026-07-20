@@ -4,8 +4,10 @@ import ai.mukei.android.protocol.TemporaryChatEndV2
 import ai.mukei.android.protocol.TemporaryChatJsonCodec
 import ai.mukei.android.protocol.TemporaryChatSessionV2
 import java.io.Closeable
+import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
 import java.util.concurrent.atomic.AtomicBoolean
+import org.json.JSONObject
 
 interface MukeiNativeGateway : Closeable {
     fun protocolCapabilities(): ByteArray
@@ -42,7 +44,30 @@ class RustNativeGateway private constructor(
 
     override fun securityStatus(): ByteArray {
         checkOpen()
-        return NativeBindings.securityStatus(nativeHandle)
+        val securityStatus = NativeBindings.securityStatus(nativeHandle)
+        return runCatching {
+            val security = JSONObject(String(securityStatus, StandardCharsets.UTF_8))
+            if (security.optJSONObject("error") != null) return@runCatching securityStatus
+
+            val applicationSnapshot = JSONObject(
+                String(
+                    NativeBindings.requestSnapshot(nativeHandle, APPLICATION_SNAPSHOT_DOMAIN),
+                    StandardCharsets.UTF_8,
+                ),
+            )
+            if (applicationSnapshot.optJSONObject("error") != null) {
+                return@runCatching securityStatus
+            }
+            val inference = applicationSnapshot
+                .optJSONObject("payload")
+                ?.optJSONObject("inference")
+                ?: return@runCatching securityStatus
+
+            security
+                .put("inference", inference)
+                .toString()
+                .toByteArray(StandardCharsets.UTF_8)
+        }.getOrDefault(securityStatus)
     }
 
     fun configureRemoteTools(
@@ -144,6 +169,7 @@ class RustNativeGateway private constructor(
 
     companion object {
         private const val MAX_PROVIDER_KEY_BYTES = 16 * 1024
+        private const val APPLICATION_SNAPSHOT_DOMAIN = "application"
 
         fun create(configJson: ByteArray): RustNativeGateway {
             require(configJson.isNotEmpty()) { "Runtime configuration must not be empty" }
