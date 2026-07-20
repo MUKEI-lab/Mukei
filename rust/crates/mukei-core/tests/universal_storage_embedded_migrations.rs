@@ -16,8 +16,8 @@ fn embedded_migrations_include_universal_storage_and_forward_hardening() {
     let versions: Vec<u32> = migrations.iter().map(|(version, _, _)| *version).collect();
     assert_eq!(
         versions,
-        (1..=16).collect::<Vec<_>>(),
-        "embedded migrations must be contiguous through V016"
+        (1..=17).collect::<Vec<_>>(),
+        "embedded migrations must be contiguous through V017"
     );
 
     let universal_storage = migrations
@@ -59,4 +59,19 @@ fn embedded_migrations_include_universal_storage_and_forward_hardening() {
     assert!(hardening
         .2
         .contains("operation_journal_terminal_evidence_immutable"));
+
+    let conversation_attachments = migrations
+        .iter()
+        .find(|(version, _, _)| *version == 17)
+        .expect("V017 conversation Storage attachment migration must be embedded");
+    assert_eq!(
+        conversation_attachments.1,
+        "V017__conversation_storage_attachments"
+    );
+    assert!(conversation_attachments
+        .2
+        .contains("CREATE TABLE IF NOT EXISTS conversation_storage_attachments"));
+    assert!(conversation_attachments
+        .2
+        .contains("conversation_storage_attachment_identity_immutable"));
 }

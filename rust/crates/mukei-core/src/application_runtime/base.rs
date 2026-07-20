@@ -40,6 +40,8 @@ impl MukeiRuntime {
             storage_importer: RwLock::new(services.storage_importer),
             #[cfg(feature = "rusqlite")]
             storage_workspace: RwLock::new(services.storage_workspace),
+            #[cfg(feature = "rusqlite")]
+            conversation_attachments: RwLock::new(services.conversation_attachments),
             remote_tool_secrets: Mutex::new(None),
             remote_policy: RwLock::new(crate::tools::RemoteFeaturePolicy::LocalOnly),
             closed: AtomicBool::new(false),
@@ -127,6 +129,18 @@ impl MukeiRuntime {
                 CommandType::StorageNodeRename,
                 CommandType::StorageNodeTrash,
                 CommandType::StorageNodeRestore,
+            ]);
+        }
+        #[cfg(feature = "rusqlite")]
+        if self
+            .conversation_attachments
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some()
+        {
+            commands.extend([
+                CommandType::ConversationAttachmentAdd,
+                CommandType::ConversationAttachmentRemove,
             ]);
         }
         ProtocolCapabilitySnapshot::for_commands(&commands)

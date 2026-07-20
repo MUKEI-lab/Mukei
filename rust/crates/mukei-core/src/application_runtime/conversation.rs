@@ -522,6 +522,38 @@ impl MukeiRuntime {
             Ok(value) => value,
             Err(acknowledgement) => return acknowledgement,
         };
+        #[cfg(feature = "rusqlite")]
+        {
+            if self.features.conversation_record(&conversation).is_none() {
+                return CommandAcknowledgementV2::rejected(
+                    Some(&command.envelope),
+                    RejectionReason::StaleScope,
+                );
+            }
+            if self.features.conversation_busy(&conversation) {
+                return CommandAcknowledgementV2::rejected(
+                    Some(&command.envelope),
+                    RejectionReason::BusyConflict,
+                );
+            }
+            if let Some(service) = self
+                .conversation_attachments
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
+            {
+                if self
+                    .async_runtime
+                    .block_on(service.remove_all_for_conversation(conversation.clone()))
+                    .is_err()
+                {
+                    return CommandAcknowledgementV2::rejected(
+                        Some(&command.envelope),
+                        RejectionReason::BackendUnavailable,
+                    );
+                }
+            }
+        }
         let removed_messages = match self.features.delete_conversation_record(&conversation) {
             Ok(value) => value,
             Err(reason) => {

@@ -12,6 +12,8 @@ pub mod audit_log;
 #[cfg(feature = "rusqlite")]
 pub mod conversation;
 #[cfg(feature = "rusqlite")]
+pub mod conversation_attachments;
+#[cfg(feature = "rusqlite")]
 pub mod download_jobs;
 #[cfg(feature = "rusqlite")]
 pub mod import_commit_repository;
@@ -66,6 +68,11 @@ pub use audit_log::{AuditChainStatus, AuditEntry, AuditLogReader, AuditLogWriter
 pub use conversation::{
     ConversationRecord, ConversationRepository, ConversationSummary, MessageRecord, MessageStatus,
     PersistedTurn, TimelinePage, TimelineRow,
+};
+#[cfg(feature = "rusqlite")]
+pub use conversation_attachments::{
+    ConversationAttachmentContext, ConversationAttachmentPort, ConversationStorageAttachment,
+    SqlConversationAttachmentService,
 };
 #[cfg(feature = "rusqlite")]
 pub use download_jobs::{

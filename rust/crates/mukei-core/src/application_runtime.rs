@@ -11,6 +11,7 @@ include!("application_runtime/chat.rs");
 include!("application_runtime/chat_branching.rs");
 include!("application_runtime/chat_snapshot.rs");
 include!("application_runtime/conversation.rs");
+include!("application_runtime/conversation_attachments.rs");
 include!("application_runtime/models_download.rs");
 include!("application_runtime/models_cancel.rs");
 include!("application_runtime/models_select.rs");

@@ -48,8 +48,9 @@ mod secure_runtime {
     use mukei_core::application_runtime::{MukeiRuntime, RuntimeConfig, RuntimeProjectionStore};
     use mukei_core::diagnostics::{install_panic_hook, CrashFingerprint, CrashSink, PanicSink};
     use mukei_core::storage::{
-        Aes256GcmObjectCipher, DatabaseEncryptionStatus, DatabasePool, ImmutableObjectStore,
-        Migrator, RuntimeProjectionRepository, SqlStorageWorkspaceService, StagedFileImporter,
+        Aes256GcmObjectCipher, ConversationAttachmentPort, DatabaseEncryptionStatus, DatabasePool,
+        ImmutableObjectStore, Migrator, RuntimeProjectionRepository,
+        SqlConversationAttachmentService, SqlStorageWorkspaceService, StagedFileImporter,
         StagedPlaintextCleanup, StorageWorkspacePort, WorkspaceStagedImportService,
         DEFAULT_MAX_STAGED_IMPORT_BYTES,
     };
@@ -275,9 +276,14 @@ mod secure_runtime {
                         return 0;
                     }
                 };
+            let conversation_attachments: Arc<dyn ConversationAttachmentPort> =
+                Arc::new(SqlConversationAttachmentService::new(
+                    Arc::clone(&database_pool),
+                    Arc::clone(&object_store),
+                ));
             let importer: Arc<dyn StagedFileImporter> = match WorkspaceStagedImportService::new(
                 Arc::clone(&database_pool),
-                object_store,
+                Arc::clone(&object_store),
                 staging_root,
                 DEFAULT_MAX_STAGED_IMPORT_BYTES,
             ) {
@@ -293,6 +299,7 @@ mod secure_runtime {
             let mut services = crate::runtime_services(&config);
             services.storage_importer = Some(importer);
             services.storage_workspace = Some(storage_workspace);
+            services.conversation_attachments = Some(conversation_attachments);
             let runtime = match MukeiRuntime::create_with_services(config, services) {
                 Ok(runtime) => Arc::new(runtime),
                 Err(_) => return 0,

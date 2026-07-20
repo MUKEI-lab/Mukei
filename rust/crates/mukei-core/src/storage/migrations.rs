@@ -133,6 +133,11 @@ const EMBEDDED_MIGRATIONS: &[(u32, &str, &str)] = &[
         "V016__storage_identity_and_recovery_hardening",
         include_str!("../../../../migrations/V016__storage_identity_and_recovery_hardening.sql"),
     ),
+    (
+        17,
+        "V017__conversation_storage_attachments",
+        include_str!("../../../../migrations/V017__conversation_storage_attachments.sql"),
+    ),
 ];
 
 const MIGRATION_LOCK_STALE_AFTER_SECS: i64 = 15 * 60;
@@ -678,7 +683,7 @@ mod tests {
         let ids: Vec<_> = list.iter().map(|(id, _, _)| *id).collect();
         assert_eq!(
             ids,
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
         );
         assert!(list.iter().any(|(_, name, body)| {
             name == "V007__message_status" && body.contains("ALTER TABLE messages")

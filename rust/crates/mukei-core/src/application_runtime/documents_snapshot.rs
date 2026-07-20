@@ -37,7 +37,28 @@ impl MukeiRuntime {
             RuntimeSnapshotDomain::Protocol => serde_json::to_value(self.capabilities())
                 .map_err(|_| RuntimeError::UnsupportedSnapshot)?,
             RuntimeSnapshotDomain::Operations => {
-                self.features.snapshot_with_conversations(self.platform.snapshot())
+                let mut snapshot = self.features.snapshot_with_conversations(self.platform.snapshot());
+                #[cfg(feature = "rusqlite")]
+                if let Some(object) = snapshot.as_object_mut() {
+                    let attachments = match self
+                        .conversation_attachments
+                        .read()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .clone()
+                    {
+                        Some(service) => self
+                            .async_runtime
+                            .block_on(service.list_all())
+                            .map_err(|_| RuntimeError::UnsupportedSnapshot)?,
+                        None => Vec::new(),
+                    };
+                    object.insert(
+                        "conversation_attachments".to_owned(),
+                        serde_json::to_value(attachments)
+                            .map_err(|_| RuntimeError::UnsupportedSnapshot)?,
+                    );
+                }
+                snapshot
             }
             RuntimeSnapshotDomain::Projects => self.features.projects_snapshot(),
             RuntimeSnapshotDomain::Storage => {

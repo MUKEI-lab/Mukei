@@ -1,7 +1,7 @@
 #![cfg(feature = "rusqlite")]
 
 //! Verifies that V015 remains immutable and existing V015 databases advance
-//! through the normal migration engine by applying V016 only.
+//! through the normal migration engine by applying V016 and later append-only migrations.
 
 use mukei_core::storage::{migrations::Migrator, DatabasePool, DbError, PooledConnectionExt};
 
@@ -27,7 +27,7 @@ async fn canonical_v015_database_applies_only_v016_on_next_boot() {
     let bundled = Migrator::embedded()
         .list_available()
         .expect("embedded migration bundle");
-    assert_eq!(bundled.last().map(|entry| entry.0), Some(16));
+    assert_eq!(bundled.last().map(|entry| entry.0), Some(17));
 
     let v15_dir = tempfile::tempdir().expect("temporary V015 migration directory");
     for (version, name, body) in bundled.iter().filter(|(version, _, _)| *version <= 15) {
@@ -71,20 +71,22 @@ async fn canonical_v015_database_applies_only_v016_on_next_boot() {
     let upgraded = Migrator::embedded()
         .apply_pending(&pool)
         .await
-        .expect("upgrade V015 database through embedded V016");
-    assert_eq!(upgraded.len(), 1, "only V016 should be pending");
+        .expect("upgrade V015 database through embedded V017");
+    assert_eq!(upgraded.len(), 2, "V016 and V017 should be pending");
     assert_eq!(upgraded[0].id, 16);
     assert_eq!(
         upgraded[0].name,
         "V016__storage_identity_and_recovery_hardening"
     );
+    assert_eq!(upgraded[1].id, 17);
+    assert_eq!(upgraded[1].name, "V017__conversation_storage_attachments");
 
     pool.with_conn(|connection| {
         let max_version: i64 =
             connection.query_row("SELECT MAX(version) FROM migrations_applied", [], |row| {
                 row.get(0)
             })?;
-        assert_eq!(max_version, 16);
+        assert_eq!(max_version, 17);
 
         let hardening_trigger_count: i64 = connection.query_row(
             "SELECT COUNT(*) FROM sqlite_master
@@ -94,9 +96,17 @@ async fn canonical_v015_database_applies_only_v016_on_next_boot() {
         )?;
         assert_eq!(hardening_trigger_count, 1);
 
+        let attachment_table_count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'conversation_storage_attachments'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(attachment_table_count, 1);
+
         let user_version: i64 =
             connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        assert_eq!(user_version, 16);
+        assert_eq!(user_version, 17);
         Ok::<_, DbError>(())
     })
     .await
@@ -105,9 +115,9 @@ async fn canonical_v015_database_applies_only_v016_on_next_boot() {
     let no_op = Migrator::embedded()
         .apply_pending(&pool)
         .await
-        .expect("repeated boot after V016");
+        .expect("repeated boot after V017");
     assert!(
         no_op.is_empty(),
-        "V016 must be idempotent at migration-engine level"
+        "V016/V017 upgrade must be idempotent at migration-engine level"
     );
 }

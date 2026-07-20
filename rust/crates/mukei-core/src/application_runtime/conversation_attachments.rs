@@ -240,4 +240,12 @@ impl MukeiRuntime {
     ) -> CommandAcknowledgementV2 {
         self.add_conversation_attachment(command)
     }
+
+    fn attachment_context_messages(
+        &self,
+        _conversation_id: &str,
+        _branch: BranchId,
+    ) -> Result<Vec<ChatMessage>, RejectionReason> {
+        Ok(Vec::new())
+    }
 }

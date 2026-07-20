@@ -116,6 +116,9 @@ pub struct RuntimeServices {
     /// SQLCipher-backed logical Universal Storage workspace service.
     #[cfg(feature = "rusqlite")]
     pub storage_workspace: Option<Arc<dyn crate::storage::StorageWorkspacePort>>,
+    /// Durable references from conversations to verified Universal Storage files.
+    #[cfg(feature = "rusqlite")]
+    pub conversation_attachments: Option<Arc<dyn crate::storage::ConversationAttachmentPort>>,
 }
 
 /// Runtime lifecycle state.

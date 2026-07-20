@@ -126,6 +126,12 @@ impl MukeiRuntime {
                 return CommandAcknowledgementV2::rejected(Some(&command.envelope), reason)
             }
         };
+        let attachment_context = match self.attachment_context_messages(&conversation, branch_id) {
+            Ok(value) => value,
+            Err(reason) => {
+                return CommandAcknowledgementV2::rejected(Some(&command.envelope), reason)
+            }
+        };
 
         let user_message = existing_user.unwrap_or_else(|| {
             let mut message = ChatMessage::user_with_id(MessageId::new(), branch_id, text.clone());
@@ -146,10 +152,11 @@ impl MukeiRuntime {
             self.features
                 .append_message(&conversation, &branch, user_message.clone());
         }
-        let mut seed_history = Vec::with_capacity(2);
+        let mut seed_history = Vec::with_capacity(2 + attachment_context.len());
         if let Some(project_context) = project_context {
             seed_history.push(project_context);
         }
+        seed_history.extend(attachment_context);
         seed_history.push(user_message.clone());
         let (acknowledgement, operation_id, operation_token) = self.accept_operation(command);
         let events = Arc::clone(&self.events);

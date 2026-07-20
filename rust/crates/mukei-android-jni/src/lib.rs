@@ -59,6 +59,7 @@ fn runtime_services(config: &RuntimeConfig) -> RuntimeServices {
             product.gpu_layers,
             max_new_tokens,
         ))),
+        ..RuntimeServices::default()
     }
 }
 

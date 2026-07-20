@@ -62,6 +62,8 @@ impl CommandRouter {
             CommandType::ConversationArchive => runtime.archive_conversation(command),
             CommandType::ConversationDelete => runtime.delete_conversation(command),
             CommandType::ConversationSelectBranch => runtime.select_active_conversation_branch(command),
+            CommandType::ConversationAttachmentAdd => runtime.add_conversation_attachment(command),
+            CommandType::ConversationAttachmentRemove => runtime.remove_conversation_attachment(command),
             CommandType::ModelDownload => runtime.download_model(command),
             CommandType::DownloadCancel => runtime.cancel_download(command),
             CommandType::ModelSelect => runtime.select_model(command),

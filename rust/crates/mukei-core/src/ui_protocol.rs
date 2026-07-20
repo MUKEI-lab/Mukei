@@ -13,7 +13,7 @@ use serde_json::Value;
 /// Current incompatible protocol generation.
 pub const PROTOCOL_MAJOR: u16 = 2;
 /// Current backward-compatible protocol generation.
-pub const PROTOCOL_MINOR: u16 = 4;
+pub const PROTOCOL_MINOR: u16 = 5;
 /// Oldest peer major accepted by this implementation.
 pub const MIN_SUPPORTED_PEER_MAJOR: u16 = 2;
 /// Maximum serialized command envelope accepted by a native transport.
@@ -217,6 +217,10 @@ pub enum CommandType {
     ConversationDelete,
     /// Persist the active branch selected for one conversation.
     ConversationSelectBranch,
+    /// Attach one existing Universal Storage file to a conversation.
+    ConversationAttachmentAdd,
+    /// Remove one Universal Storage reference from a conversation.
+    ConversationAttachmentRemove,
     /// Start a model download.
     ModelDownload,
     /// Cancel model downloads.
@@ -275,6 +279,8 @@ impl CommandType {
             "conversation.archive" => Some(Self::ConversationArchive),
             "conversation.delete" => Some(Self::ConversationDelete),
             "conversation.select_branch" => Some(Self::ConversationSelectBranch),
+            "conversation.attachment.add" => Some(Self::ConversationAttachmentAdd),
+            "conversation.attachment.remove" => Some(Self::ConversationAttachmentRemove),
             "model.download" => Some(Self::ModelDownload),
             "download.cancel" => Some(Self::DownloadCancel),
             "model.select" => Some(Self::ModelSelect),
@@ -312,6 +318,8 @@ impl CommandType {
             Self::ConversationArchive => "conversation.archive",
             Self::ConversationDelete => "conversation.delete",
             Self::ConversationSelectBranch => "conversation.select_branch",
+            Self::ConversationAttachmentAdd => "conversation.attachment.add",
+            Self::ConversationAttachmentRemove => "conversation.attachment.remove",
             Self::ModelDownload => "model.download",
             Self::DownloadCancel => "download.cancel",
             Self::ModelSelect => "model.select",
@@ -346,6 +354,8 @@ impl CommandType {
                 | Self::ConversationArchive
                 | Self::ConversationDelete
                 | Self::ConversationSelectBranch
+                | Self::ConversationAttachmentAdd
+                | Self::ConversationAttachmentRemove
                 | Self::ModelDownload
                 | Self::ModelDelete
                 | Self::DocumentGrant
@@ -396,6 +406,13 @@ pub struct SendMessagePayload {
 pub struct ConversationRenamePayload {
     /// Replacement user-visible title.
     pub title: String,
+}
+
+/// One Universal Storage node referenced by a conversation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationAttachmentPayload {
+    /// Stable logical file node identity in Universal Storage.
+    pub node_id: String,
 }
 
 /// Payload containing one model identity.
@@ -559,6 +576,8 @@ pub enum ValidatedCommandPayload {
     SendMessage(SendMessagePayload),
     /// Conversation title mutation.
     ConversationRename(ConversationRenamePayload),
+    /// Conversation-level Universal Storage attachment reference.
+    ConversationAttachment(ConversationAttachmentPayload),
     /// Model download.
     ModelDownload(ModelDownloadPayload),
     /// Model identity.
@@ -910,6 +929,8 @@ fn validate_scope_for_command(
                 | CommandType::ConversationArchive
                 | CommandType::ConversationDelete
                 | CommandType::ConversationSelectBranch
+                | CommandType::ConversationAttachmentAdd
+                | CommandType::ConversationAttachmentRemove
         ) {
             Err(RejectionReason::StaleScope)
         } else {
@@ -939,7 +960,9 @@ fn validate_scope_for_command(
         (
             CommandType::ConversationRename
             | CommandType::ConversationArchive
-            | CommandType::ConversationDelete,
+            | CommandType::ConversationDelete
+            | CommandType::ConversationAttachmentAdd
+            | CommandType::ConversationAttachmentRemove,
             _,
         ) => {
             if scope.conversation_id.is_none()
@@ -1112,6 +1135,15 @@ pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand,
                 return Err(RejectionReason::InvalidPayload);
             }
             ValidatedCommandPayload::ConversationRename(value)
+        }
+        CommandType::ConversationAttachmentAdd | CommandType::ConversationAttachmentRemove => {
+            let value: ConversationAttachmentPayload =
+                serde_json::from_value(envelope.payload.clone())
+                    .map_err(|_| RejectionReason::InvalidPayload)?;
+            if !valid_protocol_id(&value.node_id, MAX_PROTOCOL_ID_LEN) {
+                return Err(RejectionReason::InvalidPayload);
+            }
+            ValidatedCommandPayload::ConversationAttachment(value)
         }
         CommandType::ModelDownload => {
             let value: ModelDownloadPayload = serde_json::from_value(envelope.payload.clone())
