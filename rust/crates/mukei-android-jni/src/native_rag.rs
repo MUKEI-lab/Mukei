@@ -295,8 +295,8 @@ impl RuntimeRagService for AndroidRagService {
                 let ids = {
                     let mut statement = transaction
                         .prepare("SELECT chunk_uuid FROM chunks WHERE file_token = ?1")?;
-                    let rows = statement
-                        .query_map([&document_id_owned], |row| row.get::<_, String>(0))?;
+                    let rows =
+                        statement.query_map([&document_id_owned], |row| row.get::<_, String>(0))?;
                     rows.filter_map(|row| row.ok().and_then(|value| value.parse::<u64>().ok()))
                         .collect::<Vec<_>>()
                 };
