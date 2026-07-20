@@ -112,6 +112,7 @@ fn runtime_snapshot_domain(domain: SnapshotDomainV2) -> RuntimeSnapshotDomain {
         SnapshotDomainV2::Protocol => RuntimeSnapshotDomain::Protocol,
         SnapshotDomainV2::Operations => RuntimeSnapshotDomain::Operations,
         SnapshotDomainV2::Projects => RuntimeSnapshotDomain::Projects,
+        SnapshotDomainV2::Storage => RuntimeSnapshotDomain::Storage,
     }
 }
 

@@ -113,6 +113,9 @@ pub struct RuntimeServices {
     /// Encrypted staged-file importer. Absence keeps storage import capability hidden.
     #[cfg(feature = "rusqlite")]
     pub storage_importer: Option<Arc<dyn crate::storage::StagedFileImporter>>,
+    /// SQLCipher-backed logical Universal Storage workspace service.
+    #[cfg(feature = "rusqlite")]
+    pub storage_workspace: Option<Arc<dyn crate::storage::StorageWorkspacePort>>,
 }
 
 /// Runtime lifecycle state.
@@ -136,6 +139,7 @@ pub enum RuntimeSnapshotDomain {
     Protocol,
     Operations,
     Projects,
+    Storage,
 }
 
 impl RuntimeSnapshotDomain {
@@ -147,6 +151,7 @@ impl RuntimeSnapshotDomain {
             "protocol" => Some(Self::Protocol),
             "operations" => Some(Self::Operations),
             "projects" => Some(Self::Projects),
+            "storage" => Some(Self::Storage),
             _ => None,
         }
     }

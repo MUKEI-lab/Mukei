@@ -427,10 +427,14 @@ fn validate_parent_directory(
     let (stored_scope, node_type, state, system_role) =
         row.ok_or_else(|| invariant("parent directory was not found in Universal Storage"))?;
     if stored_scope != scope_id.to_string() || node_type != "directory" || state != "active" {
-        return Err(invariant("parent is not an active Universal Storage directory"));
+        return Err(invariant(
+            "parent is not an active Universal Storage directory",
+        ));
     }
     if !allow_trash && system_role.as_deref() == Some("trash") {
-        return Err(invariant("new content cannot be created directly inside Trash"));
+        return Err(invariant(
+            "new content cannot be created directly inside Trash",
+        ));
     }
     Ok(())
 }
@@ -463,7 +467,7 @@ fn reject_sibling_conflict(
 fn validate_user_name(value: &str) -> Result<String> {
     let trimmed = value.trim();
     if trimmed.is_empty()
-        || trimmed.as_bytes().len() > MAX_DIRECTORY_NAME_BYTES
+        || trimmed.len() > MAX_DIRECTORY_NAME_BYTES
         || trimmed == "."
         || trimmed == ".."
         || trimmed.contains('/')

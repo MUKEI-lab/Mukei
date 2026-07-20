@@ -10,25 +10,33 @@ impl MukeiRuntime {
                 RejectionReason::InvalidPayload,
             );
         };
-        let Some(conversation_id) = command
-            .envelope
-            .scope
-            .as_ref()
-            .and_then(|scope| scope.conversation_id.as_deref())
-        else {
-            return CommandAcknowledgementV2::rejected(
-                Some(&command.envelope),
-                RejectionReason::StaleScope,
-            );
-        };
-        let chat_id = match crate::storage::ChatId::parse(conversation_id) {
-            Ok(value) => value,
-            Err(_) => {
+        let universal_parent = payload
+            .parent_node_id
+            .as_deref()
+            .and_then(parse_storage_node_id);
+        let chat_id = if universal_parent.is_none() {
+            let Some(conversation_id) = command
+                .envelope
+                .scope
+                .as_ref()
+                .and_then(|scope| scope.conversation_id.as_deref())
+            else {
                 return CommandAcknowledgementV2::rejected(
                     Some(&command.envelope),
                     RejectionReason::StaleScope,
-                )
+                );
+            };
+            match crate::storage::ChatId::parse(conversation_id) {
+                Ok(value) => Some(value),
+                Err(_) => {
+                    return CommandAcknowledgementV2::rejected(
+                        Some(&command.envelope),
+                        RejectionReason::StaleScope,
+                    )
+                }
             }
+        } else {
+            None
         };
         let importer = self
             .storage_importer
@@ -137,21 +145,38 @@ impl MukeiRuntime {
                 return;
             };
 
-            match importer
-                .import_workspace_file(
-                    crate::storage::WorkspaceStagedImportRequest {
-                        chat_id,
-                        staged_path: PathBuf::from(staged_path),
-                        original_filename: display_name,
-                        detected_mime: Some(mime_type),
-                        expected_size: Some(size_bytes),
-                        duplicate_policy: crate::storage::DuplicatePolicy::RenameNewEntry,
-                        source_uri_fingerprint: Some(source_fingerprint),
-                    },
-                    cancellation,
-                )
-                .await
-            {
+            let import_result = if let Some(parent_node_id) = universal_parent {
+                importer
+                    .import_universal_file(
+                        crate::storage::UniversalStagedImportRequest {
+                            parent_node_id,
+                            staged_path: PathBuf::from(staged_path),
+                            original_filename: display_name,
+                            detected_mime: Some(mime_type),
+                            expected_size: Some(size_bytes),
+                            duplicate_policy: crate::storage::DuplicatePolicy::RenameNewEntry,
+                            source_uri_fingerprint: Some(source_fingerprint),
+                        },
+                        cancellation,
+                    )
+                    .await
+            } else {
+                importer
+                    .import_workspace_file(
+                        crate::storage::WorkspaceStagedImportRequest {
+                            chat_id: chat_id.expect("workspace import validated chat id"),
+                            staged_path: PathBuf::from(staged_path),
+                            original_filename: display_name,
+                            detected_mime: Some(mime_type),
+                            expected_size: Some(size_bytes),
+                            duplicate_policy: crate::storage::DuplicatePolicy::RenameNewEntry,
+                            source_uri_fingerprint: Some(source_fingerprint),
+                        },
+                        cancellation,
+                    )
+                    .await
+            };
+            match import_result {
                 Ok(receipt) => {
                     features.update_operation(
                         &operation_id_for_task,

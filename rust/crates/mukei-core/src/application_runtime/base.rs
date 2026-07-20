@@ -38,6 +38,8 @@ impl MukeiRuntime {
             rag_service: RwLock::new(None),
             #[cfg(feature = "rusqlite")]
             storage_importer: RwLock::new(services.storage_importer),
+            #[cfg(feature = "rusqlite")]
+            storage_workspace: RwLock::new(services.storage_workspace),
             remote_tool_secrets: Mutex::new(None),
             remote_policy: RwLock::new(crate::tools::RemoteFeaturePolicy::LocalOnly),
             closed: AtomicBool::new(false),
@@ -112,6 +114,20 @@ impl MukeiRuntime {
             .is_some()
         {
             commands.push(CommandType::StorageImportFile);
+        }
+        #[cfg(feature = "rusqlite")]
+        if self
+            .storage_workspace
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some()
+        {
+            commands.extend([
+                CommandType::StorageDirectoryCreate,
+                CommandType::StorageNodeRename,
+                CommandType::StorageNodeTrash,
+                CommandType::StorageNodeRestore,
+            ]);
         }
         ProtocolCapabilitySnapshot::for_commands(&commands)
             .with_transport(CAP_EVENT_GAP_REPORTING)

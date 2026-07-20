@@ -49,8 +49,9 @@ mod secure_runtime {
     use mukei_core::diagnostics::{install_panic_hook, CrashFingerprint, CrashSink, PanicSink};
     use mukei_core::storage::{
         Aes256GcmObjectCipher, DatabaseEncryptionStatus, DatabasePool, ImmutableObjectStore,
-        Migrator, RuntimeProjectionRepository, StagedFileImporter, StagedPlaintextCleanup,
-        WorkspaceStagedImportService, DEFAULT_MAX_STAGED_IMPORT_BYTES,
+        Migrator, RuntimeProjectionRepository, SqlStorageWorkspaceService, StagedFileImporter,
+        StagedPlaintextCleanup, StorageWorkspacePort, WorkspaceStagedImportService,
+        DEFAULT_MAX_STAGED_IMPORT_BYTES,
     };
     use once_cell::sync::Lazy;
     use parking_lot::Mutex;
@@ -287,8 +288,11 @@ mod secure_runtime {
                 }
             };
 
+            let storage_workspace: Arc<dyn StorageWorkspacePort> =
+                Arc::new(SqlStorageWorkspaceService::new(Arc::clone(&database_pool)));
             let mut services = crate::runtime_services(&config);
             services.storage_importer = Some(importer);
+            services.storage_workspace = Some(storage_workspace);
             let runtime = match MukeiRuntime::create_with_services(config, services) {
                 Ok(runtime) => Arc::new(runtime),
                 Err(_) => return 0,

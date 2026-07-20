@@ -43,6 +43,8 @@ pub mod ui_session;
 pub mod universal_repository;
 #[cfg(feature = "rusqlite")]
 pub mod version_repository;
+#[cfg(feature = "rusqlite")]
+pub mod workspace_service;
 
 pub use file_policy::{
     admit_file_name, AllowedFileName, FileAdmissionError, FileAdmissionRule, ALLOWED_EXACT_NAMES,
@@ -101,8 +103,9 @@ pub use settings::{PreferenceRecord, PreferenceValue, SecretRefRecord, SettingsR
 pub use staged_cleanup::{StagedCleanupReport, StagedPlaintextCleanup};
 #[cfg(all(feature = "rusqlite", feature = "tokio"))]
 pub use staged_import::{
-    StagedFileImporter, StagedImportError, WorkspaceStagedImportReceipt,
-    WorkspaceStagedImportRequest, WorkspaceStagedImportService, DEFAULT_MAX_STAGED_IMPORT_BYTES,
+    StagedFileImporter, StagedImportError, UniversalStagedImportRequest,
+    WorkspaceStagedImportReceipt, WorkspaceStagedImportRequest, WorkspaceStagedImportService,
+    DEFAULT_MAX_STAGED_IMPORT_BYTES,
 };
 #[cfg(feature = "rusqlite")]
 pub use trash_repository::{RestoreReceipt, TrashReceipt, TrashRepository};
@@ -119,6 +122,10 @@ pub use universal_repository::{
 #[cfg(feature = "rusqlite")]
 pub use version_repository::{
     FileVersionRepository, NewFileVersion, PersistedFileVersion, VersionCreator,
+};
+#[cfg(feature = "rusqlite")]
+pub use workspace_service::{
+    SqlStorageWorkspaceService, StorageNodeSnapshot, StorageWorkspacePort, UniversalStorageSnapshot,
 };
 
 #[cfg(feature = "tokio")]

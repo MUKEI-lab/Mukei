@@ -13,7 +13,7 @@ use serde_json::Value;
 /// Current incompatible protocol generation.
 pub const PROTOCOL_MAJOR: u16 = 2;
 /// Current backward-compatible protocol generation.
-pub const PROTOCOL_MINOR: u16 = 3;
+pub const PROTOCOL_MINOR: u16 = 4;
 /// Oldest peer major accepted by this implementation.
 pub const MIN_SUPPORTED_PEER_MAJOR: u16 = 2;
 /// Maximum serialized command envelope accepted by a native transport.
@@ -231,8 +231,16 @@ pub enum CommandType {
     DocumentRevoke,
     /// Retry document ingestion.
     DocumentRetryIngestion,
-    /// Import a selected Android document into the active chat workspace.
+    /// Import a selected Android document into a chat workspace or Universal Storage.
     StorageImportFile,
+    /// Create a user-owned Universal Storage directory.
+    StorageDirectoryCreate,
+    /// Rename a user-owned Universal Storage node.
+    StorageNodeRename,
+    /// Move a user-owned Universal Storage node into Trash.
+    StorageNodeTrash,
+    /// Restore a trashed Universal Storage node.
+    StorageNodeRestore,
     /// Create a durable encrypted project record.
     ProjectCreate,
     /// Update an active project record.
@@ -275,6 +283,10 @@ impl CommandType {
             "document.revoke" => Some(Self::DocumentRevoke),
             "document.retry_ingestion" => Some(Self::DocumentRetryIngestion),
             "storage.import_file" => Some(Self::StorageImportFile),
+            "storage.directory.create" => Some(Self::StorageDirectoryCreate),
+            "storage.node.rename" => Some(Self::StorageNodeRename),
+            "storage.node.trash" => Some(Self::StorageNodeTrash),
+            "storage.node.restore" => Some(Self::StorageNodeRestore),
             "project.create" => Some(Self::ProjectCreate),
             "project.update" => Some(Self::ProjectUpdate),
             "project.archive" => Some(Self::ProjectArchive),
@@ -308,6 +320,10 @@ impl CommandType {
             Self::DocumentRevoke => "document.revoke",
             Self::DocumentRetryIngestion => "document.retry_ingestion",
             Self::StorageImportFile => "storage.import_file",
+            Self::StorageDirectoryCreate => "storage.directory.create",
+            Self::StorageNodeRename => "storage.node.rename",
+            Self::StorageNodeTrash => "storage.node.trash",
+            Self::StorageNodeRestore => "storage.node.restore",
             Self::ProjectCreate => "project.create",
             Self::ProjectUpdate => "project.update",
             Self::ProjectArchive => "project.archive",
@@ -336,6 +352,10 @@ impl CommandType {
                 | Self::DocumentRevoke
                 | Self::DocumentRetryIngestion
                 | Self::StorageImportFile
+                | Self::StorageDirectoryCreate
+                | Self::StorageNodeRename
+                | Self::StorageNodeTrash
+                | Self::StorageNodeRestore
                 | Self::ProjectCreate
                 | Self::ProjectUpdate
                 | Self::ProjectArchive
@@ -415,6 +435,34 @@ pub struct StorageImportPayload {
     pub display_name: String,
     /// MIME type reported by Android.
     pub mime_type: String,
+    /// Explicit Universal Storage destination. Absence preserves chat-workspace import semantics.
+    #[serde(default)]
+    pub parent_node_id: Option<String>,
+}
+
+/// New Universal Storage directory payload.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageDirectoryCreatePayload {
+    /// Active Universal Storage directory that will own the new child.
+    pub parent_node_id: String,
+    /// User-visible directory name.
+    pub name: String,
+}
+
+/// Rename one user-owned Universal Storage node.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageNodeRenamePayload {
+    /// User-owned Universal Storage node identity.
+    pub node_id: String,
+    /// Replacement user-visible name.
+    pub name: String,
+}
+
+/// Identity of one Universal Storage node.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageNodePayload {
+    /// User-owned Universal Storage node identity.
+    pub node_id: String,
 }
 
 /// Payload containing one document identity.
@@ -521,6 +569,12 @@ pub enum ValidatedCommandPayload {
     Document(DocumentPayload),
     /// Selected document destined for encrypted workspace storage.
     StorageImport(StorageImportPayload),
+    /// New Universal Storage directory.
+    StorageDirectoryCreate(StorageDirectoryCreatePayload),
+    /// Universal Storage node rename.
+    StorageNodeRename(StorageNodeRenamePayload),
+    /// Universal Storage node identity.
+    StorageNode(StorageNodePayload),
     /// New project metadata.
     ProjectCreate(ProjectCreatePayload),
     /// Updated project metadata.
@@ -753,6 +807,8 @@ pub enum SnapshotDomainV2 {
     Operations,
     /// Durable encrypted project records.
     Projects,
+    /// Authoritative Universal Storage tree.
+    Storage,
 }
 
 impl SnapshotDomainV2 {
@@ -764,6 +820,7 @@ impl SnapshotDomainV2 {
             "protocol" => Some(Self::Protocol),
             "operations" => Some(Self::Operations),
             "projects" => Some(Self::Projects),
+            "storage" => Some(Self::Storage),
             _ => None,
         }
     }
@@ -938,8 +995,13 @@ fn validate_scope_for_command(
                 return Err(RejectionReason::StaleScope);
             }
         }
-        (CommandType::StorageImportFile, ValidatedCommandPayload::StorageImport(_)) => {
-            if scope.conversation_id.is_none() || has_model || has_document {
+        (CommandType::StorageImportFile, ValidatedCommandPayload::StorageImport(value)) => {
+            let universal = value.parent_node_id.is_some();
+            if has_model
+                || has_document
+                || (universal && has_conversation)
+                || (!universal && scope.conversation_id.is_none())
+            {
                 return Err(RejectionReason::StaleScope);
             }
         }
@@ -968,6 +1030,10 @@ fn validate_scope_for_command(
             | CommandType::ProjectMemoryAdd
             | CommandType::ProjectMemoryUpdate
             | CommandType::ProjectMemoryDelete
+            | CommandType::StorageDirectoryCreate
+            | CommandType::StorageNodeRename
+            | CommandType::StorageNodeTrash
+            | CommandType::StorageNodeRestore
             | CommandType::SettingsUpdate,
             _,
         ) if has_conversation || has_model || has_document => {
@@ -1082,10 +1148,45 @@ pub fn validate_command(envelope: CommandEnvelopeV2) -> Result<ValidatedCommand,
                 || value.target.chars().any(char::is_control)
                 || !non_empty_bounded(&value.display_name, 512)
                 || !non_empty_bounded(&value.mime_type, 256)
+                || value
+                    .parent_node_id
+                    .as_deref()
+                    .is_some_and(|node_id| !valid_protocol_id(node_id, MAX_PROTOCOL_ID_LEN))
             {
                 return Err(RejectionReason::InvalidPayload);
             }
             ValidatedCommandPayload::StorageImport(value)
+        }
+        CommandType::StorageDirectoryCreate => {
+            let value: StorageDirectoryCreatePayload =
+                serde_json::from_value(envelope.payload.clone())
+                    .map_err(|_| RejectionReason::InvalidPayload)?;
+            if !valid_protocol_id(&value.parent_node_id, MAX_PROTOCOL_ID_LEN)
+                || !non_empty_bounded(&value.name, 255)
+                || value.name.chars().any(char::is_control)
+            {
+                return Err(RejectionReason::InvalidPayload);
+            }
+            ValidatedCommandPayload::StorageDirectoryCreate(value)
+        }
+        CommandType::StorageNodeRename => {
+            let value: StorageNodeRenamePayload = serde_json::from_value(envelope.payload.clone())
+                .map_err(|_| RejectionReason::InvalidPayload)?;
+            if !valid_protocol_id(&value.node_id, MAX_PROTOCOL_ID_LEN)
+                || !non_empty_bounded(&value.name, 255)
+                || value.name.chars().any(char::is_control)
+            {
+                return Err(RejectionReason::InvalidPayload);
+            }
+            ValidatedCommandPayload::StorageNodeRename(value)
+        }
+        CommandType::StorageNodeTrash | CommandType::StorageNodeRestore => {
+            let value: StorageNodePayload = serde_json::from_value(envelope.payload.clone())
+                .map_err(|_| RejectionReason::InvalidPayload)?;
+            if !valid_protocol_id(&value.node_id, MAX_PROTOCOL_ID_LEN) {
+                return Err(RejectionReason::InvalidPayload);
+            }
+            ValidatedCommandPayload::StorageNode(value)
         }
         CommandType::DocumentRevoke | CommandType::DocumentRetryIngestion => {
             let value: DocumentPayload = serde_json::from_value(envelope.payload.clone())

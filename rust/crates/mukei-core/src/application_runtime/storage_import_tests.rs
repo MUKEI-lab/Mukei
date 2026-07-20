@@ -74,6 +74,7 @@ mod storage_import_runtime_tests {
             RuntimeServices {
                 backend_factory: None,
                 storage_importer: importer,
+                storage_workspace: None,
             },
         )
         .unwrap();

@@ -12,9 +12,9 @@ use crate::storage::import_commit_repository::{
 };
 use crate::storage::import_journal::{ImportJournalRepository, ImportState};
 use crate::storage::object_store::{ImmutableObjectStore, ObjectCipher, ObjectStoreError};
-use crate::storage::pool::DatabasePool;
+use crate::storage::pool::{DatabasePool, DbError, PooledConnectionExt};
 use crate::storage::universal::{
-    ChatId, DuplicatePolicy, ImportTransactionId, StorageNodeId, StorageObjectId,
+    ChatId, DuplicatePolicy, ImportTransactionId, StorageNodeId, StorageObjectId, StorageScopeId,
     WorkspaceAccessContext,
 };
 use crate::storage::universal_repository::UniversalStorageRepository;
@@ -31,6 +31,18 @@ pub const DEFAULT_MAX_STAGED_IMPORT_BYTES: u64 = 32 * 1024 * 1024;
 #[derive(Clone, Debug)]
 pub struct WorkspaceStagedImportRequest {
     pub chat_id: ChatId,
+    pub staged_path: PathBuf,
+    pub original_filename: String,
+    pub detected_mime: Option<String>,
+    pub expected_size: Option<u64>,
+    pub duplicate_policy: DuplicatePolicy,
+    pub source_uri_fingerprint: Option<String>,
+}
+
+/// One Android-staged file destined for an explicit Universal Storage directory.
+#[derive(Clone, Debug)]
+pub struct UniversalStagedImportRequest {
+    pub parent_node_id: StorageNodeId,
     pub staged_path: PathBuf,
     pub original_filename: String,
     pub detected_mime: Option<String>,
@@ -108,6 +120,14 @@ pub trait StagedFileImporter: Send + Sync {
         request: WorkspaceStagedImportRequest,
         cancellation: CancellationToken,
     ) -> Result<WorkspaceStagedImportReceipt, StagedImportError>;
+
+    async fn import_universal_file(
+        &self,
+        _request: UniversalStagedImportRequest,
+        _cancellation: CancellationToken,
+    ) -> Result<WorkspaceStagedImportReceipt, StagedImportError> {
+        Err(StagedImportError::InvalidConfiguration)
+    }
 }
 
 /// Filesystem/database importer parameterized by an authenticated object cipher.
@@ -226,6 +246,83 @@ impl<C: ObjectCipher> WorkspaceStagedImportService<C> {
             staged_file_removed,
         })
     }
+
+    async fn execute_universal_import(
+        &self,
+        transaction_id: ImportTransactionId,
+        request: UniversalStagedImportRequest,
+        admitted_name: crate::storage::file_policy::AllowedFileName,
+        canonical_path: PathBuf,
+        cancellation: CancellationToken,
+    ) -> Result<WorkspaceStagedImportReceipt, StagedImportError>
+    where
+        C: Send + Sync + 'static,
+    {
+        transition(&self.pool, transaction_id, ImportState::Validating).await?;
+        cancel_if_requested(&self.pool, transaction_id, &cancellation).await?;
+        transition(&self.pool, transaction_id, ImportState::Copying).await?;
+        let path_for_read = canonical_path.clone();
+        let maximum = self.max_import_bytes;
+        let expected_size = request.expected_size;
+        let bytes = tokio::task::spawn_blocking(move || {
+            read_bounded_staged_file(&path_for_read, maximum, expected_size)
+        })
+        .await
+        .map_err(|error| StagedImportError::BlockingTask(error.to_string()))??;
+        ImportJournalRepository::record_progress(&self.pool, transaction_id, bytes.len() as u64)
+            .await?;
+        cancel_if_requested(&self.pool, transaction_id, &cancellation).await?;
+        transition(&self.pool, transaction_id, ImportState::Hashing).await?;
+        validate_text_content(&bytes)?;
+        cancel_if_requested(&self.pool, transaction_id, &cancellation).await?;
+        transition(&self.pool, transaction_id, ImportState::Encrypting).await?;
+        cancel_if_requested(&self.pool, transaction_id, &cancellation).await?;
+        let object_store = Arc::clone(&self.object_store);
+        let stored_object = tokio::task::spawn_blocking(move || object_store.put(&bytes))
+            .await
+            .map_err(|error| StagedImportError::BlockingTask(error.to_string()))??;
+        transition(&self.pool, transaction_id, ImportState::CommittingObject).await?;
+        transition(&self.pool, transaction_id, ImportState::CommittingNode).await?;
+        let plaintext_size = stored_object.plaintext_size;
+        let deduplicated = stored_object.deduplicated;
+        let detected_format = match &admitted_name.rule {
+            FileAdmissionRule::Extension(extension) => extension.to_string(),
+            FileAdmissionRule::ExactName(name) => format!("exact:{name}"),
+        };
+        let receipt = ImportCommitRepository::commit(
+            &self.pool,
+            ImportCommitRequest {
+                transaction_id,
+                authorization: ImportAuthorization::Universal,
+                admitted_name,
+                stored_object,
+                detected_format,
+                detected_mime: request
+                    .detected_mime
+                    .filter(|value| !value.trim().is_empty()),
+                detected_encoding: Some("utf-8".to_string()),
+                language_id: None,
+                encryption_version: self.object_store.encryption_version(),
+                duplicate_policy: request.duplicate_policy,
+            },
+        )
+        .await?;
+        transition(&self.pool, transaction_id, ImportState::Completed).await?;
+        let cleanup_path = canonical_path;
+        let staged_file_removed =
+            tokio::task::spawn_blocking(move || fs::remove_file(cleanup_path).is_ok())
+                .await
+                .unwrap_or(false);
+        Ok(WorkspaceStagedImportReceipt {
+            transaction_id,
+            node_id: receipt.node_id,
+            object_id: receipt.object_id,
+            display_name: receipt.display_name,
+            plaintext_size,
+            deduplicated,
+            staged_file_removed,
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -286,6 +383,84 @@ where
         }
         result
     }
+
+    async fn import_universal_file(
+        &self,
+        request: UniversalStagedImportRequest,
+        cancellation: CancellationToken,
+    ) -> Result<WorkspaceStagedImportReceipt, StagedImportError> {
+        let admitted_name = admit_file_name(&request.original_filename)?;
+        if request.duplicate_policy == DuplicatePolicy::ReplaceWithNewVersion {
+            return Err(StagedImportError::InvalidConfiguration);
+        }
+        let inspected = inspect_staged_file(
+            &self.staging_root,
+            &request.staged_path,
+            self.max_import_bytes,
+            request.expected_size,
+        )?;
+        let universal = UniversalStorageRepository::ensure_universal_storage(&self.pool).await?;
+        validate_universal_import_parent(&self.pool, universal.scope_id, request.parent_node_id)
+            .await?;
+        let transaction_id = ImportJournalRepository::create(
+            &self.pool,
+            universal.scope_id,
+            request.parent_node_id,
+            admitted_name.display_name.clone(),
+            inspected.relative_path,
+            Some(inspected.size),
+            request.source_uri_fingerprint.clone(),
+        )
+        .await?;
+        let result = self
+            .execute_universal_import(
+                transaction_id,
+                request,
+                admitted_name,
+                inspected.canonical_path,
+                cancellation,
+            )
+            .await;
+        if let Err(error) = &result {
+            if !matches!(error, StagedImportError::Cancelled) {
+                let _ = ImportJournalRepository::transition(
+                    &self.pool,
+                    transaction_id,
+                    ImportState::Failed,
+                    Some(error.code().to_string()),
+                    None,
+                )
+                .await;
+            }
+        }
+        result
+    }
+}
+
+async fn validate_universal_import_parent(
+    pool: &DatabasePool,
+    scope_id: StorageScopeId,
+    parent_node_id: StorageNodeId,
+) -> Result<(), StagedImportError> {
+    pool.with_conn(move |connection| {
+        let valid: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM storage_nodes n \
+             JOIN storage_scopes s ON s.scope_id = n.scope_id \
+             WHERE n.node_id = ?1 AND n.scope_id = ?2 AND n.node_type = 'directory' \
+               AND n.state = 'active' AND s.scope_type = 'universal' AND s.state = 'active' \
+               AND COALESCE(n.system_role, '') != 'trash')",
+            rusqlite::params![parent_node_id.to_string(), scope_id.to_string()],
+            |row| row.get::<_, i64>(0).map(|value| value != 0),
+        )?;
+        if !valid {
+            return Err(DbError::Domain(MukeiError::Invariant(
+                "universal import parent is not an active user-writable directory".into(),
+            )));
+        }
+        Ok::<_, DbError>(())
+    })
+    .await?;
+    Ok(())
 }
 
 struct InspectedStagedFile {
