@@ -1,0 +1,111 @@
+name: one-shot-conversation-storage-attachments-backend
+
+on:
+  push:
+    branches:
+      - temp/universal-storage-workspace-v0.1
+    paths:
+      - .github/conversation-storage-attachments-trigger.txt
+
+concurrency:
+  group: conversation-storage-attachments-backend
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  statuses: write
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Publish pending status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d '{"state":"pending","context":"conversation-storage-attachments-backend","target_url":"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}","description":"Validating conversation Storage attachments"}'
+      - uses: actions/checkout@v4
+        with:
+          ref: temp/universal-storage-workspace-v0.1
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.86.0'
+          components: rustfmt,clippy
+      - name: Apply guarded backend patch
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/patch_conversation_storage_attachments.py 2>&1 | tee conversation-storage-attachments-backend.log
+          cargo fmt --manifest-path rust/Cargo.toml --all 2>&1 | tee -a conversation-storage-attachments-backend.log
+          git diff --check 2>&1 | tee -a conversation-storage-attachments-backend.log
+          grep -F 'V017__conversation_storage_attachments' rust/crates/mukei-core/src/storage/migrations.rs | tee -a conversation-storage-attachments-backend.log
+      - name: Core check tests and clippy
+        env:
+          RUSTFLAGS: -D warnings
+        run: |
+          set -euo pipefail
+          cargo check --locked --manifest-path rust/Cargo.toml -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets 2>&1 | tee -a conversation-storage-attachments-backend.log
+          cargo test --locked --manifest-path rust/Cargo.toml -p mukei-core --no-default-features --features std,tokio,rusqlite -- --nocapture 2>&1 | tee -a conversation-storage-attachments-backend.log
+          cargo clippy --locked --manifest-path rust/Cargo.toml -p mukei-core --no-default-features --features std,tokio,rusqlite --all-targets -- -D warnings 2>&1 | tee -a conversation-storage-attachments-backend.log
+      - name: Secure Android JNI compile
+        env:
+          RUSTFLAGS: -D warnings
+        run: |
+          set -euo pipefail
+          cargo check --locked --manifest-path rust/Cargo.toml -p mukei-android-jni --no-default-features --features secure_runtime,rag_runtime,runtime_hardening 2>&1 | tee -a conversation-storage-attachments-backend.log
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conversation-storage-attachments-backend-${{ github.sha }}
+          path: conversation-storage-attachments-backend.log
+          retention-days: 7
+      - name: Commit validated backend source
+        if: success()
+        run: |
+          set -euo pipefail
+          git config user.name 'mukei-storage-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add \
+            rust/crates/mukei-core/src/storage/mod.rs \
+            rust/crates/mukei-core/src/storage/migrations.rs \
+            rust/crates/mukei-core/src/application_runtime.rs \
+            rust/crates/mukei-core/src/application_runtime/foundation_types.rs \
+            rust/crates/mukei-core/src/application_runtime/foundation_runtime_struct.rs \
+            rust/crates/mukei-core/src/application_runtime/base.rs \
+            rust/crates/mukei-core/src/application_runtime/foundation_context.rs \
+            rust/crates/mukei-core/src/application_runtime/documents_snapshot.rs \
+            rust/crates/mukei-core/src/application_runtime/chat.rs \
+            rust/crates/mukei-core/src/application_runtime/conversation.rs \
+            rust/crates/mukei-core/src/application_runtime/conversation_attachments.rs \
+            rust/crates/mukei-core/src/application_runtime/storage_import_tests.rs \
+            rust/crates/mukei-core/src/ui_protocol.rs \
+            rust/crates/mukei-android-jni/src/secure_runtime_jni.rs \
+            rust/crates/mukei-android-jni/src/lib.rs
+          git commit -m 'Wire conversation Storage attachments'
+          git push origin HEAD:temp/universal-storage-workspace-v0.1
+      - name: Publish success status
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d '{"state":"success","context":"conversation-storage-attachments-backend","target_url":"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}","description":"Conversation Storage attachment backend validated"}'
+      - name: Publish failure status
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d '{"state":"failure","context":"conversation-storage-attachments-backend","target_url":"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}","description":"Conversation Storage attachment backend failed"}'
