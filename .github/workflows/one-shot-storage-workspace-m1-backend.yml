@@ -85,6 +85,7 @@ jobs:
             rust/crates/mukei-core/src/application_runtime/storage_import.rs \
             rust/crates/mukei-core/src/application_runtime/storage_import_tests.rs \
             rust/crates/mukei-core/src/ui_protocol.rs \
+            rust/crates/mukei-android-jni/src/lib.rs \
             rust/crates/mukei-android-jni/src/secure_runtime_jni.rs
           git commit -m 'Wire Universal Storage workspace runtime'
           git push origin HEAD:temp/universal-storage-workspace-v0.1
