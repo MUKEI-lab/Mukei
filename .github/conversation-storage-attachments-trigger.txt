@@ -1,1 +1,1 @@
-conversation-storage-attachments-backend-v1
+conversation-storage-attachments-backend-v2
