@@ -76,6 +76,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+    testImplementation("junit:junit:4.13.2")
 }
 
 // Release APKs must remain self-contained for every supported ABI. This catches
