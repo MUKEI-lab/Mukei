@@ -71,5 +71,15 @@ replace_once(
     '        || trimmed.as_bytes().len() > MAX_DIRECTORY_NAME_BYTES\n',
     '        || trimmed.len() > MAX_DIRECTORY_NAME_BYTES\n',
 )
+replace_once(
+    'rust/crates/mukei-android-jni/src/lib.rs',
+    '''        SnapshotDomainV2::Operations => RuntimeSnapshotDomain::Operations,
+        SnapshotDomainV2::Projects => RuntimeSnapshotDomain::Projects,
+''',
+    '''        SnapshotDomainV2::Operations => RuntimeSnapshotDomain::Operations,
+        SnapshotDomainV2::Projects => RuntimeSnapshotDomain::Projects,
+        SnapshotDomainV2::Storage => RuntimeSnapshotDomain::Storage,
+''',
+)
 
 print('storage workspace M1 compile follow-up patch applied')
