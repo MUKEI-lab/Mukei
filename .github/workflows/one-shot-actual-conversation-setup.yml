@@ -46,10 +46,17 @@ jobs:
       - name: Apply exact conversation patches
         run: |
           set -euo pipefail
-          python3 .github/scripts/normalize_actual_conversation_patch.py
-          python3 .github/scripts/patch_actual_conversations.py
-          cargo fmt --manifest-path rust/Cargo.toml --all
-          git diff --check
+          python3 .github/scripts/normalize_actual_conversation_patch.py 2>&1 | tee actual-conversation-patch.log
+          python3 .github/scripts/patch_actual_conversations.py 2>&1 | tee -a actual-conversation-patch.log
+          cargo fmt --manifest-path rust/Cargo.toml --all 2>&1 | tee -a actual-conversation-patch.log
+          git diff --check 2>&1 | tee -a actual-conversation-patch.log
+      - name: Upload patch diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: actual-conversation-patch-${{ github.sha }}
+          path: actual-conversation-patch.log
+          retention-days: 7
       - name: Rust compile and conversation tests
         env:
           RUSTFLAGS: -D warnings
