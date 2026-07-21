@@ -1,3 +1,0 @@
-source=85fc66d72216de7678b1745a09e98d5126d50c88
-variant=offline-arm64
-action=build-sign-verify
