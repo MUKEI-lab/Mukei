@@ -1,9 +1,14 @@
 package ai.mukei.android.designsystem
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -55,8 +60,33 @@ fun MukeiIcon(
         modifier.semantics { this.contentDescription = contentDescription }
     }
     val density = LocalDensity.current
+    val ambientContent = LocalContentColor.current
+    val temporaryIcon = icon == MukeiIconKey.TEMPORARY_CHAT
+    val temporaryActive = temporaryIcon && tint == MaterialTheme.colorScheme.primary
+    val animatedTemporaryTint by animateColorAsState(
+        targetValue = tint,
+        animationSpec = tween(durationMillis = 180),
+        label = "temporary-chat-tint",
+    )
+    val temporaryActiveProgress by animateFloatAsState(
+        targetValue = if (temporaryActive) 1f else 0f,
+        animationSpec = tween(durationMillis = 190),
+        label = "temporary-chat-active",
+    )
+    val temporaryTransitionProgress by animateFloatAsState(
+        targetValue = if (temporaryIcon && ambientContent.alpha < 0.99f) 1f else 0f,
+        animationSpec = tween(durationMillis = 140),
+        label = "temporary-chat-transition",
+    )
+    val renderedTint = if (temporaryIcon) animatedTemporaryTint else tint
+
     Canvas(modifier = describedModifier.size(size)) {
-        val strokeWidth = with(density) { 1.7.dp.toPx() }
+        val baseStrokeWidth = with(density) { 1.7.dp.toPx() }
+        val strokeWidth = if (temporaryIcon) {
+            baseStrokeWidth * (1f + 0.08f * temporaryTransitionProgress)
+        } else {
+            baseStrokeWidth
+        }
         val stroke = Stroke(
             width = strokeWidth,
             cap = StrokeCap.Round,
@@ -65,6 +95,7 @@ fun MukeiIcon(
         val w = this.size.width
         val h = this.size.height
         fun p(x: Float, y: Float) = Offset(w * x, h * y)
+        val tint = renderedTint
 
         when (icon) {
             MukeiIconKey.MENU -> {
@@ -88,22 +119,77 @@ fun MukeiIcon(
             }
 
             MukeiIconKey.TEMPORARY_CHAT -> {
-                drawRoundRect(
+                // The transition ring acknowledges the tap immediately without claiming
+                // that native session begin/end has completed.
+                if (temporaryTransitionProgress > 0f) {
+                    drawArc(
+                        color = tint.copy(alpha = 0.34f * temporaryTransitionProgress),
+                        startAngle = -58f,
+                        sweepAngle = 244f,
+                        useCenter = false,
+                        topLeft = p(0.08f, 0.08f),
+                        size = Size(w * 0.84f, h * 0.84f),
+                        style = Stroke(
+                            width = baseStrokeWidth * 0.78f,
+                            cap = StrokeCap.Round,
+                        ),
+                    )
+                }
+
+                val hatLift = 0.025f * temporaryTransitionProgress +
+                    0.008f * temporaryActiveProgress
+                val glassesDrop = 0.018f * temporaryTransitionProgress
+                val hat = Path().apply {
+                    moveTo(w * 0.30f, h * (0.39f - hatLift))
+                    lineTo(w * 0.39f, h * (0.19f - hatLift))
+                    lineTo(w * 0.61f, h * (0.19f - hatLift))
+                    lineTo(w * 0.70f, h * (0.39f - hatLift))
+                }
+                drawPath(hat, tint, style = stroke)
+                drawLine(
                     tint,
-                    topLeft = p(0.12f, 0.16f),
-                    size = Size(w * 0.66f, h * 0.52f),
-                    cornerRadius = CornerRadius(w * 0.14f, h * 0.14f),
-                    style = stroke,
+                    p(0.18f, 0.42f - hatLift),
+                    p(0.82f, 0.42f - hatLift),
+                    strokeWidth,
+                    StrokeCap.Round,
                 )
-                drawLine(tint, p(0.28f, 0.68f), p(0.20f, 0.80f), strokeWidth, StrokeCap.Round)
-                drawCircle(
+
+                val leftLensCenter = p(0.34f, 0.64f + glassesDrop)
+                val rightLensCenter = p(0.66f, 0.64f + glassesDrop)
+                val lensRadius = w * 0.145f
+                if (temporaryActiveProgress > 0f) {
+                    val fill = tint.copy(alpha = 0.11f * temporaryActiveProgress)
+                    drawCircle(fill, radius = lensRadius * 0.82f, center = leftLensCenter)
+                    drawCircle(fill, radius = lensRadius * 0.82f, center = rightLensCenter)
+                    drawCircle(
+                        tint.copy(alpha = 0.55f * temporaryActiveProgress),
+                        radius = w * 0.025f * temporaryActiveProgress,
+                        center = p(0.50f, 0.83f),
+                    )
+                }
+                drawCircle(tint, radius = lensRadius, center = leftLensCenter, style = stroke)
+                drawCircle(tint, radius = lensRadius, center = rightLensCenter, style = stroke)
+                drawLine(
                     tint,
-                    radius = w * 0.19f,
-                    center = p(0.70f, 0.68f),
-                    style = stroke,
+                    p(0.485f, 0.64f + glassesDrop),
+                    p(0.515f, 0.64f + glassesDrop),
+                    strokeWidth,
+                    StrokeCap.Round,
                 )
-                drawLine(tint, p(0.70f, 0.68f), p(0.70f, 0.56f), strokeWidth, StrokeCap.Round)
-                drawLine(tint, p(0.70f, 0.68f), p(0.79f, 0.72f), strokeWidth, StrokeCap.Round)
+                drawLine(
+                    tint,
+                    p(0.18f, 0.58f + glassesDrop),
+                    p(0.20f, 0.58f + glassesDrop),
+                    strokeWidth,
+                    StrokeCap.Round,
+                )
+                drawLine(
+                    tint,
+                    p(0.80f, 0.58f + glassesDrop),
+                    p(0.82f, 0.58f + glassesDrop),
+                    strokeWidth,
+                    StrokeCap.Round,
+                )
             }
 
             MukeiIconKey.MORE -> {
